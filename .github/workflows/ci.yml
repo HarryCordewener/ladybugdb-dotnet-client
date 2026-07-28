@@ -38,6 +38,18 @@ jobs:
       - name: Unit tests
         run: dotnet test LadybugDb.Client.Tests --no-build -c Release
 
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch native binaries
+        run: ./scripts/fetch-liblbug.sh
+      - name: Integration tests
+        run: dotnet test LadybugDb.Client.IntegrationTests -c Release
+
   interop-drift:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="TUnit" Version="1.62.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LadybugDb.Client\LadybugDb.Client.csproj" />
+    <ProjectReference Include="..\LadybugDb.Client.Native\LadybugDb.Client.Native.csproj" />
+  </ItemGroup>
+</Project>
