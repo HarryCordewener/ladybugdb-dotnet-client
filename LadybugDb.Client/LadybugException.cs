@@ -7,6 +7,10 @@ public class LadybugException : Exception
         : base(statement is null ? message : $"{message}{Environment.NewLine}Statement: {statement}")
         => Statement = statement;
 
+    /// <summary>Wraps an underlying exception (for example a marshalling failure) with no known statement.</summary>
+    public LadybugException(string message, Exception innerException)
+        : base(message, innerException) => Statement = null;
+
     /// <summary>The Cypher statement that produced this error, when one is known.</summary>
     public string? Statement { get; }
 }

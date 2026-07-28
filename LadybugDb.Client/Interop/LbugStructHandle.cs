@@ -22,8 +22,8 @@ namespace LadybugDb.Client.Interop;
 /// Instead, storage from <see cref="AllocateUnowned"/> is "unowned" - a plain native allocation
 /// this SafeHandle does not yet know about. Only after the caller's <c>*_init</c> reports success
 /// does it call <see cref="Adopt"/>, which is the sole path to <c>SetHandle</c>. Until that call,
-/// <see cref="SafeHandle.IsInvalid"/> (handle == 0) is true, and empirically (verified directly
-/// against this runtime, not assumed) <c>SafeHandle</c> never invokes <see cref="ReleaseHandle"/>
+/// <see cref="SafeHandle.IsInvalid"/> (handle == 0) is true, and (verified directly against this
+/// runtime, not assumed - see HandleTests) <c>SafeHandle</c> never invokes <see cref="ReleaseHandle"/>
 /// while a handle is invalid - so a failed init leaves this object inert: no <c>*_destroy</c>
 /// call, ever, for a struct the engine never finished constructing. The failure path instead
 /// frees the raw allocation directly with <see cref="FreeUnowned"/>, which only ever undoes
@@ -34,8 +34,6 @@ internal abstract class LbugStructHandle : SafeHandle
     protected LbugStructHandle() : base(IntPtr.Zero, ownsHandle: true) { }
 
     public override bool IsInvalid => handle == IntPtr.Zero;
-
-    public unsafe void* Pointer => (void*)handle;
 
     /// <summary>
     /// Allocates zeroed native storage of <paramref name="size"/> bytes. The result is not yet
@@ -62,5 +60,56 @@ internal abstract class LbugStructHandle : SafeHandle
             NativeMemory.Free((void*)handle);
             SetHandle(IntPtr.Zero);
         }
+    }
+
+    /// <summary>
+    /// Leases the struct's address for the duration of exactly one synchronous native call.
+    /// </summary>
+    /// <remarks>
+    /// There is deliberately no plain pointer property on this type: a raw pointer handed out
+    /// without a reference held against it could be dereferenced after a concurrent
+    /// <c>Dispose</c>/finalize has already run <see cref="ReleaseHandle"/> - the C struct
+    /// destroyed, its storage freed - which is a use-after-free, not merely a leak. Single
+    /// threaded call sites are not exempt either: after release, the address is gone, so a
+    /// "just check IsClosed first" pattern still races and can dereference freed memory or
+    /// segfault instead of throwing a managed exception.
+    ///
+    /// <see cref="Acquire"/> instead calls <see cref="DangerousAddRef"/> before handing out the
+    /// pointer and <see cref="DangerousRelease"/> when the lease is disposed. SafeHandle only
+    /// ever invokes <see cref="ReleaseHandle"/> once its reference count reaches zero, so a
+    /// concurrent <c>Dispose</c> while a lease is outstanding is deferred, not lost: it decrements
+    /// the handle's own baseline reference but the actual destroy-and-free waits for this lease's
+    /// <see cref="DangerousRelease"/> (verified empirically, not assumed). Always scope a lease
+    /// tightly around one synchronous native call - never hold it across an <c>await</c>, a lock,
+    /// or another handle's lease; the C# compiler enforces the first of those for us since
+    /// <see cref="Lease"/> is a <c>ref struct</c> and cannot be stored across an async boundary.
+    /// </remarks>
+    internal Lease Acquire() => new(this);
+
+    internal readonly unsafe ref struct Lease
+    {
+        private readonly LbugStructHandle _handle;
+
+        internal Lease(LbugStructHandle handle)
+        {
+            // Fast, friendly path for the common case (fully released already). Not load-bearing
+            // on its own - DangerousAddRef is re-checked below, since IsClosed can still read
+            // false for a handle whose Dispose() is in flight but pinned open by another
+            // outstanding lease (verified empirically); that in-flight case is not a safety bug
+            // (the struct cannot be freed while any lease, old or new, is outstanding) but this
+            // explicit check is what makes the common "already disposed" case fail fast and clear.
+            ObjectDisposedException.ThrowIf(handle.IsClosed, handle);
+
+            var acquired = false;
+            handle.DangerousAddRef(ref acquired);
+            if (!acquired)
+                throw new ObjectDisposedException(handle.GetType().Name);
+
+            _handle = handle;
+        }
+
+        internal void* Pointer => (void*)_handle.DangerousGetHandle();
+
+        public void Dispose() => _handle.DangerousRelease();
     }
 }

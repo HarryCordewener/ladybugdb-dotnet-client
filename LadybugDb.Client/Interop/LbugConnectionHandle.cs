@@ -11,13 +11,28 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
         try
         {
             var conn = (lbug_connection*)storage;
-            var state = LbugNative.lbug_connection_init((lbug_database*)database.Pointer, conn);
+
+            lbug_state state;
+            using (var lease = database.Acquire())
+            {
+                state = LbugNative.lbug_connection_init((lbug_database*)lease.Pointer, conn);
+            }
+
             if (state != lbug_state.LbugSuccess)
-                throw new LadybugException("Failed to open a LadybugDB connection.");
+            {
+                var detail = NativeString.TakeOwnershipOrNull(LbugNative.lbug_get_last_error());
+                var message = detail is null
+                    ? "Failed to open a LadybugDB connection."
+                    : $"Failed to open a LadybugDB connection: {detail}";
+                throw new LadybugException(message);
+            }
 
             var handle = new LbugConnectionHandle();
-            handle.Adopt(storage);
+            // See LbugDatabaseHandle.Open: set before Adopt so a failure here biases toward a
+            // leak (storage never freed) rather than a double free (freed here, then again from
+            // a handle that already believes it owns it).
             adopted = true;
+            handle.Adopt(storage);
             return handle;
         }
         finally
@@ -28,8 +43,21 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
 
     protected override unsafe bool ReleaseHandle()
     {
-        LbugNative.lbug_connection_destroy((lbug_connection*)handle);
-        FreeStorage();
+        try
+        {
+            LbugNative.lbug_connection_destroy((lbug_connection*)handle);
+        }
+        catch
+        {
+            // See LbugDatabaseHandle.ReleaseHandle: this runs on the finalizer thread and must
+            // never throw, however the native entry point resolves.
+            return false;
+        }
+        finally
+        {
+            FreeStorage();
+        }
+
         return true;
     }
 }
