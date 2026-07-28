@@ -46,7 +46,7 @@ jobs:
         with:
           global-json-file: global.json
       - name: Fetch native binaries
-        run: ./scripts/fetch-liblbug.sh
+        run: bash scripts/fetch-liblbug.sh
       - name: Integration tests
         run: dotnet test LadybugDb.Client.IntegrationTests -c Release
 
@@ -58,7 +58,7 @@ jobs:
         with:
           global-json-file: global.json
       - name: Regenerate interop
-        run: ./scripts/regen-interop.sh
+        run: bash scripts/regen-interop.sh
       - name: Fail if generated interop is stale
         run: |
           if ! git diff --exit-code -- LadybugDb.Client/Native/LbugNative.g.cs third-party/lbug.h; then
