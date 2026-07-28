@@ -90,9 +90,16 @@ while IFS='|' read -r RID ASSET LIBFILE; do
   DEST="$NATIVE_DIR/runtimes/$RID/native"
   mkdir -p "$DEST"
   EX="$WORK/x-$RID"; mkdir -p "$EX"
+  # `unzip` is absent from GitHub's windows-latest image (not bundled by Git
+  # for Windows either - it's a separate MSYS2 package), and `tar` can't be
+  # swapped in as a substitute: under `shell: bash`, Git Bash puts its own
+  # GNU tar first on PATH, and GNU tar cannot read zip containers at all -
+  # on Linux either, not just Windows. python3's zipfile module needs no OS
+  # branching and is preinstalled on every GitHub-hosted runner (including
+  # inside Git Bash on Windows, since it's on the system PATH there too).
   case "$ASSET" in
     *.tar.gz) tar -xzf "$WORK/$ASSET" -C "$EX" ;;
-    *.zip)    unzip -qo "$WORK/$ASSET" -d "$EX" ;;
+    *.zip)    python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$WORK/$ASSET" "$EX" ;;
   esac
 
   if [ ! -e "$EX/$LIBFILE" ]; then
