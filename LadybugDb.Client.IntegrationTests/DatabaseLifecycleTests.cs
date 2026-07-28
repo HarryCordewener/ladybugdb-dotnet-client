@@ -56,6 +56,52 @@ public class DatabaseLifecycleTests
         }
     }
 
+    /// <summary>
+    /// Triggers a genuine write conflict against the real engine: one connection holds an open
+    /// write transaction (<c>BEGIN TRANSACTION</c>, then an uncommitted write) while a second
+    /// connection attempts its own write. LadybugDB permits exactly one write transaction at a
+    /// time and raises rather than queueing, so the second write must fail - and this asserts it
+    /// fails as the typed, retryable <see cref="LadybugWriteConflictException"/>, not a plain
+    /// <see cref="LadybugException"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is the real-engine counterpart to
+    /// <c>QueryFailureClassifierTests.RealEngineMessage_ClassifiesAsWriteConflict</c>, which
+    /// pins the exact message text this test observes so the classifier stays covered without
+    /// needing the real engine on every run. If the message asserted here ever needs to change,
+    /// that unit test's constant must change with it.
+    /// </remarks>
+    [Test]
+    public async Task ConcurrentWrite_ThrowsLadybugWriteConflictException()
+    {
+        var path = TempDbPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn1 = await db.ConnectAsync();
+            await using var conn2 = await db.ConnectAsync();
+
+            await using (var _ = await conn1.QueryAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+
+            await using (var _ = await conn1.QueryAsync("BEGIN TRANSACTION")) { }
+            await using (var _ = await conn1.QueryAsync("CREATE (o:Obj {dbref: 1, name: 'A'})")) { }
+
+            const string conflicting = "CREATE (o:Obj {dbref: 2, name: 'B'})";
+            var ex = await Assert.ThrowsAsync<LadybugWriteConflictException>(
+                async () => await conn2.QueryAsync(conflicting));
+
+            await Assert.That(ex!.Statement).IsEqualTo(conflicting);
+            await Assert.That(ex.Message).Contains("write transaction");
+
+            await using (var _ = await conn1.QueryAsync("COMMIT")) { }
+        }
+        finally
+        {
+            TryDelete(path);
+        }
+    }
+
     private static void TryDelete(string path)
     {
         foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })

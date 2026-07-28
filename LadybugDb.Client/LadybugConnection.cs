@@ -65,10 +65,7 @@ public sealed class LadybugConnection : IAsyncDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                throw failureMessage.Contains("one write transaction", StringComparison.OrdinalIgnoreCase)
-                    ? new LadybugWriteConflictException(failureMessage, cypher)
-                    : new LadybugException(
-                        string.IsNullOrEmpty(failureMessage) ? "Query failed." : failureMessage, cypher);
+                throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
             return new LadybugQueryResult(handle);

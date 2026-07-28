@@ -9,15 +9,26 @@ internal sealed class LbugQueryResultHandle : LbugStructHandle
     /// <c>lbug_query_result</c> storage.
     /// </summary>
     /// <remarks>
-    /// Mirrors <see cref="LbugConnectionHandle.Open"/>: storage is allocated unowned, the native
-    /// call runs against it, and only once that call has actually completed - whether the query
-    /// itself succeeded or failed - does this adopt the storage so <see cref="ReleaseHandle"/>
-    /// will destroy it. A query failure (bad Cypher, a runtime error) still leaves
-    /// <c>out_query_result</c> populated with a struct <c>lbug_query_result_destroy</c> is safe
-    /// to call on - it carries the captured error message - so it is adopted just the same. The
-    /// only path that must NOT adopt is one where the native call never ran at all, e.g. the
-    /// connection lease throwing because the connection was concurrently disposed, which would
-    /// leave storage the engine never touched.
+    /// Mirrors <see cref="LbugConnectionHandle.Open"/>'s allocate-unowned/run-native-call/adopt
+    /// shape, but deliberately diverges from it on one point: <c>Open</c> only adopts when
+    /// <c>state == LbugSuccess</c>, while this adopts unconditionally once
+    /// <c>lbug_connection_query</c> has run, regardless of the returned <see cref="lbug_state"/>.
+    /// That is a considered choice, not an oversight - <c>Open</c>'s storage (a bare
+    /// <c>lbug_database</c>/<c>lbug_connection</c>) is meaningless on init failure, so there is
+    /// nothing for its matching <c>*_destroy</c> to do and adopting would just risk calling it on
+    /// storage the engine never finished building. A query failure is different: the C header
+    /// does not document it explicitly, but observed behavior (a failed query still returns a
+    /// result carrying a readable error message via <c>lbug_query_result_get_error_message</c>,
+    /// and this project's design notes record the same) implies <c>out_query_result</c> is always
+    /// left in a state <c>lbug_query_result_destroy</c> is safe - and needs - to be called on:
+    /// either a real result, or one capturing the error. Skipping adoption on failure would leak
+    /// that captured state instead of freeing it. This is still an assumption against an
+    /// undocumented C contract, not a proven guarantee - if a future engine version left
+    /// <c>out_query_result</c> unpopulated on some failure path, destroying it here would be
+    /// unsafe. The only path that must NOT adopt is one where the native call never ran at all,
+    /// e.g. the connection lease throwing because the connection was concurrently disposed, which
+    /// would leave storage the engine never touched; that case still routes through
+    /// <c>FreeUnowned</c> below.
     /// </remarks>
     internal static unsafe LbugQueryResultHandle Execute(
         LbugConnectionHandle connection, sbyte* query, out lbug_state state)
