@@ -87,10 +87,9 @@ internal static class NativeLibraryResolver
     // ending in a generic, unhelpful DllNotFoundException. Throwing our own
     // DllNotFoundException instead is a supported pattern: exceptions raised
     // from a DllImportResolver callback propagate unmodified to the P/Invoke
-    // call site (verified empirically - see task-4-report.md), so this is
-    // how the actionable "install LadybugDb.Client.Native" guidance actually
-    // reaches the caller instead of being replaced by the runtime's own
-    // generic message.
+    // call site (verified empirically), so this is how the actionable
+    // "install LadybugDb.Client.Native" guidance actually reaches the caller
+    // instead of being replaced by the runtime's own generic message.
     private static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (!string.Equals(libraryName, LibraryName, StringComparison.Ordinal))

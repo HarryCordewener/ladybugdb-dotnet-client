@@ -46,7 +46,7 @@ public class NativeLibraryResolverTests
     {
         var rid = NativeLibraryResolver.CurrentRid();
         var fileName = NativeLibraryResolver.CurrentFileName();
-        var path = Path.Combine(RepoRoot(), "LadybugDb.Client.Native", "runtimes", rid, "native", fileName);
+        var path = Path.Combine(TestPaths.RepoRoot(), "LadybugDb.Client.Native", "runtimes", rid, "native", fileName);
 
         await Assert.That(File.Exists(path)).IsTrue();
 
@@ -60,13 +60,5 @@ public class NativeLibraryResolverTests
         {
             if (loaded) NativeLibrary.Free(handle);
         }
-    }
-
-    private static string RepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "LadybugDb.Client.slnx")))
-            dir = Path.GetDirectoryName(dir);
-        return dir ?? throw new InvalidOperationException("repo root not found");
     }
 }

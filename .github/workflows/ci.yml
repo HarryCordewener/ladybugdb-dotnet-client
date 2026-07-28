@@ -16,6 +16,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Fetch native binaries
+        shell: bash
+        # Invoke via `bash script.sh` rather than `./script.sh` so this works
+        # regardless of whether the checkout preserved the executable bit -
+        # git only tracks the mode, and shallow/fresh clones on some
+        # filesystems (notably Windows runners) don't reliably surface it.
+        # `shell: bash` picks up Git Bash on windows-latest; the script is
+        # bash, not ported to PowerShell.
+        run: bash scripts/fetch-liblbug.sh
       - name: Restore
         run: dotnet restore
       - name: Build

@@ -8,14 +8,6 @@ namespace LadybugDb.Client.Tests;
 
 public class PackagingTests
 {
-    private static string RepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "LadybugDb.Client.slnx")))
-            dir = Path.GetDirectoryName(dir);
-        return dir ?? throw new InvalidOperationException("repo root not found");
-    }
-
     /// <summary>
     /// Locates the built .nupkg for the given package id.
     ///
@@ -31,7 +23,7 @@ public class PackagingTests
     private static string? FindPackage(string id)
     {
         var pattern = new Regex($"^{Regex.Escape(id)}\\.\\d.*\\.nupkg$");
-        return Directory.EnumerateFiles(RepoRoot(), "*.nupkg", SearchOption.AllDirectories)
+        return Directory.EnumerateFiles(TestPaths.RepoRoot(), "*.nupkg", SearchOption.AllDirectories)
             .Where(p => !Path.GetFileName(p).Contains(".symbols.", StringComparison.Ordinal))
             .Where(p => pattern.IsMatch(Path.GetFileName(p)))
             .FirstOrDefault();
