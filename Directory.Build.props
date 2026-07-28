@@ -11,5 +11,20 @@
     <RepositoryUrl>https://github.com/HarryCordewener/ladybugdb-dotnet-client</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <!--
+      Foundation milestone only: typed parameter binds, transactions, and IAsyncEnumerable are
+      all still deferred to Milestone 2. Publishing 1.0.0 here would assert a stable API this
+      milestone doesn't have. NuGet versions can be unlisted but never replaced, so this stays
+      pre-release until the API settles.
+    -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>alpha</VersionSuffix>
+    <!--
+      Ships the /// XML doc comments as a .xml sidecar so they surface in consumer IntelliSense.
+      This also turns on CS1591 (missing XML comment on a publicly visible member); test projects
+      opt back out of that specific warning since they are never packed and their public test
+      classes are not part of any shipped API.
+    -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 </Project>

@@ -12,12 +12,18 @@ public sealed class LadybugDatabase : IDisposable
     private readonly LbugDatabaseHandle _handle;
 
     /// <summary>
-    /// Serializes write transactions. LadybugDB permits exactly one write transaction at a
-    /// time and raises rather than queueing, so the client holds this rather than letting
-    /// callers collide. Read paths do not take it.
+    /// Reserved for Milestone 2, which will use this to serialize write transactions: LadybugDB
+    /// permits exactly one write transaction at a time and raises rather than queueing, so the
+    /// client is meant to hold this rather than let callers collide. Not wired up yet - nothing
+    /// currently acquires it, so concurrent writers demonstrably do collide today (see
+    /// <see cref="LadybugWriteConflictException"/>, which exists precisely because they can).
     /// </summary>
     internal SemaphoreSlim WriteLock { get; } = new(1, 1);
 
+    /// <summary>Opens (creating if necessary) the LadybugDB database at <paramref name="path"/>.</summary>
+    /// <param name="path">Filesystem path to the database directory.</param>
+    /// <param name="config">Runtime configuration. <see langword="null"/> selects engine defaults.</param>
+    /// <exception cref="LadybugException">The engine failed to open the database.</exception>
     public LadybugDatabase(string path, LadybugConfig? config = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -54,6 +60,11 @@ public sealed class LadybugDatabase : IDisposable
 
     private static byte ToNativeBool(bool value) => value ? (byte)1 : (byte)0;
 
+    /// <summary>
+    /// Closes the database. Connections, results, and other objects opened from it must not be
+    /// used afterward; doing so throws <see cref="ObjectDisposedException"/> rather than
+    /// corrupting memory, but disposing them first is still the intended order.
+    /// </summary>
     public void Dispose()
     {
         _handle.Dispose();
