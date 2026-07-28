@@ -36,12 +36,23 @@ win-arm64|liblbug-windows-arm64.zip|lbug_shared.dll
 
 WRITE_LOCK=0
 [ "${1:-}" = "--update-lock" ] && WRITE_LOCK=1
-[ "$WRITE_LOCK" = 1 ] && : > "$LOCK"
+
+# In --update-lock mode, hashes accumulate into a scratch file and are only
+# moved over the real lockfile once ALL assets have downloaded and hashed
+# successfully. Writing directly into $LOCK as we went would truncate/corrupt
+# a previously-good lockfile the moment any later asset failed (bad asset
+# name, network blip, etc.), leaving a half-written lockfile committed to the
+# working tree with no way back short of `git checkout`.
+LOCK_NEW="$WORK/liblbug.lock.new"
+[ "$WRITE_LOCK" = 1 ] && : > "$LOCK_NEW"
+CHANGED=0
+TOTAL=0
 
 # Read from a herestring, not a pipe, so the loop body runs in the current
 # shell rather than a subshell: a failure inside the loop then always
 # terminates the whole script under `set -e`, without depending on
-# `pipefail`'s interaction with the pipeline's exit status.
+# `pipefail`'s interaction with the pipeline's exit status. It also means
+# CHANGED/TOTAL above are visible after the loop, for the summary below.
 while IFS='|' read -r RID ASSET LIBFILE; do
   [ -z "$RID" ] && continue
   echo "==> $RID  $ASSET"
@@ -49,7 +60,20 @@ while IFS='|' read -r RID ASSET LIBFILE; do
   ACTUAL="$(sha256sum "$WORK/$ASSET" | cut -d' ' -f1)"
 
   if [ "$WRITE_LOCK" = 1 ]; then
-    echo "$ASSET  $ACTUAL" >> "$LOCK"
+    TOTAL=$((TOTAL + 1))
+    OLD_HASH=""
+    [ -f "$LOCK" ] && OLD_HASH="$(awk -v a="$ASSET" '$1==a {print $2}' "$LOCK")"
+    echo "$ASSET  $ACTUAL" >> "$LOCK_NEW"
+    if [ "$ACTUAL" != "$OLD_HASH" ]; then
+      CHANGED=$((CHANGED + 1))
+      if [ -z "$OLD_HASH" ]; then
+        echo "    new:     $ASSET  $ACTUAL"
+      else
+        echo "    changed: $ASSET"
+        echo "      old: $OLD_HASH"
+        echo "      new: $ACTUAL"
+      fi
+    fi
   else
     EXPECTED="$(awk -v a="$ASSET" '$1==a {print $2}' "$LOCK")"
     if [ -z "$EXPECTED" ]; then
@@ -78,5 +102,10 @@ while IFS='|' read -r RID ASSET LIBFILE; do
   cp -L "$EX/$LIBFILE" "$DEST/$LIBFILE"
   ls -1 "$DEST"
 done <<< "$ASSETS"
+
+if [ "$WRITE_LOCK" = 1 ]; then
+  mv "$LOCK_NEW" "$LOCK"
+  echo "lockfile updated: $CHANGED of $TOTAL hashes changed"
+fi
 
 echo "done: $VERSION"
