@@ -6,9 +6,34 @@ indices. LadybugDB is the maintained continuation of Kuzu.
 
 Embedded means in-process: no server, no daemon, no separate install.
 
-> **Status: design phase.** No packages are published yet and there is no usable code in this
-> repository. The design is settled and recorded in
+> **Status: foundation milestone.** No packages are published to NuGet yet, but the client is real
+> and tested against the actual engine: open a database, open connections, run Cypher, and read
+> string column values back. The full design - including what later milestones add - is recorded
+> in
 > [`docs/superpowers/specs/2026-07-27-ladybugdb-dotnet-client-design.md`](docs/superpowers/specs/2026-07-27-ladybugdb-dotnet-client-design.md).
+
+### What this milestone supports
+
+- Opening and closing a database (`LadybugDatabase`), with configurable buffer pool size, thread
+  count, compression, and read-only mode.
+- Opening one or more connections to a database (`LadybugConnection`).
+- Running a Cypher statement as a plain string and getting back a `LadybugQueryResult`.
+- Reading a result's columns one string at a time (`ReadStringAsync`), row by row.
+- Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
+  `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
+- Safe disposal ordering: disposing a database out from under a still-open connection or result
+  throws `ObjectDisposedException`, not a crash.
+
+### What this milestone does not support yet
+
+These are deferred to Milestone 2:
+
+- Parameterized queries (`$ref`-style placeholders bound from a plain object or dictionary).
+- Reading columns as anything other than a string - no typed value marshalling yet.
+- Iterating a result with `await foreach` (`IAsyncEnumerable<T>`) - use `HasNext` and
+  `ReadStringAsync` in a loop instead.
+- Explicit transaction control beyond issuing `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` as plain
+  Cypher statements.
 
 ## Planned packages
 
@@ -21,19 +46,22 @@ The managed package deliberately ships zero native binaries, so they cannot prop
 into a consumer's own package. Install `LadybugDb.Client.Native` alongside it to run the embedded
 engine.
 
-## Intended usage
+## Usage
 
 ```csharp
 using var db = new LadybugDatabase("./mydb");
 await using var conn = await db.ConnectAsync();
 
-await using var result = await conn.QueryAsync(
-    "MATCH (o:Object) WHERE o.dbref = $ref RETURN o",
-    new { @ref = 42 });
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+await using (var _ = await conn.QueryAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
 
-await foreach (var row in result)
+await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
+while (result.HasNext)
 {
-    // ...
+    var name = await result.ReadStringAsync(0);
+    Console.WriteLine(name); // Limbo
 }
 ```
 
