@@ -29,5 +29,11 @@ jobs:
         run: dotnet restore
       - name: Build
         run: dotnet build --no-restore -c Release
+      - name: Pack
+        # PackagingTests (LadybugDb.Client.Tests) inspects the built .nupkg
+        # contents, so it needs real packages on disk - `dotnet build` alone
+        # never produces them (GeneratePackageOnBuild is intentionally not
+        # set, so dev builds stay fast).
+        run: dotnet pack --no-build -c Release
       - name: Unit tests
         run: dotnet test LadybugDb.Client.Tests --no-build -c Release
