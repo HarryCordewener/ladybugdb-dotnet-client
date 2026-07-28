@@ -262,18 +262,43 @@ smoke-tested only where runners permit; this limitation is stated rather than pa
 
 ## Risks and open questions
 
-1. **Workload fit is the biggest unknown.** Ladybug is optimized for analytical workloads over
-   large databases — columnar storage, vectorized and factorized query processing. SharpMUSH's
-   pattern is the opposite: small, frequent, write-heavy mutations. Write throughput against a
-   realistic mutation pattern should be measured early, before the binding's API is built out
-   against assumptions that may not hold.
-2. **Write concurrency.** The `Vela-Engineering/kuzu` fork advertises concurrent multi-writer
-   support as a differentiator, which implies mainline Ladybug has single-writer constraints.
-   The concurrency model needs to be characterized by test, not assumed.
-3. **Ecosystem fragmentation.** Post-Kuzu there are multiple active forks (LadybugDB,
+1. **Workload fit — measured, and it passes.** Benchmarked 2026-07-27 (`benchmarks/`), 1k → 100k
+   objects against pre-registered thresholds. Write latency passes comfortably and does not
+   degrade with scale (p50 ~2.0 ms, p99 2.8–2.9 ms against a 5 ms budget, flat across all sizes).
+
+   Point lookups initially failed at 100k on both trial schemas, and the cause was schema, not
+   engine. Two findings the client and any consumer must respect:
+
+   - **Primary keys must be INT64, not STRING.** At an identical 100,000 rows, a STRING key
+     costs 4.8× an INT64 key. Switching a 1,000,000-row attribute table from a composite
+     string key (`"42/DESC"`) to an INT64 key moved p50 from 1.785 ms to **0.087 ms** and p99
+     from 2.507 ms (fail) to **0.231 ms** (pass). Row-count scaling itself is healthy —
+     10× the rows costs 1.8–2.6×. Buffer pool size was ruled out as a factor.
+   - **Never store a set of values in one wide column.** A `MAP(STRING,STRING)` of ten
+     attributes cost 3.619 ms to read against 0.123 ms for the key alone, because a single-row
+     read materializes the whole column value. Columnar storage scans many rows of few columns
+     well and fetches few rows of many columns badly.
+
+   Bulk load must use `COPY`: 1,000,000 rows in 0.5 s, against 296 s for per-row `CREATE`.
+
+2. **Write concurrency — single writer by default.** Ladybug permits one write transaction at a
+   time and **raises** rather than queueing (`Cannot start a new write transaction in the
+   system`). Throughput is flat from 1 to 8 writers (~450/s) while conflict retries climb to
+   over 10,000. **This obligates the client**: it must either serialize writes internally or
+   surface the refusal as a typed, retryable exception — never as a raw native error string.
+
+   Not yet characterized: the `Database` constructor exposes `enable_multi_writes` (default
+   `false`), so this may be a default rather than a hard constraint. Worth establishing before
+   committing to an internal write lock.
+
+3. **Attribute access is a traversal, not a key seek.** SharpMUSH resolves attributes with a
+   variable-depth graph walk (`1..999 OUTBOUND`). A side test put traversal at roughly 1.7× the
+   cost of a seek, with depth nearly free beyond the first hop — but a genuinely nested
+   attribute tree has not been modelled.
+4. **Ecosystem fragmentation.** Post-Kuzu there are multiple active forks (LadybugDB,
    Vela-Engineering). LadybugDB is clearly mainline by stars, release cadence, and binding
    ecosystem, but this is worth periodic re-evaluation.
-4. **Blocking calls under load** — see Decision 2. If measurement shows slow traversals stalling
+5. **Blocking calls under load** — see Decision 2. If measurement shows slow traversals stalling
    threads in practice, the reserved async signatures allow adding a connection-affine offload
    without an API break.
 
