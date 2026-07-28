@@ -18,9 +18,19 @@
 
   <Target Name="FailIfNativesMissing" BeforeTargets="Build;Pack">
     <ItemGroup>
-      <_Natives Include="runtimes/**/*" />
+      <!-- One item per shipped RID; File is the expected library path under runtimes/<rid>/. -->
+      <_ExpectedNatives Include="linux-x64"><File>native/liblbug.so</File></_ExpectedNatives>
+      <_ExpectedNatives Include="linux-arm64"><File>native/liblbug.so</File></_ExpectedNatives>
+      <_ExpectedNatives Include="osx-x64"><File>native/liblbug.dylib</File></_ExpectedNatives>
+      <_ExpectedNatives Include="osx-arm64"><File>native/liblbug.dylib</File></_ExpectedNatives>
+      <_ExpectedNatives Include="win-x64"><File>native/lbug_shared.dll</File></_ExpectedNatives>
+      <_ExpectedNatives Include="win-arm64"><File>native/lbug_shared.dll</File></_ExpectedNatives>
     </ItemGroup>
-    <Error Condition="'@(_Natives)' == ''"
-           Text="No native binaries found. Run scripts/fetch-liblbug.sh first." />
+    <ItemGroup>
+      <_MissingNatives Include="%(_ExpectedNatives.Identity)"
+                        Condition="!Exists('runtimes/%(_ExpectedNatives.Identity)/%(_ExpectedNatives.File)')" />
+    </ItemGroup>
+    <Error Condition="'@(_MissingNatives)' != ''"
+           Text="Missing native binaries for RID(s): @(_MissingNatives). Run scripts/fetch-liblbug.sh first." />
   </Target>
 </Project>
