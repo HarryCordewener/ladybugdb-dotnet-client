@@ -37,3 +37,19 @@ jobs:
         run: dotnet pack --no-build -c Release
       - name: Unit tests
         run: dotnet test LadybugDb.Client.Tests --no-build -c Release
+
+  interop-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Regenerate interop
+        run: ./scripts/regen-interop.sh
+      - name: Fail if generated interop is stale
+        run: |
+          if ! git diff --exit-code -- LadybugDb.Client/Native/LbugNative.g.cs third-party/lbug.h; then
+            echo "::error::Generated interop is out of date. Run scripts/regen-interop.sh and commit."
+            exit 1
+          fi
