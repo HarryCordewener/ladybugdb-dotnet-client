@@ -282,8 +282,17 @@ smoke-tested only where runners permit; this limitation is stated rather than pa
    Bulk load must use `COPY`: 1,000,000 rows in 0.5 s, against 296 s for per-row `CREATE`.
 
 2. **Write concurrency — single writer by default.** Ladybug permits one write transaction at a
-   time and **raises** rather than queueing (`Cannot start a new write transaction in the
-   system`). Throughput is flat from 1 to 8 writers (~450/s) while conflict retries climb to
+   time and **raises** rather than queueing. The complete message, captured from a live conflict
+   between two connections on v0.18.3, is:
+
+   > `Cannot start a new write transaction in the system. Only one write transaction at a time is allowed in the system.`
+
+   (An earlier revision of this document quoted only the first sentence, because the benchmark
+   harness truncated exception text at 90 characters. That truncation later caused a reviewer to
+   conclude, wrongly, that a substring match on `one write transaction` could never fire. Quote
+   engine messages in full or not at all.)
+
+   Throughput is flat from 1 to 8 writers (~450/s) while conflict retries climb to
    over 10,000. **This obligates the client**: it must either serialize writes internally or
    surface the refusal as a typed, retryable exception — never as a raw native error string.
 
