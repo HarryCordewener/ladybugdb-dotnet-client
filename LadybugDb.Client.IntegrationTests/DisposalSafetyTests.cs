@@ -39,7 +39,7 @@ public class DisposalSafetyTests
             // The connection itself must still be safely disposable afterward.
             await conn.DisposeAsync();
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     [Test]
@@ -66,7 +66,7 @@ public class DisposalSafetyTests
             await result.DisposeAsync();
             await conn.DisposeAsync();
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     [Test]
@@ -80,7 +80,7 @@ public class DisposalSafetyTests
 
             await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.ConnectAsync());
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     [Test]
@@ -105,7 +105,7 @@ public class DisposalSafetyTests
             await conn.DisposeAsync();
             db.Dispose();
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     [Test]
@@ -129,21 +129,12 @@ public class DisposalSafetyTests
             await using var result = await conn.QueryAsync(
                 "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static async Task CreateAndAbandonConnection(LadybugDatabase db)
     {
         _ = await db.ConnectAsync();
-    }
-
-    private static void Cleanup(string path)
-    {
-        foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })
-        {
-            try { if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
-        }
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best effort */ }
     }
 }

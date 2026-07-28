@@ -80,9 +80,20 @@ internal abstract class LbugStructHandle : SafeHandle
     /// concurrent <c>Dispose</c> while a lease is outstanding is deferred, not lost: it decrements
     /// the handle's own baseline reference but the actual destroy-and-free waits for this lease's
     /// <see cref="SafeHandle.DangerousRelease"/> (verified empirically, not assumed). Always scope a lease
-    /// tightly around one synchronous native call - never hold it across an <c>await</c>, a lock,
-    /// or another handle's lease; the C# compiler enforces the first of those for us since
-    /// <see cref="Lease"/> is a <c>ref struct</c> and cannot be stored across an async boundary.
+    /// tightly around one synchronous native call - never hold it across an <c>await</c>; the C#
+    /// compiler enforces this for us since <see cref="Lease"/> is a <c>ref struct</c> and cannot
+    /// be stored across an async boundary.
+    ///
+    /// Nesting leases from different handles is safe, and in this library is required whenever a
+    /// native call needs a descendant's storage (e.g. a query result) plus an ancestor's (e.g. the
+    /// database it was obtained from): the ancestor's lease must be the outermost one, acquired
+    /// before and released after the descendant's. That ordering is what keeps a child from ever
+    /// outliving its parent's storage for the duration of the call - the descendant's native call
+    /// runs only while the ancestor is also proven live. Nesting cannot deadlock: <c>Acquire</c>
+    /// never blocks a thread waiting on another thread's lease, because <see cref="SafeHandle.DangerousAddRef"/>
+    /// is an interlocked increment on a refcount, not a lock acquisition - two leases, nested or
+    /// concurrent, on the same or different handles, never contend for anything a thread could be
+    /// suspended waiting on.
     /// </remarks>
     internal Lease Acquire() => new(this);
 

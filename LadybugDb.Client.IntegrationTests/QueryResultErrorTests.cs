@@ -47,7 +47,7 @@ public class QueryResultErrorTests
             var ex = await Assert.ThrowsAsync<LadybugException>(async () => await result.ReadStringAsync(5));
             await Assert.That(ex!.Message).Contains("Failed to read column 5.");
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     [Test]
@@ -66,7 +66,7 @@ public class QueryResultErrorTests
             var ex = await Assert.ThrowsAsync<LadybugException>(async () => await result.ReadStringAsync(0));
             await Assert.That(ex!.Message).Contains("Column 0 is not a string.");
         }
-        finally { Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 
     /// <summary>
@@ -109,15 +109,6 @@ public class QueryResultErrorTests
             using var tuple = LbugFlatTupleHandle.GetNext(result.Handle, out var state);
             await Assert.That(state).IsNotEqualTo(lbug_state.LbugSuccess);
         }
-        finally { Cleanup(path); }
-    }
-
-    private static void Cleanup(string path)
-    {
-        foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })
-        {
-            try { if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
-        }
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best effort */ }
+        finally { TestDatabase.Cleanup(path); }
     }
 }

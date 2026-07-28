@@ -21,9 +21,6 @@ public sealed class LadybugConnection : IAsyncDisposable
         _handle = handle;
     }
 
-    /// <summary>The database this connection belongs to.</summary>
-    internal LadybugDatabase Database => _database;
-
     /// <summary>
     /// Executes a Cypher statement and returns its result.
     /// </summary>

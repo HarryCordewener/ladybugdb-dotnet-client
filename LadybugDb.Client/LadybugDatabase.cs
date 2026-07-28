@@ -61,9 +61,17 @@ public sealed class LadybugDatabase : IDisposable
     private static byte ToNativeBool(bool value) => value ? (byte)1 : (byte)0;
 
     /// <summary>
-    /// Closes the database. Connections, results, and other objects opened from it must not be
-    /// used afterward; doing so throws <see cref="ObjectDisposedException"/> rather than
-    /// corrupting memory, but disposing them first is still the intended order.
+    /// Closes the database. Connections, results, and other objects opened from it should not be
+    /// used afterward; disposing them first is still the intended order. Doing so anyway is
+    /// always memory-safe - it never corrupts state or crashes the process - but it is not
+    /// guaranteed to throw <see cref="ObjectDisposedException"/> immediately. <c>Dispose</c>
+    /// releases this object's own baseline reference on the underlying handle; the handle is only
+    /// actually closed once every outstanding lease on it has also been released (see
+    /// <see cref="Interop.LbugStructHandle.Acquire"/>), so a call already in flight on another
+    /// thread when <c>Dispose</c> runs may still complete normally instead of throwing, and a
+    /// burst of concurrent calls can keep succeeding for some time afterward while leases keep
+    /// draining. A call that starts after the handle has fully closed throws
+    /// <see cref="ObjectDisposedException"/>.
     /// </summary>
     public void Dispose()
     {

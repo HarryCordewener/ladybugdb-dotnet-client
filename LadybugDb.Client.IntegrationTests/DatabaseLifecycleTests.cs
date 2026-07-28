@@ -30,7 +30,7 @@ public class DatabaseLifecycleTests
         }
         finally
         {
-            TryDelete(path);
+            TestDatabase.Cleanup(path);
         }
     }
 
@@ -51,7 +51,7 @@ public class DatabaseLifecycleTests
         }
         finally
         {
-            TryDelete(path);
+            TestDatabase.Cleanup(path);
         }
     }
 
@@ -97,16 +97,7 @@ public class DatabaseLifecycleTests
         }
         finally
         {
-            TryDelete(path);
+            TestDatabase.Cleanup(path);
         }
-    }
-
-    private static void TryDelete(string path)
-    {
-        foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })
-        {
-            try { if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
-        }
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best effort */ }
     }
 }

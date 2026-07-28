@@ -49,6 +49,8 @@ engine.
 ## Usage
 
 ```csharp
+using LadybugDb.Client;
+
 using var db = new LadybugDatabase("./mydb");
 await using var conn = await db.ConnectAsync();
 
