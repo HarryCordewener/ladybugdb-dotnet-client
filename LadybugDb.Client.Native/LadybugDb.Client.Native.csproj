@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>LadybugDb.Client.Native</PackageId>
+    <Description>Native liblbug binaries for LadybugDb.Client, for six runtime identifiers. Install alongside LadybugDb.Client to run the embedded engine.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="runtimes/**/*"
+          Pack="true"
+          PackagePath="runtimes"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <Target Name="FailIfNativesMissing" BeforeTargets="Build;Pack">
+    <ItemGroup>
+      <_Natives Include="runtimes/**/*" />
+    </ItemGroup>
+    <Error Condition="'@(_Natives)' == ''"
+           Text="No native binaries found. Run scripts/fetch-liblbug.sh first." />
+  </Target>
+</Project>
