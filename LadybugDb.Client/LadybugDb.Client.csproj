@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>true</IsPackable>
+    <PackageId>LadybugDb.Client</PackageId>
+    <Description>.NET client for LadybugDB, an embedded graph database with Cypher. Managed assembly only; install LadybugDb.Client.Native for the embedded engine.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LadybugDb.Client.Tests" />
+    <InternalsVisibleTo Include="LadybugDb.Client.IntegrationTests" />
+  </ItemGroup>
+</Project>

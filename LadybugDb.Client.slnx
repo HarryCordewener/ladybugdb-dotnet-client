@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LadybugDb.Client/LadybugDb.Client.csproj" />
+  <Project Path="LadybugDb.Client.Tests/LadybugDb.Client.Tests.csproj" />
+</Solution>
