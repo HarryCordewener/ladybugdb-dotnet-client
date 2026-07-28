@@ -1,0 +1,11 @@
+<Project>
+  <!-- Suppress the MTP error by overriding _MTPBeforeVSTest when IsTestingPlatformApplication is true -->
+  <Target Name="_MTPBeforeVSTest" BeforeTargets="VSTest" Condition="'$(IsTestingPlatformApplication)' == 'true'">
+    <!-- This target overrides the error-throwing version, allowing VSTest to proceed with InvokeTestingPlatform -->
+  </Target>
+
+  <!-- Override VSTest target to use InvokeTestingPlatform for .NET 10 -->
+  <Target Name="VSTest" Condition="'$(IsTestingPlatformApplication)' == 'true'">
+    <CallTarget Targets="InvokeTestingPlatform" />
+  </Target>
+</Project>
