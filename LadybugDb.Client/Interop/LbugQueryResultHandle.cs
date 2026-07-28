@@ -26,18 +26,26 @@ internal sealed class LbugQueryResultHandle : LbugStructHandle
     /// undocumented C contract, not a proven guarantee - if a future engine version left
     /// <c>out_query_result</c> unpopulated on some failure path, destroying it here would be
     /// unsafe. The only path that must NOT adopt is one where the native call never ran at all,
-    /// e.g. the connection lease throwing because the connection was concurrently disposed, which
-    /// would leave storage the engine never touched; that case still routes through
-    /// <c>FreeUnowned</c> below.
+    /// e.g. a lease throwing because an ancestor was concurrently disposed, which would leave
+    /// storage the engine never touched; that case still routes through <c>FreeUnowned</c> below.
+    ///
+    /// This also leases <paramref name="database"/> in addition to <paramref name="connection"/>,
+    /// and in that order (database outermost). A live connection handle only protects against the
+    /// connection's own disposal; nothing about it protects against its ancestor database having
+    /// been disposed out from under it, since the two are independent
+    /// <see cref="System.Runtime.InteropServices.SafeHandle"/> instances with no relationship the
+    /// runtime enforces on our behalf. Without this, a disposed database's freed storage is
+    /// dereferenced by the native call - observed as a segfault, not a managed exception.
     /// </remarks>
     internal static unsafe LbugQueryResultHandle Execute(
-        LbugConnectionHandle connection, sbyte* query, out lbug_state state)
+        LbugDatabaseHandle database, LbugConnectionHandle connection, sbyte* query, out lbug_state state)
     {
         var storage = AllocateUnowned((nuint)sizeof(lbug_query_result));
         var adopted = false;
         try
         {
             var result = (lbug_query_result*)storage;
+            using (var dbLease = database.Acquire())
             using (var lease = connection.Acquire())
             {
                 state = LbugNative.lbug_connection_query((lbug_connection*)lease.Pointer, query, result);

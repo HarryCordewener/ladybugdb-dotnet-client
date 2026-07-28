@@ -28,11 +28,12 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// Executes a Cypher statement and returns its result.
     /// </summary>
     /// <remarks>
-    /// No <c>IsClosed</c> pre-check here: <see cref="Execute"/> leases this connection's handle
-    /// internally (via <see cref="LbugQueryResultHandle.Execute"/>), and that lease already
-    /// throws <see cref="ObjectDisposedException"/> if the connection has been disposed. A
-    /// separate check-then-call here would just reintroduce the TOCTOU window leases exist to
-    /// close.
+    /// No <c>IsClosed</c> pre-check here: <see cref="Execute"/> leases both this connection's
+    /// handle and its parent <see cref="LadybugDatabase"/>'s handle internally (via
+    /// <see cref="LbugQueryResultHandle.Execute"/>), and those leases already throw
+    /// <see cref="ObjectDisposedException"/> if the connection - or the database it belongs to -
+    /// has been disposed. A separate check-then-call here would just reintroduce the TOCTOU
+    /// window leases exist to close.
     /// </remarks>
     public ValueTask<LadybugQueryResult> QueryAsync(string cypher, CancellationToken cancellationToken = default)
     {
@@ -46,7 +47,7 @@ public sealed class LadybugConnection : IAsyncDisposable
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try
         {
-            var handle = LbugQueryResultHandle.Execute(_handle, (sbyte*)utf8, out var state);
+            var handle = LbugQueryResultHandle.Execute(_database.Handle, _handle, (sbyte*)utf8, out var state);
 
             // Non-null only on failure: NativeString.TakeOwnership never returns null (it maps a
             // null native pointer to string.Empty), so this doubles as the success/failure flag
@@ -68,7 +69,7 @@ public sealed class LadybugConnection : IAsyncDisposable
                 throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
-            return new LadybugQueryResult(handle);
+            return new LadybugQueryResult(_database.Handle, handle);
         }
         finally
         {
@@ -76,6 +77,7 @@ public sealed class LadybugConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>Closes the connection. Safe to call even if the parent database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {
         _handle.Dispose();

@@ -26,7 +26,6 @@ public class DatabaseLifecycleTests
                 "CREATE (o:Obj {dbref: 42, name: 'Limbo'})")) { }
 
             await using var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-            await Assert.That(result.IsSuccess).IsTrue();
             await Assert.That(result.HasNext).IsTrue();
         }
         finally

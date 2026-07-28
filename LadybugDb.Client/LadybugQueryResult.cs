@@ -6,30 +6,38 @@ namespace LadybugDb.Client;
 /// <summary>The result of a Cypher statement.</summary>
 public sealed class LadybugQueryResult : IAsyncDisposable
 {
+    private readonly LbugDatabaseHandle _database;
     private readonly LbugQueryResultHandle _handle;
 
-    internal LadybugQueryResult(LbugQueryResultHandle handle) => _handle = handle;
+    internal LadybugQueryResult(LbugDatabaseHandle database, LbugQueryResultHandle handle)
+    {
+        _database = database;
+        _handle = handle;
+    }
 
     internal LbugQueryResultHandle Handle => _handle;
 
-    public unsafe bool IsSuccess
-    {
-        get
-        {
-            using var lease = _handle.Acquire();
-            return LbugNative.lbug_query_result_is_success((lbug_query_result*)lease.Pointer) != 0;
-        }
-    }
-
+    /// <summary>
+    /// <see langword="true"/> if there is at least one more row available from
+    /// <see cref="ReadStringAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Leases the parent <see cref="LadybugDatabase"/>'s handle in addition to this result's own
+    /// handle: a <see cref="LadybugQueryResult"/> only protects against its own disposal, not its
+    /// ancestor database's, so without the extra lease a disposed database's freed storage would
+    /// be dereferenced here - a crash, not a managed exception.
+    /// </remarks>
     public unsafe bool HasNext
     {
         get
         {
+            using var dbLease = _database.Acquire();
             using var lease = _handle.Acquire();
             return LbugNative.lbug_query_result_has_next((lbug_query_result*)lease.Pointer) != 0;
         }
     }
 
+    /// <summary>Closes the result. Safe to call even if the parent database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {
         _handle.Dispose();
@@ -50,8 +58,17 @@ public sealed class LadybugQueryResult : IAsyncDisposable
         return ValueTask.FromResult(ReadString(columnIndex));
     }
 
+    /// <remarks>
+    /// Leases the parent <see cref="LadybugDatabase"/>'s handle for the entire read, in addition
+    /// to the per-call leases each native step already takes on its own handle - see
+    /// <see cref="HasNext"/> for why. The lease is held across every native call this method
+    /// makes (has-next check, tuple fetch, value fetch, string read) rather than re-acquired per
+    /// call, since none of it can run safely once the database is gone.
+    /// </remarks>
     private unsafe string? ReadString(ulong columnIndex)
     {
+        using var dbLease = _database.Acquire();
+
         bool hasNext;
         using (var lease = _handle.Acquire())
         {
@@ -61,11 +78,11 @@ public sealed class LadybugQueryResult : IAsyncDisposable
 
         using var tupleHandle = LbugFlatTupleHandle.GetNext(_handle, out var tupleState);
         if (tupleState != lbug_state.LbugSuccess)
-            throw new LadybugException("Failed to advance to the next row.");
+            throw new LadybugException(WithErrorDetail("Failed to advance to the next row."));
 
         using var valueHandle = LbugValueHandle.GetValue(tupleHandle, columnIndex, out var valueState);
         if (valueState != lbug_state.LbugSuccess)
-            throw new LadybugException($"Failed to read column {columnIndex}.");
+            throw new LadybugException(WithErrorDetail($"Failed to read column {columnIndex}."));
 
         sbyte* raw;
         lbug_state stringState;
@@ -74,8 +91,25 @@ public sealed class LadybugQueryResult : IAsyncDisposable
             stringState = LbugNative.lbug_value_get_string((lbug_value*)lease.Pointer, &raw);
         }
         if (stringState != lbug_state.LbugSuccess)
-            throw new LadybugException($"Column {columnIndex} is not a string.");
+            throw new LadybugException(WithErrorDetail($"Column {columnIndex} is not a string."));
 
         return NativeString.TakeOwnership(raw);
+    }
+
+    /// <summary>
+    /// Folds the engine's own error detail (if any) into <paramref name="message"/>, the same way
+    /// <see cref="LbugDatabaseHandle.Open"/> and <see cref="LbugConnectionHandle.Open"/> do.
+    /// </summary>
+    /// <remarks>
+    /// Consumes <c>lbug_get_last_error()</c> unconditionally on every failure branch above, even
+    /// when it turns out there is nothing recorded (<see cref="NativeString.TakeOwnershipOrNull"/>
+    /// returns <see langword="null"/>). Leaving it unconsumed is the hazard: a message recorded by
+    /// this call and never read would otherwise still be sitting there for an unrelated later
+    /// call to pick up and misreport.
+    /// </remarks>
+    private static unsafe string WithErrorDetail(string message)
+    {
+        var detail = NativeString.TakeOwnershipOrNull(LbugNative.lbug_get_last_error());
+        return detail is null ? message : $"{message} {detail}";
     }
 }
