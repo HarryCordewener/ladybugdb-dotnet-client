@@ -65,6 +65,48 @@ internal sealed class LbugQueryResultHandle : LbugStructHandle
     }
 
     /// <summary>
+    /// Runs <c>lbug_connection_execute</c> against a prepared statement and takes ownership of the
+    /// resulting <c>lbug_query_result</c> storage.
+    /// </summary>
+    /// <remarks>
+    /// Same allocate-unowned/run-native-call/adopt-unconditionally shape as <see cref="Execute"/>,
+    /// for the same reason: an execution that fails still leaves <c>out_query_result</c> in a
+    /// destroy-safe state carrying a readable error message, exactly like a failed
+    /// <c>lbug_connection_query</c>. Leases <paramref name="database"/>, <paramref name="connection"/>,
+    /// and <paramref name="statement"/> together - database outermost, per <see cref="Execute"/>'s
+    /// remarks - because <c>lbug_connection_execute</c> dereferences both the connection and the
+    /// prepared statement pointers, not just the statement's own storage.
+    /// </remarks>
+    internal static unsafe LbugQueryResultHandle ExecutePrepared(
+        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle statement, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_query_result));
+        var adopted = false;
+        try
+        {
+            var result = (lbug_query_result*)storage;
+            using (var dbLease = database.Acquire())
+            using (var connLease = connection.Acquire())
+            using (var stmtLease = statement.Acquire())
+            {
+                state = LbugNative.lbug_connection_execute(
+                    (lbug_connection*)connLease.Pointer, (lbug_prepared_statement*)stmtLease.Pointer, result);
+            }
+
+            var handle = new LbugQueryResultHandle();
+            // See LbugDatabaseHandle.Open: set before Adopt so a failure inside Adopt itself
+            // biases toward a leak (storage never freed) rather than a double free.
+            adopted = true;
+            handle.Adopt(storage);
+            return handle;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
+    /// <summary>
     /// Runs <c>lbug_query_result_get_next_query_result</c> and wraps the resulting
     /// <c>lbug_query_result</c> storage - the next statement's result, for a multi-statement
     /// script run through a single <see cref="LbugConnectionHandle"/> query.

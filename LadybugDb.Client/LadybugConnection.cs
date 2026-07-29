@@ -39,6 +39,22 @@ public sealed class LadybugConnection : IAsyncDisposable
         return ValueTask.FromResult(Execute(cypher));
     }
 
+    /// <summary>
+    /// Prepares a parameterized Cypher statement for repeated execution with different bound
+    /// values, avoiding re-planning the same query on every call.
+    /// </summary>
+    /// <remarks>
+    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync"/>:
+    /// <see cref="LadybugPreparedStatement.Prepare"/> leases both this connection's handle and its
+    /// parent <see cref="LadybugDatabase"/>'s handle internally.
+    /// </remarks>
+    public ValueTask<LadybugPreparedStatement> PrepareAsync(string cypher, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher));
+    }
+
     private unsafe LadybugQueryResult Execute(string cypher)
     {
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);

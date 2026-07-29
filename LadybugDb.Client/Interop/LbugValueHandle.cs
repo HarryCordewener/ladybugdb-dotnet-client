@@ -5,6 +5,45 @@ namespace LadybugDb.Client.Interop;
 internal sealed class LbugValueHandle : LbugStructHandle
 {
     /// <summary>
+    /// <see langword="true"/> for every factory below except <see cref="CreateNull"/>: the caller
+    /// (this library) allocated the <c>lbug_value</c> struct storage itself via
+    /// <see cref="LbugStructHandle.AllocateUnowned"/>, so releasing it must free that allocation
+    /// with <see cref="LbugStructHandle.FreeStorage"/> in addition to calling <c>lbug_value_destroy</c>.
+    /// <see langword="false"/> only for a value obtained from <c>lbug_value_create_null</c>, which
+    /// returns a pointer the ENGINE allocated and owns end to end - per <c>third-party/lbug.h</c>,
+    /// "Caller is responsible for destroying the returned value" is the entire contract, with no
+    /// separate free step implied. Calling <c>FreeStorage</c>'s <c>NativeMemory.Free</c> on that
+    /// pointer afterward would apply the wrong allocator to memory this process's native allocator
+    /// never carved out, and - because <c>lbug_value_destroy</c> already frees what it owns - risks
+    /// a double free of the same address, not merely a leak.
+    /// </summary>
+    private readonly bool _ownsManagedStorage;
+
+    private LbugValueHandle() : this(ownsManagedStorage: true) { }
+
+    private LbugValueHandle(bool ownsManagedStorage) => _ownsManagedStorage = ownsManagedStorage;
+
+    /// <summary>
+    /// Runs <c>lbug_value_create_null</c> and wraps the resulting <c>lbug_value*</c> - backs
+    /// <see cref="LadybugDb.Client.LadybugPreparedStatement.BindNull"/> via
+    /// <c>lbug_prepared_statement_bind_value</c>.
+    /// </summary>
+    /// <remarks>
+    /// Unlike every other factory here, this native call takes no <c>out_value</c> parameter: it
+    /// returns a freshly engine-allocated <c>lbug_value*</c> directly, so there is nothing for this
+    /// library to allocate via <see cref="LbugStructHandle.AllocateUnowned"/> first - the returned
+    /// pointer is adopted as-is. See <see cref="_ownsManagedStorage"/> for why that also changes how
+    /// this handle must be released.
+    /// </remarks>
+    internal static unsafe LbugValueHandle CreateNull()
+    {
+        var native = LbugNative.lbug_value_create_null();
+        var handle = new LbugValueHandle(ownsManagedStorage: false);
+        handle.Adopt(native);
+        return handle;
+    }
+
+    /// <summary>
     /// Runs <c>lbug_flat_tuple_get_value</c> and takes ownership of the resulting
     /// <c>lbug_value</c> storage.
     /// </summary>
@@ -392,7 +431,11 @@ internal sealed class LbugValueHandle : LbugStructHandle
         }
         finally
         {
-            FreeStorage();
+            // See _ownsManagedStorage: only free the struct memory this library itself allocated.
+            // A value from CreateNull() was allocated by the engine and already fully released by
+            // lbug_value_destroy above; NativeMemory.Free-ing it too would double-free it.
+            if (_ownsManagedStorage) FreeStorage();
+            else SetHandle(IntPtr.Zero);
         }
 
         return true;
