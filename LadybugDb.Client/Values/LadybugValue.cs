@@ -1,3 +1,6 @@
+using System.Globalization;
+using ExtendedNumerics;
+
 namespace LadybugDb.Client;
 
 /// <summary>
@@ -69,6 +72,51 @@ public readonly struct LadybugValue : IEquatable<LadybugValue>
     /// <summary>Reads this value as a <see cref="double"/>.</summary>
     /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Double"/>.</exception>
     public double AsDouble() => As<double>(LadybugType.Double);
+
+    /// <summary>
+    /// Reads this value as a <see cref="decimal"/>, parsed from the engine's exact decimal string
+    /// with <see cref="NumberStyles.Number"/> under <see cref="CultureInfo.InvariantCulture"/> -
+    /// explicitly invariant, since a machine configured with a comma decimal separator would
+    /// otherwise misparse the engine's always-dot-separated string. The engine's DECIMAL supports
+    /// up to 38 significant digits, while .NET's <see cref="decimal"/> holds only 28-29; a value in
+    /// that gap does not truncate, round, or silently lose precision here - it throws instead. Use
+    /// <see cref="AsBigDecimal"/> to read such a value losslessly, for all 38 digits.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Decimal"/>.</exception>
+    /// <exception cref="LadybugException">The value's precision exceeds what <see cref="decimal"/> can represent.</exception>
+    public decimal AsDecimal()
+    {
+        if (Type != LadybugType.Decimal)
+            throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Decimal}.");
+
+        var s = (string)_payload!;
+        if (decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d))
+            return d;
+
+        throw new LadybugException(
+            $"DECIMAL value '{s}' exceeds the range decimal can represent (decimal holds 28-29 " +
+            "significant digits; the engine supports up to 38). Use AsBigDecimal() to read it losslessly.");
+    }
+
+    /// <summary>
+    /// Reads this value as a <see cref="BigDecimal"/>, parsed from the exact engine decimal string
+    /// under <see cref="CultureInfo.InvariantCulture"/> - the same string <see cref="AsDecimal"/>
+    /// parses, and the same one <see cref="AsString"/> returns verbatim. Unlike
+    /// <see cref="AsDecimal"/>, this is always lossless: <see cref="BigDecimal"/> is backed by an
+    /// arbitrary-precision <see cref="System.Numerics.BigInteger"/> mantissa, so it holds every one
+    /// of the engine's up-to-38 significant digits without the 28-29 digit ceiling
+    /// <see cref="decimal"/> has. This is the accessor to use for a DECIMAL(29..38) value, or any
+    /// time bidirectional exactness matters more than interop with existing <see cref="decimal"/>-based
+    /// code.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Decimal"/>.</exception>
+    public BigDecimal AsBigDecimal()
+    {
+        if (Type != LadybugType.Decimal)
+            throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Decimal}.");
+
+        return BigDecimal.Parse((string)_payload!, CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// Reads this value as a <see cref="string"/>. Unlike the other accessors, this accepts any

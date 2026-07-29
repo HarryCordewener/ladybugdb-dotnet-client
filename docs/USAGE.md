@@ -117,11 +117,12 @@ on every call, which matters for any statement run in a loop. It also sidesteps 
 string interpolation, which is both slower (no plan reuse) and a Cypher-injection risk if any bound
 value comes from outside your program.
 
-`LadybugPreparedStatement` has nineteen typed `Bind(name, value)` overloads covering the engine's
+`LadybugPreparedStatement` has seventeen typed `Bind(name, value)` overloads covering the engine's
 scalar and temporal parameter types — every integer width (signed and unsigned), `bool`, `float`,
 `double`, `string`, `DateOnly`, `TimeSpan` (INTERVAL), `DateTime` (TIMESTAMP), `DateTimeOffset`
-(TIMESTAMP_TZ) — plus `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds`
-for the other three timestamp precisions, and `BindNull(name)` for a typed NULL. Call `ExecuteAsync()`
+(TIMESTAMP_TZ), `BigDecimal` (DECIMAL, see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below) —
+plus `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the other
+three timestamp precisions, and `BindNull(name)` for a typed NULL. Call `ExecuteAsync()`
 to run the statement with whatever values the most recent `Bind` calls set, and get back an ordinary
 `LadybugQueryResult` — read it exactly as described in [Reading results](#reading-results) below.
 Re-binding a subset of parameters and calling `ExecuteAsync()` again reuses every parameter not
@@ -181,7 +182,7 @@ list, including the handful of types this client does not yet marshal.
 Covered, each reading as its own `LadybugType`/accessor pair:
 
 - **Scalars:** `BOOL`, every signed/unsigned integer width (`INT8`…`INT64`, `UINT8`…`UINT64`),
-  `FLOAT`, `DOUBLE`, `STRING`, `BLOB`.
+  `FLOAT`, `DOUBLE`, `STRING`, `BLOB`, `DECIMAL` (see below).
 - **Temporal:** `DATE`, `TIMESTAMP` (and its `_SEC`/`_MS`/`_NS` variants, all normalized to one
   `DateTime` representation), `TIMESTAMP_TZ`, `INTERVAL` (see the lossy-conversion note above).
 - **Containers:** `LIST`/`ARRAY` (`AsList()`), `STRUCT` (`AsStruct()`), `MAP` (`AsMap()`).
@@ -193,15 +194,83 @@ Covered, each reading as its own `LadybugType`/accessor pair:
 no usable payload, rather than throwing at read time:
 
 - `UUID`
-- `DECIMAL`
 - `RECURSIVE_REL`
 - `INT128`
 - `UNION`
 - `POINTER`
 
-None of these six are reachable through ordinary Cypher in the schemas this guide's own samples
+None of these five are reachable through ordinary Cypher in the schemas this guide's own samples
 use; if your schema needs one, `LadybugType.Unsupported` is your signal to check back on a later
 release rather than a silent gap.
+
+### DECIMAL: `AsDecimal()` vs `AsBigDecimal()`
+
+The engine's `DECIMAL` supports up to **38 significant digits** — `DECIMAL(38,0)` and
+`DECIMAL(38,10)` are both accepted; `DECIMAL(39,0)` is rejected at `CREATE TABLE` time with
+"Precision of DECIMAL/NUMERIC must be a positive integer…". .NET's own `decimal` holds only
+**28-29 significant digits**, so there's a real gap (`DECIMAL(29..38)`) that `decimal` cannot
+represent at all.
+
+Two read accessors exist because of that gap:
+
+- **`AsDecimal()`** parses the engine's exact decimal string into a `decimal`. Convenient, and
+  correct for anything up to `decimal`'s own range — but a value needing more digits than that
+  throws `LadybugException` (pointing you at `AsBigDecimal()`) rather than silently truncating or
+  rounding.
+- **`AsBigDecimal()`** parses the same string into an
+  [`ExtendedNumerics.BigDecimal`](https://www.nuget.org/packages/ExtendedNumerics.BigDecimal) —
+  arbitrary-precision, backed by a `BigInteger` mantissa — and is **always lossless**, for all 38
+  engine digits. Use this for a `DECIMAL(29..38)` value, or any time exactness matters more than
+  interop with existing `decimal`-based code.
+
+Binding is symmetric: `LadybugPreparedStatement.Bind(string, BigDecimal)` is the write-side
+counterpart to `AsBigDecimal()` — there is no separate `decimal`-typed overload, since `BigDecimal`
+already converts implicitly from `decimal`/`double`/`int`/`BigInteger`. Build one with
+`BigDecimal.Parse("12345.6789")` (or an implicit conversion from an existing `decimal`) and bind it
+directly:
+
+```csharp
+using ExtendedNumerics;
+
+await using var stmt = await conn.PrepareAsync("CREATE (n:Ledger {id: $id, amount: $amount})");
+stmt.Bind("id", 1L);
+stmt.Bind("amount", BigDecimal.Parse("12345.6789"));
+await using (var _ = await stmt.ExecuteAsync()) { }
+```
+
+**Precision and scale are derived from the value itself**, not from the target column's declared
+`DECIMAL(p,s)` — the C API gives a prepared statement no way to ask what a parameter's declared
+column type is. What that means in practice, established empirically against a real database
+(not assumed from the header):
+
+- **A bound value with lower precision/scale than the column is widened, not rejected.** Binding
+  `BigDecimal.Parse("123")` (precision 3, scale 0) into a `DECIMAL(18,4)` column reads back as
+  `123.0000` — the engine pads to the column's own scale.
+- **A bound value with higher *scale* than the column is silently rounded, not rejected.** Binding
+  `BigDecimal.Parse("123.456")` (scale 3) into a `DECIMAL(18,2)` column reads back as `123.46` —
+  confirmed round-half-away-from-zero (`1.5` → `2`, `-1.5` → `-2`, `2.5` → `3`). This is the one
+  genuine sharp edge in this bind path: narrowing the scale does not throw, it loses precision
+  silently. If your application can't tolerate that, round or reject on the .NET side before
+  binding.
+- **A bound value whose integer part doesn't fit the column's precision is rejected.** Binding
+  `BigDecimal.Parse("12345.67")` into a `DECIMAL(5,2)` column (room for only 3 integer digits)
+  throws `LadybugException` ("Overflow exception: Decimal Cast Failed: input 12345.67 is not in
+  range of DECIMAL(5, 2)").
+- **A value needing more than 38 significant digits throws before the native call is ever made** —
+  this client's own guard, not an engine round-trip, since forwarding an out-of-range precision
+  into `lbug_value_create_decimal` has no useful behavior to fall back on.
+
+`ExtendedNumerics.BigDecimal` also normalizes trailing zeros out of its own mantissa by default
+(`BigDecimal.AlwaysNormalize`, a `true`-by-default static on the type) — unlike `decimal`, which
+preserves them. So `BigDecimal.Parse("1.2300")` and `BigDecimal.Parse("1.23")` are the identical
+value the instant they're parsed. That's the dependency's own canonical form, not something this
+client does; it doesn't affect round-trip correctness (both the value you bind and the value you
+read back normalize the same way, so equality still holds exactly), only the trailing zeros'
+*visibility* if you inspect `.Mantissa`/`.Exponent` directly. `AsString()` still returns the
+engine's own storage exactly as-is, trailing zeros included, if you need that.
+
+See `LadybugDb.Client.IntegrationTests/DecimalBidirectionalTests.cs` for the full evidence behind
+every claim above, including the 38-digit maximum, negative values, and zero.
 
 **`AsTimeSpan()` on an INTERVAL is lossy.** A native interval carries a separate months component
 that `TimeSpan` has no concept of, so the conversion — delegated to the engine's own

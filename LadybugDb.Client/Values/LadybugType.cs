@@ -4,12 +4,12 @@ namespace LadybugDb.Client;
 public enum LadybugType
 {
     /// <summary>
-    /// A type this client does not yet marshal (currently <c>UUID</c>, <c>DECIMAL</c>,
-    /// <c>RECURSIVE_REL</c>, <c>INT128</c>, <c>UNION</c>, and <c>POINTER</c> - see
-    /// docs/USAGE.md's "Type coverage" section). The payload is always <see langword="null"/>, so
-    /// every <c>As*</c> accessor on a <see cref="LadybugValue"/> of this type - including
-    /// <see cref="LadybugValue.AsString"/> - throws <see cref="InvalidOperationException"/>; there
-    /// is no way to read the value out of this client today, only to detect that it occurred.
+    /// A type this client does not yet marshal (currently <c>UUID</c>, <c>RECURSIVE_REL</c>,
+    /// <c>INT128</c>, <c>UNION</c>, and <c>POINTER</c> - see docs/USAGE.md's "Type coverage"
+    /// section). The payload is always <see langword="null"/>, so every <c>As*</c> accessor on a
+    /// <see cref="LadybugValue"/> of this type - including <see cref="LadybugValue.AsString"/> -
+    /// throws <see cref="InvalidOperationException"/>; there is no way to read the value out of
+    /// this client today, only to detect that it occurred.
     /// </summary>
     Unsupported = 0,
     /// <summary>SQL NULL.</summary>
@@ -36,6 +36,13 @@ public enum LadybugType
     Single,
     /// <summary>DOUBLE.</summary>
     Double,
+    /// <summary>
+    /// DECIMAL. Backed by the engine's exact decimal string, not a parsed <see cref="decimal"/> -
+    /// see <see cref="LadybugValue.AsDecimal"/> (bounded, 28-29 significant digits) and
+    /// <see cref="LadybugValue.AsBigDecimal"/> (always lossless, all 38 digits) for why parsing is
+    /// deferred to those accessors.
+    /// </summary>
+    Decimal,
     /// <summary>STRING.</summary>
     String,
     /// <summary>BLOB.</summary>

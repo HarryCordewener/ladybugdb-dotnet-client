@@ -11,6 +11,16 @@
     <InternalsVisibleTo Include="LadybugDb.Client.IntegrationTests" />
   </ItemGroup>
   <ItemGroup>
+    <!--
+      Zero transitive dependencies (verified against the published nuspec) - chosen over
+      Singulink.Numerics.BigDecimal specifically because Singulink pulls five transitive
+      packages. Backs LadybugValue.AsBigDecimal() and LadybugPreparedStatement's BigDecimal
+      bind - the lossless path for DECIMAL, which the engine supports up to 38 significant
+      digits, beyond .NET's native decimal (28-29).
+    -->
+    <PackageReference Include="ExtendedNumerics.BigDecimal" Version="3003.2.0.161" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 </Project>

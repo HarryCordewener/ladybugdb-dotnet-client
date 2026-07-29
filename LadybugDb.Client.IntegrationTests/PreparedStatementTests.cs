@@ -210,6 +210,7 @@ public class PreparedStatementTests
             await using var stmt = await conn.PrepareAsync("CREATE (n:V {id: 1, val: $val})");
             Assert.Throws<ArgumentException>(() => stmt.Bind(name!, 1L));
             Assert.Throws<ArgumentException>(() => stmt.Bind(name!, "x"));
+            Assert.Throws<ArgumentException>(() => stmt.Bind(name!, ExtendedNumerics.BigDecimal.One));
             Assert.Throws<ArgumentException>(() => stmt.BindNull(name!));
         }
         finally { TestDatabase.Cleanup(path); }

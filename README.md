@@ -12,7 +12,7 @@ bindings for Python, NodeJS, Rust, Go, Swift, Java, and C/C++, but none for .NET
 
 > **Status: pre-1.0, unpublished.** No package is on NuGet yet. What exists is real and tested
 > against the actual engine — open a database, open one or more connections, run Cypher (plain or
-> prepared/parameterized), read every scalar/temporal/container/graph type back except the six
+> prepared/parameterized), read every scalar/temporal/container/graph type back except the five
 > listed under [Current status and limitations](#current-status-and-limitations), and run
 > transactions — but the public surface is still pre-1.0 and can change. See
 > [Current status and limitations](#current-status-and-limitations) before you invest in this.
@@ -70,8 +70,11 @@ Supported today:
 - Running a Cypher statement as a plain string and getting back a `LadybugQueryResult`.
 - Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every scalar,
   temporal, container (LIST/ARRAY/STRUCT/MAP), and graph (NODE/REL/INTERNAL_ID) type the engine
-  can return marshalled to a typed `LadybugValue` — six less-common engine types remain
-  unreachable (`UUID`, `DECIMAL`, `RECURSIVE_REL`, `INT128`, `UNION`, `POINTER`; see
+  can return marshalled to a typed `LadybugValue`, including `DECIMAL` (`AsDecimal()` for values
+  within .NET's native `decimal` range, `AsBigDecimal()` as the always-lossless path for the
+  engine's full 38-digit precision — see
+  [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)) — five less-common engine
+  types remain unreachable (`UUID`, `RECURSIVE_REL`, `INT128`, `UNION`, `POINTER`; see
   [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown) — columns addressable by
   position or name, and chained multi-statement results walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
@@ -89,8 +92,10 @@ Supported today:
   [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the numbers and
   the retry pattern still needed when it's off (the default).
 - Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`), with
-  nineteen typed `Bind` overloads covering the engine's scalar/temporal types plus `BindNull`, so a
-  statement executed repeatedly with different values only gets planned once.
+  seventeen typed `Bind` overloads covering the engine's scalar/temporal types plus `BindNull`, so
+  a statement executed repeatedly with different values only gets planned once. Includes a
+  `BigDecimal` overload (`ExtendedNumerics.BigDecimal`) for lossless DECIMAL binding at any
+  precision the engine supports.
 
 No known functional gaps remain in the API surface listed above. See
 [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for smaller, reviewed

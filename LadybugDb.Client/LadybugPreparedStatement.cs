@@ -1,4 +1,7 @@
+using System.Globalization;
+using System.Numerics;
 using System.Runtime.InteropServices;
+using ExtendedNumerics;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Native;
 
@@ -243,6 +246,122 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         {
             Marshal.FreeCoTaskMem(utf8Name);
         }
+    }
+
+    /// <summary>
+    /// Binds a <c>DECIMAL</c> parameter losslessly, for all 38 significant digits the engine
+    /// supports - the write-side counterpart to <see cref="LadybugValue.AsBigDecimal"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="value"/>'s precision and scale are derived from the value itself (its
+    /// <see cref="BigDecimal.Mantissa"/>/<see cref="BigDecimal.Exponent"/>), not taken from the
+    /// target column's declared <c>DECIMAL(p,s)</c> - the C API gives a prepared statement no way
+    /// to ask what a parameter's declared column type is, only <c>lbug_value_create_decimal(val,
+    /// precision, scale)</c> to build the value being bound. Empirically (see
+    /// docs/USAGE.md's DECIMAL binding section), the engine accepts a bound precision/scale that
+    /// differs from the target column's - lower precision and lower scale are both widened to the
+    /// column's own DECIMAL(p,s) on write, not rejected or silently truncated. A derived precision
+    /// above 38 - the engine's DECIMAL maximum - throws here before the native call, rather than
+    /// letting the engine reject it with a less specific message.
+    /// </para>
+    /// <para>
+    /// Follows the same short-lived-value discipline as <see cref="BindNull"/>, for the same
+    /// reason: <c>lbug_value_create_decimal</c> returns an engine-owned <c>lbug_value*</c> directly
+    /// (per its "caller is responsible for destroying the returned value"), the same ownership
+    /// shape that caused a double-free via <see cref="Interop.LbugValueHandle"/>/
+    /// <c>NativeMemory.Free</c> elsewhere in this client, so it is destroyed via
+    /// <c>lbug_value_destroy</c> directly in a <c>finally</c> rather than wrapped in a handle.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="LadybugException">
+    /// <paramref name="value"/> needs more than 38 significant digits to represent, exceeding what
+    /// the engine's DECIMAL type can hold.
+    /// </exception>
+    public unsafe void Bind(string name, BigDecimal value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var digitString = DecimalStringOf(value, out var precision, out var scale);
+        if (precision > 38)
+            throw new LadybugException(
+                $"The BigDecimal value bound to parameter '{name}' needs {precision} significant " +
+                "digits to represent exactly, exceeding the engine's DECIMAL(38) maximum.");
+
+        var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
+        try
+        {
+            var utf8Value = Marshal.StringToCoTaskMemUTF8(digitString);
+            try
+            {
+                var nativeValue = LbugNative.lbug_value_create_decimal((sbyte*)utf8Value, precision, scale);
+                try
+                {
+                    lbug_state state;
+                    using (var lease = _handle.Acquire())
+                    {
+                        state = LbugNative.lbug_prepared_statement_bind_value(
+                            (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, nativeValue);
+                    }
+                    ThrowIfBindFailed(state, name);
+                }
+                finally
+                {
+                    LbugNative.lbug_value_destroy(nativeValue);
+                }
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(utf8Value);
+            }
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8Name);
+        }
+    }
+
+    /// <summary>
+    /// Renders a <see cref="BigDecimal"/> as the plain (never scientific-notation), always
+    /// invariant, always-dot-separated digit string <c>lbug_value_create_decimal</c> expects,
+    /// alongside the precision/scale that string implies. Deliberately does not use
+    /// <see cref="BigDecimal.ToString()"/>: that formatter defaults to
+    /// <see cref="CultureInfo.CurrentCulture"/> (wrong on a comma-decimal-separator machine, the
+    /// same hazard <see cref="LadybugValue.AsDecimal"/> guards against on the read side) and pads
+    /// or trims digits according to its own <c>NumberFormatInfo.NumberDecimalDigits</c>, neither of
+    /// which this bind path wants - it needs the exact digits <paramref name="value"/> carries, no
+    /// more and no fewer. Building the string directly from <see cref="BigDecimal.Mantissa"/>/
+    /// <see cref="BigDecimal.Exponent"/> sidesteps both.
+    /// </summary>
+    private static string DecimalStringOf(BigDecimal value, out uint precision, out uint scale)
+    {
+        var negative = value.Mantissa.Sign < 0;
+        var digits = BigInteger.Abs(value.Mantissa).ToString(CultureInfo.InvariantCulture);
+
+        string text;
+        if (value.Exponent >= 0)
+        {
+            // An integer with trailing zeros the mantissa doesn't store, e.g. mantissa=123,
+            // exponent=2 -> "12300". No fractional part, so scale is always 0 here.
+            text = digits + new string('0', value.Exponent);
+            scale = 0;
+        }
+        else
+        {
+            // A fractional value: -exponent digits belong after the decimal point. If the mantissa
+            // has fewer digits than that (e.g. mantissa=5, exponent=-3 -> "0.005"), left-pad with
+            // zeros first so there's always at least one digit left of the point.
+            var fractionDigits = -value.Exponent;
+            if (digits.Length <= fractionDigits)
+                digits = digits.PadLeft(fractionDigits + 1, '0');
+
+            var splitAt = digits.Length - fractionDigits;
+            text = string.Concat(digits.AsSpan(0, splitAt), ".", digits.AsSpan(splitAt));
+            scale = (uint)fractionDigits;
+        }
+
+        precision = (uint)digits.Length;
+        return negative ? "-" + text : text;
     }
 
     /// <summary>

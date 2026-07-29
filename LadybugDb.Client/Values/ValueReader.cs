@@ -57,6 +57,7 @@ internal static class ValueReader
             lbug_data_type_id.LBUG_UINT8 => ReadUInt8(value),
             lbug_data_type_id.LBUG_DOUBLE => ReadDouble(value),
             lbug_data_type_id.LBUG_FLOAT => ReadSingle(value),
+            lbug_data_type_id.LBUG_DECIMAL => ReadDecimal(value),
             lbug_data_type_id.LBUG_STRING => ReadString(value),
             lbug_data_type_id.LBUG_DATE => ReadDate(value),
             lbug_data_type_id.LBUG_TIMESTAMP => ReadTimestamp(value),
@@ -170,6 +171,25 @@ internal static class ValueReader
         var state = LbugNative.lbug_value_get_string(value, &raw);
         ThrowIfFailed(state, "string");
         return new LadybugValue(LadybugType.String, NativeString.TakeOwnership(raw));
+    }
+
+    /// <summary>
+    /// Reads a DECIMAL value. The engine hands this back as a caller-owned <c>char*</c> - the same
+    /// string-ownership contract as <see cref="ReadString"/> and every other native string in this
+    /// client - via <c>lbug_value_get_decimal_as_string</c>, so it goes through the same
+    /// <see cref="NativeString.TakeOwnership"/> path. The exact engine string is stored as the
+    /// payload rather than a parsed <see cref="decimal"/>: the engine supports DECIMAL up to 38
+    /// significant digits while <see cref="decimal"/> holds only 28-29, so parsing eagerly here
+    /// would throw on values the caller never asked to convert. Parsing is deferred to
+    /// <see cref="LadybugValue.AsDecimal"/>, which the caller reaches only if it wants a
+    /// <see cref="decimal"/>; <see cref="LadybugValue.AsString"/> reads this losslessly regardless.
+    /// </summary>
+    private static unsafe LadybugValue ReadDecimal(lbug_value* value)
+    {
+        sbyte* raw;
+        var state = LbugNative.lbug_value_get_decimal_as_string(value, &raw);
+        ThrowIfFailed(state, "decimal");
+        return new LadybugValue(LadybugType.Decimal, NativeString.TakeOwnership(raw));
     }
 
     private static unsafe LadybugValue ReadDate(lbug_value* value)
