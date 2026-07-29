@@ -7,7 +7,9 @@ real engine while this guide was written.
 - [Opening and configuring a database](#opening-and-configuring-a-database)
 - [Connections](#connections)
 - [Executing Cypher](#executing-cypher)
+- [Prepared statements](#prepared-statements)
 - [Reading results](#reading-results)
+- [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
 - [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)
@@ -86,13 +88,52 @@ await using (var _ = await conn.QueryAsync(
 run repeatedly with different values, prefer `conn.PrepareAsync(cypher)` and the resulting
 `LadybugPreparedStatement`'s typed `Bind` overloads over interpolating values into the string
 yourself — it avoids re-planning the same query on every call, and avoids interpolation being the
-only thing standing between you and a Cypher injection bug. Every `QueryAsync` call returns a
+only thing standing between you and a Cypher injection bug; see
+[Prepared statements](#prepared-statements) below. Every `QueryAsync` call returns a
 result, even for statements like `CREATE TABLE` that don't produce rows; disposing it discards
 that result and frees the underlying native resources. The `await using (var _ = ...) { }` shape
 above is the idiom for "run this statement, I don't need to read anything back."
 
 A statement that fails throws `LadybugException` or `LadybugWriteConflictException` — see
 [Error handling](#error-handling).
+
+## Prepared statements
+
+```csharp
+await using var stmt = await conn.PrepareAsync("CREATE (o:Object {dbref: $dbref, name: $name})");
+stmt.Bind("dbref", 42L);
+stmt.Bind("name", "Limbo");
+await using (var _ = await stmt.ExecuteAsync()) { }
+
+stmt.Bind("dbref", 43L);
+stmt.Bind("name", "The Void");
+await using (var _ = await stmt.ExecuteAsync()) { }
+```
+
+`conn.PrepareAsync(cypher)` compiles a Cypher string once and returns a `LadybugPreparedStatement`
+that can be executed repeatedly with different bound values — the engine plans the query once, not
+on every call, which matters for any statement run in a loop. It also sidesteps building Cypher by
+string interpolation, which is both slower (no plan reuse) and a Cypher-injection risk if any bound
+value comes from outside your program.
+
+`LadybugPreparedStatement` has a `Bind(name, value)` overload for every one of the engine's twenty
+scalar and temporal parameter types — every integer width (signed and unsigned), `bool`, `float`,
+`double`, `string`, `DateOnly`, `TimeSpan` (INTERVAL), `DateTime` (TIMESTAMP), `DateTimeOffset`
+(TIMESTAMP_TZ) — plus `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds`
+for the other three timestamp precisions, and `BindNull(name)` for a typed NULL. Call `ExecuteAsync()`
+to run the statement with whatever values the most recent `Bind` calls set, and get back an ordinary
+`LadybugQueryResult` — read it exactly as described in [Reading results](#reading-results) below.
+Re-binding a subset of parameters and calling `ExecuteAsync()` again reuses every parameter not
+re-bound since the last call.
+
+**Binding a parameter name the Cypher doesn't reference doesn't throw.** `Bind`/`BindNull` only
+validate the value being converted (e.g. an out-of-range `DateTime`); they do not check the name
+against the prepared statement's actual parameter list, because the C API has no entry point to ask
+it. A typo in a bound name, or a parameter your Cypher string doesn't actually use, silently
+"succeeds" at bind time — confirmed empirically, not assumed from the header — and only surfaces if
+the *Cypher* references a name that was never bound, which fails at `ExecuteAsync()` with
+`LadybugException` ("Parameter name not found."), not at `Bind`. Double-check your parameter names
+against the Cypher string itself; nothing else will catch a mismatch for you.
 
 ## Reading results
 
@@ -133,6 +174,14 @@ Every LadybugDB type marshals to a typed `LadybugValue` — `AsInt64()`, `AsStri
 type the engine has. Call the accessor matching `row.GetValue(i).Type`; calling the wrong one
 throws `InvalidOperationException`.
 
+**`AsTimeSpan()` on an INTERVAL is lossy.** A native interval carries a separate months component
+that `TimeSpan` has no concept of, so the conversion — delegated to the engine's own
+`lbug_interval_to_difftime`, not computed by this client — converts months at a fixed 30 days each
+before adding the days/microseconds components. An interval built from `INTERVAL 1 MONTH` and one
+built from `INTERVAL 30 DAYS` are indistinguishable once read back as a `TimeSpan`. If your
+application does calendar-aware arithmetic where a month isn't uniformly 30 days, don't round-trip
+through `AsTimeSpan()` for that.
+
 `await foreach` honours a `CancellationToken` between rows via `result.WithCancellation(token)` —
 it can't interrupt a single row already being read (there's no `await` point inside the native
 call for that), but it's checked before every row starts.
@@ -158,6 +207,56 @@ one native cursor behind a multi-statement script, not one per result: only ever
 *later* one already advanced further throws `InvalidOperationException` — without that guard, it
 would silently hand back a stale duplicate of a result already in hand (and can leave a later
 statement in the script never read through any result at all), rather than failing loudly.
+
+## Transactions
+
+If you need a single logical write to span more than one statement, use
+`conn.BeginTransactionAsync()`:
+
+```csharp
+await using (var tx = await conn.BeginTransactionAsync())
+{
+    await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})");
+    await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})");
+    await tx.CommitAsync();
+}
+```
+
+`LadybugTransaction` is a thin wrapper, not a native primitive — **the C API has no transaction
+functions at all.** `BeginTransactionAsync` issues `BEGIN TRANSACTION`, `CommitAsync` issues
+`COMMIT`, and `RollbackAsync` issues `ROLLBACK`, all as ordinary Cypher through the exact same
+query path as `QueryAsync`. What it buys you over issuing those statements yourself: disposing a
+transaction that was never committed or rolled back rolls it back automatically (including when
+its database is disposed first — see [Disposal and lifetime](#disposal-and-lifetime)), a second
+commit or rollback throws `InvalidOperationException` instead of silently doing nothing or hitting
+the engine again, and beginning a second transaction on a connection that already has one open
+throws `InvalidOperationException` client-side rather than sending a nested `BEGIN TRANSACTION`
+that the engine would reject in a way that invalidates the *first* transaction, not just the
+second call. Every statement run on the connection while a transaction is open — not just ones
+issued through the `LadybugTransaction` object — participates in it, because the transaction lives
+on the connection itself, matching what `BEGIN TRANSACTION` means to the engine.
+
+**The raw-Cypher escape hatch bypasses all of that safety — and it can crash the process, not just
+skip a rollback.** Nothing stops you from issuing `await conn.QueryAsync("BEGIN TRANSACTION")`
+directly instead of calling `BeginTransactionAsync`, but if you do, this client has no way to know
+a transaction is open. `BeginTransactionAsync`'s bookkeeping (the connection's `_activeTransaction`
+tracking and the database-side registration that drives the automatic rollback-on-dispose in
+[Disposal and lifetime](#disposal-and-lifetime)) only runs *inside* `BeginTransactionAsync` itself;
+a transaction opened by handing `BEGIN TRANSACTION` to `QueryAsync` as a plain string is invisible
+to it, so `LadybugDatabase.Dispose` never rolls it back.
+
+Reproduced directly, not assumed: opening a transaction via raw `QueryAsync("BEGIN TRANSACTION")`,
+leaving it uncommitted, then disposing the database and letting the connection's own `DisposeAsync`
+run afterward, **aborts the whole process** — `lbug_connection_destroy`'s own auto-rollback (see
+[Disposal and lifetime](#disposal-and-lifetime)) fires against a transaction the now-destroyed
+database can no longer service, and the engine throws a native `lbug::common::TransactionManagerException`
+("Invalid transaction type to rollback") that crosses the P/Invoke boundary as an unhandled
+exception — `terminate()`, `SIGABRT`, the process is gone, not a catchable managed exception. This
+is a real tradeoff you can reach for deliberately (for example, Cypher your database driver already
+emits verbatim), not a footnote: reaching for it means you've opted back into managing that
+transaction's entire lifetime by hand — commit or roll it back yourself, before the connection or
+database can be disposed — exactly as if this client provided no transaction API at all, except
+that getting it wrong here doesn't throw, it takes the process down.
 
 ## Error handling
 
@@ -347,31 +446,8 @@ client-side write lock on top of it — concurrency is the engine's business onc
 `EnableMultiWrites = true`. If you leave it off (the default), the retry-loop pattern above is
 still the expected approach; the client makes no attempt to serialize writers for you either way.
 
-If you need a single logical write to span more than one statement, use
-`conn.BeginTransactionAsync()`:
-
-```csharp
-await using (var tx = await conn.BeginTransactionAsync())
-{
-    await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})");
-    await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})");
-    await tx.CommitAsync();
-}
-```
-
-`LadybugTransaction` is a thin wrapper, not a native primitive — **the C API has no transaction
-functions at all.** `BeginTransactionAsync` issues `BEGIN TRANSACTION`, `CommitAsync` issues
-`COMMIT`, and `RollbackAsync` issues `ROLLBACK`, all as ordinary Cypher through the exact same
-query path as `QueryAsync`. What it buys you over issuing those statements yourself: disposing a
-transaction that was never committed or rolled back rolls it back automatically (including when
-its database is disposed first — see [Disposal and lifetime](#disposal-and-lifetime)), a second
-commit or rollback throws `InvalidOperationException` instead of silently doing nothing or hitting
-the engine again, and beginning a second transaction on a connection that already has one open
-throws `InvalidOperationException` client-side rather than sending a nested `BEGIN TRANSACTION`
-that the engine would reject in a way that invalidates the *first* transaction, not just the
-second call. Every statement run on the connection while a transaction is open — not just ones
-issued through the `LadybugTransaction` object — participates in it, because the transaction lives
-on the connection itself, matching what `BEGIN TRANSACTION` means to the engine.
+If you need a single logical write to span more than one statement, see
+[Transactions](#transactions).
 
 ## Schema guidance
 
@@ -427,5 +503,5 @@ missing entirely:
 - **A dedicated transaction API** now exists (`BeginTransactionAsync` / `LadybugTransaction`), but
   it is a wrapper over `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` Cypher, not a native engine
   primitive - the C API has no transaction functions at all. See
-  [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)
-  for the full contract.
+  [Transactions](#transactions) for the full contract, including the raw-Cypher escape hatch's
+  tradeoff.
