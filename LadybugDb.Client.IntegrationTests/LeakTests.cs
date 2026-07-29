@@ -5,6 +5,23 @@ using TUnit.Core;
 
 namespace LadybugDb.Client.IntegrationTests;
 
+/// <summary>
+/// <see cref="NotInParallelAttribute"/> at the class level, with no constraint key: both tests
+/// below measure <see cref="Environment.WorkingSet"/>, a whole-process metric with no way to scope
+/// it to a single test - any concurrent memory churn from another test running at the same time
+/// inflates the measured growth here, regardless of what that other test actually is. This bit
+/// twice already this milestone, each time fixed by putting <c>[NotInParallel]</c> on the
+/// <em>other</em> (churning) test instead - <c>TransactionConcurrentDisposalTests</c> and
+/// <c>TransactionBeginBeginRaceTests</c> - which only holds until the next heavy test is added
+/// (exactly what happened when <c>DecimalBidirectionalTests</c> landed and produced a third,
+/// isolated failure). Chasing every future churner is unbounded; there is exactly one measurer, so
+/// the fix belongs here: a global (no constraint key) <c>[NotInParallel]</c> makes both tests in
+/// this class run completely alone - not concurrently with each other, and not with anything else
+/// in the suite - so no future test, whatever it does, can push this measurement over its bound.
+/// Do not parallelise this class, and do not "fix" a future flake here by chasing whatever else
+/// happened to be running at the time - that is this exact same bug recurring a fourth time.
+/// </summary>
+[NotInParallel]
 public class LeakTests
 {
     /// <summary>

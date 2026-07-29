@@ -78,19 +78,21 @@ public class TransactionBeginBeginRaceTests
     private const long MaxVmSizeGrowthBytes = 3L * 8L * 1024 * 1024 * 1024 * 1024;
 
     /// <summary>
-    /// <see cref="NotInParallelAttribute"/>: same reasoning as
-    /// <see cref="TransactionConcurrentDisposalTests"/>'s own use of it - a `dotnet`-subprocess
+    /// No longer <c>[NotInParallel]</c>, for the same reason as
+    /// <see cref="TransactionConcurrentDisposalTests"/>'s own removal of it: a `dotnet`-subprocess
     /// spawn plus 30 full database-open-through-close iterations in the child is enough
     /// process-wide memory churn that, run concurrently with <c>LeakTests</c>'s
     /// <see cref="Environment.WorkingSet"/>-based measurements, intermittently pushed those
-    /// unrelated tests' measured growth past their bound. Observed directly (this test was the
-    /// new contributor): a handful of failures in several consecutive full-suite runs, always
-    /// <c>LeakTests</c>, never this test itself. Isolating this test removes it as a contributor
-    /// without touching the leak tests' bound, which project policy keeps fixed.
+    /// unrelated tests' measured growth past their bound - fixing it here (the churner) rather
+    /// than at <c>LeakTests</c> (the measurer) only held until the next heavy test landed and
+    /// reproduced the same failure via a different combination, which is exactly what happened.
+    /// <c>LeakTests</c> now carries a global <c>[NotInParallel]</c> itself and runs completely
+    /// alone, so this test no longer needs to avoid it specifically and goes back into the general
+    /// parallel pool, gated by the assembly's <see cref="DatabaseParallelLimit"/> like every other
+    /// database-opening test.
     /// </summary>
     [Test]
     [Repeat(2)]
-    [NotInParallel]
     public async Task BeginTransactionAsync_RacingAnotherBeginTransactionAsync_DoesNotLeakOrCrash()
     {
         var harnessPath = Path.Combine(AppContext.BaseDirectory, "LadybugDb.Client.CrashRepro.dll");

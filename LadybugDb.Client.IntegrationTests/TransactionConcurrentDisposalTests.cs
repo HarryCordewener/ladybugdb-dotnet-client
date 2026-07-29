@@ -43,18 +43,19 @@ public class TransactionConcurrentDisposalTests
     /// <c>ROLLBACK</c>s racing on one connection).
     /// </summary>
     /// <remarks>
-    /// <see cref="NotInParallelAttribute"/>: enough churn in this one process (a full
-    /// database-open-through-close lifecycle per iteration) that running it concurrently with
-    /// <c>LeakTests.RepeatedQueries_DoNotGrowProcessMemory</c> - which measures
-    /// <see cref="Environment.WorkingSet"/>, a whole-process metric with no way to scope it to one
-    /// test - intermittently inflated that unrelated test's measured growth past its bound at the
-    /// full 200-iteration count. Observed directly: failed once in several consecutive full-suite
-    /// runs, always exactly this combination, never when either test ran alone. Isolating this
-    /// test removes it as a contributor without touching the leak test's bound, which project
-    /// policy keeps fixed (quarantine a flaky leak test, never raise the number).
+    /// No longer <c>[NotInParallel]</c>. This test used to carry it because enough churn in this
+    /// one process (a full database-open-through-close lifecycle per iteration) intermittently
+    /// inflated <c>LeakTests.RepeatedQueries_DoNotGrowProcessMemory</c>'s
+    /// <see cref="Environment.WorkingSet"/> measurement past its bound when the two ran
+    /// concurrently. That was chasing the churner rather than fixing the measurer - it only held
+    /// until the next heavy test landed and reproduced the same failure via a different
+    /// combination. <c>LeakTests</c> now carries a global <c>[NotInParallel]</c> itself, so it runs
+    /// completely alone regardless of what else is in the suite; this test no longer needs to
+    /// avoid it (or anything else) specifically, and running in the general parallel pool - gated
+    /// by the assembly's <see cref="DatabaseParallelLimit"/> like every other database-opening test
+    /// - is exactly what it was designed for.
     /// </remarks>
     [Test]
-    [NotInParallel]
     public async Task ConcurrentDatabaseAndConnectionDispose_ClosesTransactionExactlyOnce()
     {
         var iterations = Environment.GetEnvironmentVariable("LADYBUG_FULL_CONCURRENCY_STRESS") == "1"
