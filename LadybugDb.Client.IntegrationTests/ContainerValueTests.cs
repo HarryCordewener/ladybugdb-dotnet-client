@@ -57,4 +57,36 @@ public class ContainerValueTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    [Test]
+    public async Task Rel_ExposesLabelEndpointsAndProperties()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
+            await using (var _ = await conn.QueryAsync(
+                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (a:Person)-[k:Knows]->(b:Person) RETURN a, k, b");
+            var row = await r.ReadRowAsync();
+
+            var source = row!.Value.GetValue(0).AsNode();
+            var rel = row.Value.GetValue(1).AsRel();
+            var destination = row.Value.GetValue(2).AsNode();
+
+            await Assert.That(rel.Label).IsEqualTo("Knows");
+            await Assert.That(rel.SourceId).IsEqualTo(source.Id);
+            await Assert.That(rel.DestinationId).IsEqualTo(destination.Id);
+            await Assert.That(rel.Properties["since"].AsInt64()).IsEqualTo(1990L);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

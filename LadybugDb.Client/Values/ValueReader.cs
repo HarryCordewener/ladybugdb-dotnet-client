@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Native;
 
@@ -69,6 +70,7 @@ internal static class ValueReader
             lbug_data_type_id.LBUG_STRUCT => ReadStruct(value, depth),
             lbug_data_type_id.LBUG_MAP => ReadMap(value, depth),
             lbug_data_type_id.LBUG_NODE => ReadNode(value, depth),
+            lbug_data_type_id.LBUG_REL => ReadRel(value, depth),
             _ => new LadybugValue(LadybugType.Unsupported, null),
         };
     }
@@ -345,7 +347,10 @@ internal static class ValueReader
             items[i] = Read((lbug_value*)lease.Pointer, depth + 1);
         }
 
-        return new LadybugValue(LadybugType.List, items);
+        // Wrapped read-only: LadybugValue is a struct copied freely between callers, and AsList()
+        // exposes this array as IReadOnlyList<T>. Without this wrapper a caller could cast back to
+        // LadybugValue[] and mutate the single backing store shared by every copy of this value.
+        return new LadybugValue(LadybugType.List, Array.AsReadOnly(items));
     }
 
     /// <summary>
@@ -376,7 +381,10 @@ internal static class ValueReader
             fields[name] = Read((lbug_value*)lease.Pointer, depth + 1);
         }
 
-        return new LadybugValue(LadybugType.Struct, fields);
+        // Wrapped read-only for the same reason as ReadList: AsStruct() exposes this dictionary as
+        // IReadOnlyDictionary<T>, and without the wrapper a cast back to Dictionary<,> would give
+        // mutable access to the store shared by every copy of this LadybugValue.
+        return new LadybugValue(LadybugType.Struct, new ReadOnlyDictionary<string, LadybugValue>(fields));
     }
 
     /// <summary>
@@ -417,7 +425,8 @@ internal static class ValueReader
             entries[i] = new KeyValuePair<LadybugValue, LadybugValue>(key, mapValue);
         }
 
-        return new LadybugValue(LadybugType.Map, entries);
+        // Wrapped read-only for the same reason as ReadList.
+        return new LadybugValue(LadybugType.Map, Array.AsReadOnly(entries));
     }
 
     /// <summary>
@@ -476,7 +485,87 @@ internal static class ValueReader
             properties[name] = Read((lbug_value*)lease.Pointer, depth + 1);
         }
 
-        return new LadybugValue(LadybugType.Node, new LadybugNode(id, label, properties));
+        // Wrapped read-only for the same reason as ReadStruct: LadybugNode.Properties is public and
+        // must not hand out a mutable Dictionary<,> that every copy of the containing LadybugValue
+        // (and every holder of this LadybugNode) shares.
+        return new LadybugValue(LadybugType.Node,
+            new LadybugNode(id, label, new ReadOnlyDictionary<string, LadybugValue>(properties)));
+    }
+
+    /// <summary>
+    /// Reads a REL value's id, source/destination node ids, label, and properties. Mirrors
+    /// <see cref="ReadNode"/> exactly: every <c>lbug_rel_val_get_*</c> entry point used here shares
+    /// the identical caller-supplied-<c>out_value</c> ownership shape as the <c>lbug_node_val_get_*</c>
+    /// family (re-confirmed against <c>third-party/lbug.h</c> lines 1463-1515 and the generated
+    /// signatures in <c>LbugNative.g.cs</c> for this fix round, not assumed from the Task 3 reading),
+    /// so each result is wrapped in its own owned <see cref="LbugValueHandle"/> and destroyed via
+    /// <c>using</c>. Rel properties are user data exactly like node properties, so they consume the
+    /// same recursion <paramref name="depth"/> budget.
+    /// </summary>
+    private static unsafe LadybugValue ReadRel(lbug_value* value, int depth)
+    {
+        LadybugInternalId id;
+        using (var idHandle = LbugValueHandle.GetRelIdValue(value, out var idState))
+        {
+            if (idState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a relationship's internal id."));
+
+            using var lease = idHandle.Acquire();
+            id = ReadInternalId((lbug_value*)lease.Pointer);
+        }
+
+        LadybugInternalId sourceId;
+        using (var srcHandle = LbugValueHandle.GetRelSrcIdValue(value, out var srcState))
+        {
+            if (srcState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a relationship's source node id."));
+
+            using var lease = srcHandle.Acquire();
+            sourceId = ReadInternalId((lbug_value*)lease.Pointer);
+        }
+
+        LadybugInternalId destinationId;
+        using (var dstHandle = LbugValueHandle.GetRelDstIdValue(value, out var dstState))
+        {
+            if (dstState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a relationship's destination node id."));
+
+            using var lease = dstHandle.Acquire();
+            destinationId = ReadInternalId((lbug_value*)lease.Pointer);
+        }
+
+        string label;
+        using (var labelHandle = LbugValueHandle.GetRelLabelValue(value, out var labelState))
+        {
+            if (labelState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a relationship's label."));
+
+            using var lease = labelHandle.Acquire();
+            label = ReadString((lbug_value*)lease.Pointer).AsString();
+        }
+
+        ulong propertyCount;
+        var sizeState = LbugNative.lbug_rel_val_get_property_size(value, &propertyCount);
+        ThrowIfFailed(sizeState, "rel property count");
+
+        var properties = new Dictionary<string, LadybugValue>();
+        for (ulong i = 0; i < propertyCount; i++)
+        {
+            sbyte* namePtr;
+            var nameState = LbugNative.lbug_rel_val_get_property_name_at(value, i, &namePtr);
+            ThrowIfFailed(nameState, "rel property name");
+            var name = NativeString.TakeOwnership(namePtr);
+
+            using var propertyHandle = LbugValueHandle.GetRelPropertyValueAt(value, i, out var propertyState);
+            if (propertyState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read relationship property '{name}'."));
+
+            using var lease = propertyHandle.Acquire();
+            properties[name] = Read((lbug_value*)lease.Pointer, depth + 1);
+        }
+
+        return new LadybugValue(LadybugType.Rel,
+            new LadybugRel(id, sourceId, destinationId, label, new ReadOnlyDictionary<string, LadybugValue>(properties)));
     }
 
     private static unsafe LadybugInternalId ReadInternalId(lbug_value* value)

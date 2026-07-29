@@ -27,3 +27,36 @@ public sealed class LadybugNode
     /// <summary>This node's properties, keyed by property name.</summary>
     public IReadOnlyDictionary<string, LadybugValue> Properties { get; }
 }
+
+/// <summary>A REL value read from a query result, already fully marshalled into managed memory.</summary>
+public sealed class LadybugRel
+{
+    internal LadybugRel(
+        LadybugInternalId id,
+        LadybugInternalId sourceId,
+        LadybugInternalId destinationId,
+        string label,
+        IReadOnlyDictionary<string, LadybugValue> properties)
+    {
+        Id = id;
+        SourceId = sourceId;
+        DestinationId = destinationId;
+        Label = label;
+        Properties = properties;
+    }
+
+    /// <summary>This relationship's internal id.</summary>
+    public LadybugInternalId Id { get; }
+
+    /// <summary>The internal id of the source node this relationship points from.</summary>
+    public LadybugInternalId SourceId { get; }
+
+    /// <summary>The internal id of the destination node this relationship points to.</summary>
+    public LadybugInternalId DestinationId { get; }
+
+    /// <summary>The relationship table label this relationship belongs to.</summary>
+    public string Label { get; }
+
+    /// <summary>This relationship's properties, keyed by property name.</summary>
+    public IReadOnlyDictionary<string, LadybugValue> Properties { get; }
+}

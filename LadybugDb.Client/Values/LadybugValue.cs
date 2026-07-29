@@ -164,6 +164,14 @@ public readonly struct LadybugValue
         throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Node}.");
     }
 
+    /// <summary>Reads this value as a graph relationship.</summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Rel"/>.</exception>
+    public LadybugRel AsRel()
+    {
+        if (_payload is LadybugRel rel) return rel;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Rel}.");
+    }
+
     private T As<T>(LadybugType expected) where T : struct
     {
         if (Type != expected)

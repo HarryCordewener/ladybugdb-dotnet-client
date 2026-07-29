@@ -240,6 +240,144 @@ internal sealed class LbugValueHandle : LbugStructHandle
         }
     }
 
+    /// <summary>
+    /// Runs <c>lbug_rel_val_get_id_val</c> and takes ownership of the resulting INTERNAL_ID value.
+    /// Same owned <c>out_value</c> reasoning as <see cref="GetNodeIdValue"/> - re-confirmed against
+    /// <c>third-party/lbug.h</c> (lines 1463-1467) and <c>LbugNative.g.cs</c> for this fix round.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRelIdValue(lbug_value* rel, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_rel_val_get_id_val(rel, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>lbug_rel_val_get_src_id_val</c> and takes ownership of the resulting INTERNAL_ID
+    /// value for the relationship's source node. Same owned <c>out_value</c> reasoning as
+    /// <see cref="GetNodeIdValue"/>.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRelSrcIdValue(lbug_value* rel, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_rel_val_get_src_id_val(rel, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>lbug_rel_val_get_dst_id_val</c> and takes ownership of the resulting INTERNAL_ID
+    /// value for the relationship's destination node. Same owned <c>out_value</c> reasoning as
+    /// <see cref="GetNodeIdValue"/>.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRelDstIdValue(lbug_value* rel, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_rel_val_get_dst_id_val(rel, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>lbug_rel_val_get_label_val</c> and takes ownership of the resulting STRING value.
+    /// Same owned <c>out_value</c> reasoning as <see cref="GetNodeLabelValue"/>.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRelLabelValue(lbug_value* rel, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_rel_val_get_label_val(rel, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>lbug_rel_val_get_property_value_at</c> and takes ownership of the resulting
+    /// property value. Same owned <c>out_value</c> reasoning as <see cref="GetNodePropertyValueAt"/>.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRelPropertyValueAt(lbug_value* rel, ulong index, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_rel_val_get_property_value_at(rel, index, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
     protected override unsafe bool ReleaseHandle()
     {
         try
