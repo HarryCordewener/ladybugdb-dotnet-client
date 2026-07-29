@@ -382,4 +382,37 @@ public class DecimalBidirectionalTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    /// <summary>
+    /// Regresses a bypass of the precision > 38 guard above: <c>BigDecimal.Parse(new string('9',
+    /// 38)) * 10</c> keeps its 38-nines <c>Mantissa</c> unchanged and just bumps <c>Exponent</c>
+    /// from 0 to 1 (confirmed directly against <c>ExtendedNumerics.BigDecimal</c>, not assumed),
+    /// so the formatted digit string gains a trailing zero - "999...990", 39 significant digits -
+    /// that <c>DecimalStringOf</c>'s old <c>precision = (uint)digits.Length</c> never counted,
+    /// because <c>digits</c> is built from the mantissa alone and the appended zero lives only in
+    /// <c>text</c>. That let a 39-digit value slip past the <c>precision &gt; 38</c> check above
+    /// and bind a longer digit string than its own reported precision claimed. Before the fix this
+    /// value bound successfully (unbounded/silently-truncated write); after it, this throws exactly
+    /// like <see cref="BoundValue_NeedingMoreThan38Digits_ThrowsBeforeReachingTheEngine"/>'s
+    /// already-covered case, just reached via trailing zeros instead of raw digit count.
+    /// </summary>
+    [Test]
+    public async Task BoundValue_IntegerWithTrailingZerosExceeding38Digits_ThrowsBeforeReachingTheEngine()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            var (db, conn) = await OpenWithColumn(path, "DECIMAL(38,0)");
+            using var _db = db;
+            await using var _conn = conn;
+
+            await using var stmt = await conn.PrepareAsync("CREATE (n:T {id: 1, v: $v})");
+            var tooBig = BigDecimal.Parse(new string('9', 38)) * 10; // 38-nines mantissa, exponent 1 -> 39 significant digits
+
+            var ex = Assert.Throws<LadybugException>(() => stmt.Bind("v", tooBig));
+            await Assert.That(ex).IsNotNull();
+            await Assert.That(ex!.Message).Contains("39");
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

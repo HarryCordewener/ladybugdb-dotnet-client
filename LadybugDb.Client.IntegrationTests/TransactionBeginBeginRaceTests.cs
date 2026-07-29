@@ -95,6 +95,14 @@ public class TransactionBeginBeginRaceTests
     [Repeat(2)]
     public async Task BeginTransactionAsync_RacingAnotherBeginTransactionAsync_DoesNotLeakOrCrash()
     {
+        // The subprocess harness's ReadVmSizeBytes (LadybugDb.Client.CrashRepro/Program.cs) parses
+        // VmSize out of /proc/self/status and returns null anywhere that file doesn't exist -
+        // Linux-only. Off Linux it prints no VMSIZE: lines at all, which would otherwise fail this
+        // test's "vmSizes.Count >= 2" assertion below with a confusing message rather than an
+        // explicit, self-explanatory skip.
+        Skip.When(!OperatingSystem.IsLinux(),
+            "Parses VmSize from /proc/self/status via the CrashRepro subprocess harness - Linux-only.");
+
         var harnessPath = Path.Combine(AppContext.BaseDirectory, "LadybugDb.Client.CrashRepro.dll");
         var basePath = TestDatabase.NewPath();
         try

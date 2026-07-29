@@ -117,12 +117,13 @@ on every call, which matters for any statement run in a loop. It also sidesteps 
 string interpolation, which is both slower (no plan reuse) and a Cypher-injection risk if any bound
 value comes from outside your program.
 
-`LadybugPreparedStatement` has seventeen typed `Bind(name, value)` overloads covering the engine's
-scalar and temporal parameter types — every integer width (signed and unsigned), `bool`, `float`,
-`double`, `string`, `DateOnly`, `TimeSpan` (INTERVAL), `DateTime` (TIMESTAMP), `DateTimeOffset`
-(TIMESTAMP_TZ), `BigDecimal` (DECIMAL, see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below) —
-plus `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the other
-three timestamp precisions, and `BindNull(name)` for a typed NULL. Call `ExecuteAsync()`
+`LadybugPreparedStatement` has 21 binding methods in total. Seventeen are typed `Bind(name, value)`
+overloads covering the engine's scalar and temporal parameter types — every integer width (signed
+and unsigned), `bool`, `float`, `double`, `string`, `DateOnly`, `TimeSpan` (INTERVAL), `DateTime`
+(TIMESTAMP), `DateTimeOffset` (TIMESTAMP_TZ), `BigDecimal` (DECIMAL, see
+[DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below) — plus `BindTimestampSeconds`/
+`BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the other three timestamp precisions,
+and `BindNull(name)` for a typed NULL. Call `ExecuteAsync()`
 to run the statement with whatever values the most recent `Bind` calls set, and get back an ordinary
 `LadybugQueryResult` — read it exactly as described in [Reading results](#reading-results) below.
 Re-binding a subset of parameters and calling `ExecuteAsync()` again reuses every parameter not
@@ -411,9 +412,10 @@ connection, or result used after its own disposal, or after an ancestor's dispos
 ## Disposal and lifetime
 
 `LadybugDatabase` is `IDisposable`; `LadybugConnection`, `LadybugQueryResult`, and
-`LadybugTransaction` are `IAsyncDisposable`. Disposal is safe in any order — it never corrupts
-state or crashes the process — but children should normally be disposed before the database they
-came from:
+`LadybugTransaction` are `IAsyncDisposable`. For transactions opened through `BeginTransactionAsync`
+— the API this section otherwise describes — disposal is safe in any order: it never corrupts state
+or crashes the process. Children should still normally be disposed before the database they came
+from:
 
 ```csharp
 var db = new LadybugDatabase(path);
@@ -430,6 +432,13 @@ await result.DisposeAsync();
 await conn.DisposeAsync();
 db.Dispose();
 ```
+
+**This "never crashes" guarantee is specifically about the managed transaction API.** The raw-Cypher
+escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")` instead of `BeginTransactionAsync`) is not
+covered by anything in this section — see [Transactions](#transactions) above for why disposing a
+database or connection with an uncommitted raw transaction still open aborts the whole process
+instead of throwing a catchable exception. Complete or roll back any such transaction yourself,
+before disposal, if you use that escape hatch.
 
 Disposing a database out from under a still-open connection or result doesn't crash — it throws a
 managed `ObjectDisposedException` on the next call against that connection or result, instead:
@@ -598,7 +607,13 @@ one row per attribute (or a narrow, fixed set of columns) over one row holding a
 600× — for the same data inserted one `CREATE` at a time:
 
 ```csharp
-await using (var _ = await conn.QueryAsync($"COPY Object FROM '{csvPath}'")) { }
+// COPY FROM's source path is a string literal, not a bindable parameter - there is no prepared-
+// statement equivalent for it - so csvPath is interpolated into the Cypher string itself. Escape
+// any single quote it contains (Cypher escapes ' by doubling it to '') before interpolating,
+// exactly as you would for any other string literal built from a path you don't fully control -
+// an unescaped quote breaks the query at best, and changes what statement actually runs at worst.
+var escapedCsvPath = csvPath.Replace("'", "''");
+await using (var _ = await conn.QueryAsync($"COPY Object FROM '{escapedCsvPath}'")) { }
 ```
 
 Row-count scaling itself is healthy once the schema is right: 10× the rows costs only 1.8–2.6×,

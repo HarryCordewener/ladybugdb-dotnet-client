@@ -114,4 +114,48 @@ public class TransactionTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    /// <summary>
+    /// Regresses a fix-round-5 finding: a failed <c>CommitAsync</c>/<c>RollbackAsync</c> used to
+    /// give its completion claim back (<c>Volatile.Write(ref _completed, 0)</c>), re-opening the
+    /// transaction to a concurrent claimant even though the failed native call had already reached
+    /// the engine. Forces a real commit failure without any disposal or concurrency involved: issue
+    /// <c>COMMIT</c> directly through the connection (bypassing the <see cref="LadybugTransaction"/>
+    /// wrapper entirely) to end the engine-side transaction, then call <c>tx.CommitAsync()</c> -
+    /// the wrapper still thinks its transaction is open, so it claims completion and sends a second
+    /// <c>COMMIT</c>, which the engine rejects ("No active transaction for COMMIT"). Before the fix,
+    /// that failure reset <c>_completed</c> to false, so <c>tx.IsCompleted</c> would read
+    /// <see langword="false"/> right after the exception and a further <c>CommitAsync</c>/
+    /// <c>RollbackAsync</c> would attempt yet another native call against a transaction the engine
+    /// already finished, instead of failing fast with <see cref="InvalidOperationException"/>.
+    /// </summary>
+    [Test]
+    public async Task FailedCommit_IsTerminal_NotReclaimable()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+
+            await using var tx = await conn.BeginTransactionAsync();
+            await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+
+            // Ends the engine-side transaction behind the wrapper's back - tx still believes it is
+            // open, so its own CommitAsync below will fail when it tries to COMMIT again.
+            await using (var _ = await conn.QueryAsync("COMMIT")) { }
+
+            await Assert.ThrowsAsync<LadybugException>(async () => await tx.CommitAsync());
+
+            // Terminal: IsCompleted stays true after the failure (the buggy version reset it to
+            // false here), and neither method reattempts a native call against a transaction the
+            // engine already finished - both fail fast with the "already completed" guard instead.
+            await Assert.That(tx.IsCompleted).IsTrue();
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await tx.CommitAsync());
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await tx.RollbackAsync());
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

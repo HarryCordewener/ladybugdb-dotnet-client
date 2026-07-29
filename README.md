@@ -19,12 +19,27 @@ bindings for Python, NodeJS, Rust, Go, Swift, Java, and C/C++, but none for .NET
 
 ## Install
 
-Two packages, both required:
+**Not published yet.** No package is on NuGet (see the status note above), so `dotnet add package`
+won't work today. Until a tagged release ships, build from source instead — see
+[docs/BUILDING.md](docs/BUILDING.md) for the full walkthrough, or the short version:
+
+```console
+git clone https://github.com/HarryCordewener/ladybugdb-dotnet-client.git
+cd ladybugdb-dotnet-client
+bash scripts/fetch-liblbug.sh
+dotnet pack -c Release
+```
+
+That produces the two packages below under each project's `bin/Release`, both required, which you
+can reference locally (e.g. a local NuGet feed, or `dotnet add package ... --source <path>`) or via
+a project reference to `LadybugDb.Client/LadybugDb.Client.csproj`:
 
 | Package | Contents |
 |---|---|
 | `LadybugDb.Client` | The managed client. Zero native binaries. |
 | `LadybugDb.Client.Native` | `liblbug` binaries for six RIDs: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`, `win-arm64`. |
+
+Once a release ships (see [docs/RELEASING.md](docs/RELEASING.md)), this becomes the normal:
 
 ```console
 dotnet add package LadybugDb.Client
@@ -80,7 +95,11 @@ Supported today:
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
 - Safe disposal ordering: disposing a database out from under a still-open connection, result, or
-  transaction throws `ObjectDisposedException` (or completes cleanly), never crashes the process.
+  managed transaction (one opened via `BeginTransactionAsync`) throws `ObjectDisposedException` (or
+  completes cleanly), never crashes the process. This guarantee does not extend to the raw-Cypher
+  escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")`) — see
+  [docs/USAGE.md](docs/USAGE.md#transactions) for why disposing with an uncommitted raw transaction
+  can abort the process instead of throwing.
 - Transactions (`LadybugConnection.BeginTransactionAsync` / `LadybugTransaction`), a thin,
   hard-to-misuse wrapper over `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` - the C API has no native
   transaction primitive, so that is genuinely all this is under the hood. Disposing a transaction
@@ -91,11 +110,12 @@ Supported today:
   conflicts climbing into the tens of thousands per run with it off). See
   [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the numbers and
   the retry pattern still needed when it's off (the default).
-- Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`), with
-  seventeen typed `Bind` overloads covering the engine's scalar/temporal types plus `BindNull`, so
-  a statement executed repeatedly with different values only gets planned once. Includes a
-  `BigDecimal` overload (`ExtendedNumerics.BigDecimal`) for lossless DECIMAL binding at any
-  precision the engine supports.
+- Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`) — 21
+  binding methods in total: seventeen typed `Bind` overloads covering the engine's scalar/temporal
+  types (including a `BigDecimal` overload, via `ExtendedNumerics.BigDecimal`, for lossless DECIMAL
+  binding at any precision the engine supports), `BindTimestampSeconds`/`BindTimestampMilliseconds`/
+  `BindTimestampNanoseconds` for the three non-default timestamp precisions, and `BindNull` for a
+  typed NULL — so a statement executed repeatedly with different values only gets planned once.
 
 No known functional gaps remain in the API surface listed above. See
 [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for smaller, reviewed

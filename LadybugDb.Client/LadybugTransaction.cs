@@ -114,6 +114,20 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// <see cref="DisposeAsync"/>/<see cref="EnsureClosedForDispose"/> that won the race to close
     /// it out first; see <see cref="_completed"/>.
     /// </exception>
+    /// <remarks>
+    /// A failed <c>COMMIT</c> is terminal, not retryable: the claim <see cref="TryClaimCompletion"/>
+    /// won above is never given back, regardless of whether the native call below throws. An earlier
+    /// version did give it back on failure, specifically so a caller could retry or fall back to
+    /// <see cref="RollbackAsync"/> - but that re-opened the exact race this type exists to close: a
+    /// concurrent <see cref="DisposeAsync"/>/<see cref="EnsureClosedForDispose"/> could then win the
+    /// now-reopened claim, issue its own native call against the same connection while this method's
+    /// caller was still observing the first failure, and clear <see cref="_completed"/> out from
+    /// under a transaction whose completion attempt had already reached the engine. A <c>COMMIT</c>
+    /// that reached the engine and failed leaves the engine's own transaction state not something
+    /// this wrapper can safely guess at; treating it as still-open is what let two native calls race
+    /// the same connection. Callers that need to retry must open a new transaction via
+    /// <see cref="LadybugConnection.BeginTransactionAsync"/>.
+    /// </remarks>
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         if (!TryClaimCompletion()) throw AlreadyCompleted();
@@ -124,17 +138,13 @@ public sealed class LadybugTransaction : IAsyncDisposable
             {
             }
         }
-        catch
+        finally
         {
-            // The claim above is only valid once the commit actually happens - give it back so
-            // a caller can retry or fall back to RollbackAsync, matching the pre-existing
-            // behaviour of only marking this transaction completed after COMMIT/ROLLBACK
-            // actually succeeded.
-            Volatile.Write(ref _completed, 0);
-            throw;
+            // Runs whether the COMMIT above succeeded or threw - see the remarks above for why a
+            // failed attempt must still be treated as this transaction's final word, exactly like
+            // DisposeAsync/EnsureClosedForDispose already do.
+            _connection.OnTransactionCompleted(this);
         }
-
-        _connection.OnTransactionCompleted(this);
     }
 
     /// <summary>Rolls back the transaction by issuing <c>ROLLBACK</c>.</summary>
@@ -144,6 +154,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// <see cref="DisposeAsync"/>/<see cref="EnsureClosedForDispose"/> that won the race to close
     /// it out first; see <see cref="_completed"/>.
     /// </exception>
+    /// <remarks>A failed <c>ROLLBACK</c> is terminal too - see <see cref="CommitAsync"/>'s remarks, which apply identically here.</remarks>
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
         if (!TryClaimCompletion()) throw AlreadyCompleted();
@@ -154,14 +165,11 @@ public sealed class LadybugTransaction : IAsyncDisposable
             {
             }
         }
-        catch
+        finally
         {
-            // See CommitAsync's identical catch: give the claim back so a retry is possible.
-            Volatile.Write(ref _completed, 0);
-            throw;
+            // See CommitAsync's identical finally/remarks.
+            _connection.OnTransactionCompleted(this);
         }
-
-        _connection.OnTransactionCompleted(this);
     }
 
     private static InvalidOperationException AlreadyCompleted() => new(

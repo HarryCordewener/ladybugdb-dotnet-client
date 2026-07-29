@@ -141,10 +141,16 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     }
 
     /// <summary>Binds a <c>TIMESTAMP</c> (microsecond) parameter.</summary>
-    /// <remarks>Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_t.value</c> is microseconds since 1970-01-01T00:00:00Z.</remarks>
+    /// <remarks>
+    /// Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_t.value</c> is microseconds
+    /// since 1970-01-01T00:00:00Z. <paramref name="value"/> is normalized to UTC first - see
+    /// <see cref="NormalizeToUtcTicks"/> - so a <see cref="DateTimeKind.Local"/> value binds the
+    /// same instant it represents, not its raw wall-clock reading; <see cref="DateTimeKind.Unspecified"/>
+    /// is assumed to already be UTC.
+    /// </remarks>
     public unsafe void Bind(string name, DateTime value)
     {
-        var micros = ToMicros(name, value.Ticks);
+        var micros = ToMicros(name, NormalizeToUtcTicks(value));
         BindScalar(name, new lbug_timestamp_t { value = micros }, LbugNative.lbug_prepared_statement_bind_timestamp);
     }
 
@@ -162,13 +168,19 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     }
 
     /// <summary>Binds a <c>TIMESTAMP_SEC</c> parameter.</summary>
-    /// <remarks>Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_sec_t.value</c> is seconds since 1970-01-01T00:00:00Z.</remarks>
+    /// <remarks>
+    /// Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_sec_t.value</c> is seconds
+    /// since 1970-01-01T00:00:00Z. <paramref name="value"/> is normalized to UTC first - see
+    /// <see cref="NormalizeToUtcTicks"/> - so a <see cref="DateTimeKind.Local"/> value binds the
+    /// same instant it represents, not its raw wall-clock reading; <see cref="DateTimeKind.Unspecified"/>
+    /// is assumed to already be UTC.
+    /// </remarks>
     public unsafe void BindTimestampSeconds(string name, DateTime value)
     {
         long seconds;
         try
         {
-            seconds = checked((value.Ticks - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerSecond);
+            seconds = checked((NormalizeToUtcTicks(value) - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerSecond);
         }
         catch (OverflowException ex)
         {
@@ -178,13 +190,19 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     }
 
     /// <summary>Binds a <c>TIMESTAMP_MS</c> parameter.</summary>
-    /// <remarks>Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_ms_t.value</c> is milliseconds since 1970-01-01T00:00:00Z.</remarks>
+    /// <remarks>
+    /// Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_ms_t.value</c> is
+    /// milliseconds since 1970-01-01T00:00:00Z. <paramref name="value"/> is normalized to UTC first
+    /// - see <see cref="NormalizeToUtcTicks"/> - so a <see cref="DateTimeKind.Local"/> value binds
+    /// the same instant it represents, not its raw wall-clock reading;
+    /// <see cref="DateTimeKind.Unspecified"/> is assumed to already be UTC.
+    /// </remarks>
     public unsafe void BindTimestampMilliseconds(string name, DateTime value)
     {
         long millis;
         try
         {
-            millis = checked((value.Ticks - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerMillisecond);
+            millis = checked((NormalizeToUtcTicks(value) - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerMillisecond);
         }
         catch (OverflowException ex)
         {
@@ -198,13 +216,16 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// Inverts <see cref="ValueReader"/>'s read side: <c>lbug_timestamp_ns_t.value</c> is
     /// nanoseconds since 1970-01-01T00:00:00Z; a <see cref="DateTime"/> tick is 100ns, so this is
     /// exact (no truncation) unlike the microsecond and lower-precision binds above.
+    /// <paramref name="value"/> is normalized to UTC first - see <see cref="NormalizeToUtcTicks"/> -
+    /// so a <see cref="DateTimeKind.Local"/> value binds the same instant it represents, not its raw
+    /// wall-clock reading; <see cref="DateTimeKind.Unspecified"/> is assumed to already be UTC.
     /// </remarks>
     public unsafe void BindTimestampNanoseconds(string name, DateTime value)
     {
         long nanos;
         try
         {
-            nanos = checked((value.Ticks - DateTime.UnixEpoch.Ticks) * 100);
+            nanos = checked((NormalizeToUtcTicks(value) - DateTime.UnixEpoch.Ticks) * 100);
         }
         catch (OverflowException ex)
         {
@@ -360,7 +381,15 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
             scale = (uint)fractionDigits;
         }
 
-        precision = (uint)digits.Length;
+        // Precision is the significant-digit count of the formatted text actually being sent
+        // (excluding the sign, added below, and the decimal point) - not digits.Length, which
+        // undercounts whenever Exponent >= 0 appended trailing zeros text carries but the mantissa
+        // string never did (e.g. mantissa "999...9" (38 nines), exponent 1 -> text "999...990",
+        // 39 significant digits, but digits.Length is still 38). Using digits.Length there let a
+        // 39-digit value slip past the precision > 38 guard below and bind a longer digit string
+        // than its own reported precision claimed.
+        var decimalPointIndex = text.IndexOf('.');
+        precision = (uint)(decimalPointIndex >= 0 ? text.Length - 1 : text.Length);
         return negative ? "-" + text : text;
     }
 
@@ -469,6 +498,25 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
             Marshal.FreeCoTaskMem(utf8Name);
         }
     }
+
+    /// <summary>
+    /// Normalizes <paramref name="value"/>'s ticks to UTC before any of the four TIMESTAMP* binds
+    /// (<see cref="Bind(string, DateTime)"/>, <see cref="BindTimestampSeconds"/>,
+    /// <see cref="BindTimestampMilliseconds"/>, <see cref="BindTimestampNanoseconds"/>) convert them
+    /// to engine units - one shared missing normalization step, not four independent bugs.
+    /// <see cref="DateTimeKind.Local"/> is converted via <see cref="DateTime.ToUniversalTime"/> so
+    /// the bound value represents the same <em>instant</em> <paramref name="value"/> does, not its
+    /// raw wall-clock reading - matching the read side (<see cref="ValueReader"/>), which always
+    /// returns <see cref="DateTimeKind.Utc"/>. Without this, a <see cref="DateTimeKind.Local"/>
+    /// value's wall-clock reading was persisted as if it were already UTC, silently shifting the
+    /// represented instant by the zone's UTC offset on every round trip.
+    /// <see cref="DateTimeKind.Unspecified"/> is assumed to already be UTC - its
+    /// <see cref="DateTime.Ticks"/> pass through unchanged, exactly like <see cref="DateTimeKind.Utc"/>
+    /// itself - because <see cref="DateTime.ToUniversalTime"/> treats Unspecified as local (not
+    /// UTC) and would apply an unwanted shift here if called unconditionally.
+    /// </summary>
+    private static long NormalizeToUtcTicks(DateTime value) =>
+        value.Kind == DateTimeKind.Local ? value.ToUniversalTime().Ticks : value.Ticks;
 
     private long ToMicros(string paramName, long ticksSinceDotNetEpoch)
     {

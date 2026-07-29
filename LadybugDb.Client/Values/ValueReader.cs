@@ -327,9 +327,15 @@ internal static class ValueReader
         {
             try
             {
-                var bytes = new byte[length];
-                if (length > 0)
-                    new ReadOnlySpan<byte>(raw, checked((int)length)).CopyTo(bytes);
+                // The checked cast runs BEFORE the allocation, not after: an over-large blob (length
+                // > int.MaxValue, which byte[] cannot index anyway) must throw the cheap, immediate
+                // OverflowException here, not attempt a multi-gigabyte `new byte[length]` first and
+                // let that fail with OutOfMemoryException instead - a much less specific error for
+                // the same fundamentally unrepresentable input.
+                var count = checked((int)length);
+                var bytes = new byte[count];
+                if (count > 0)
+                    new ReadOnlySpan<byte>(raw, count).CopyTo(bytes);
                 return new LadybugValue(LadybugType.Blob, bytes);
             }
             catch (OverflowException ex)

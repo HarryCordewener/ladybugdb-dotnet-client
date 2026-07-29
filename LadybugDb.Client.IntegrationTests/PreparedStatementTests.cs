@@ -167,6 +167,52 @@ public class PreparedStatementTests
         finally { TestDatabase.Cleanup(path); }
     }
 
+    /// <summary>
+    /// Regresses the fix for all four TIMESTAMP* binds ignoring <see cref="DateTime.Kind"/>: a
+    /// <see cref="DateTimeKind.Local"/> value used to be persisted as if its raw wall-clock reading
+    /// were already UTC, silently shifting the represented instant by this host's UTC offset. Binds
+    /// the same <see cref="DateTimeKind.Local"/> value through all four TIMESTAMP* precisions and
+    /// asserts each reads back as the same <em>instant</em> (<c>local.ToUniversalTime()</c>) - the
+    /// read side always reports <see cref="DateTimeKind.Utc"/>, so comparing against the raw local
+    /// value directly would only pass by coincidence on a host whose local zone happens to be UTC.
+    /// Zero milliseconds keeps every precision down to TIMESTAMP_SEC's whole seconds exact, so nothing
+    /// here is obscured by truncation noise unrelated to the Kind bug this covers.
+    /// </summary>
+    [Test]
+    public async Task LocalKindDateTime_RoundTripsToTheSameInstant_AcrossAllFourTimestampBinds()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE L(id INT64, ts TIMESTAMP, tssec TIMESTAMP_SEC, " +
+                "tsms TIMESTAMP_MS, tsns TIMESTAMP_NS, PRIMARY KEY(id))")) { }
+
+            var local = DateTime.SpecifyKind(new DateTime(2026, 7, 28, 12, 34, 56), DateTimeKind.Local);
+            var expectedInstant = local.ToUniversalTime();
+
+            await using var stmt = await conn.PrepareAsync(
+                "CREATE (n:L {id: 1, ts: $ts, tssec: $tssec, tsms: $tsms, tsns: $tsns})");
+            stmt.Bind("ts", local);
+            stmt.BindTimestampSeconds("tssec", local);
+            stmt.BindTimestampMilliseconds("tsms", local);
+            stmt.BindTimestampNanoseconds("tsns", local);
+            await using (var _ = await stmt.ExecuteAsync()) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:L) RETURN n.ts, n.tssec, n.tsms, n.tsns");
+            await foreach (var row in r)
+            {
+                await Assert.That(row.GetValue(0).AsDateTime()).IsEqualTo(expectedInstant);
+                await Assert.That(row.GetValue(1).AsDateTime()).IsEqualTo(expectedInstant);
+                await Assert.That(row.GetValue(2).AsDateTime()).IsEqualTo(expectedInstant);
+                await Assert.That(row.GetValue(3).AsDateTime()).IsEqualTo(expectedInstant);
+            }
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
     [Test]
     public async Task BindNull_BindsATypedNullValue()
     {
