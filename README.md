@@ -93,8 +93,10 @@ Supported today:
   [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)). `UNION` and `POINTER` have no
   dedicated typed accessor, but read as `LadybugType.Unsupported` with `AsString()` returning the
   engine's own string rendering rather than throwing — see
-  [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown — columns addressable by
-  position or name, and chained multi-statement results walked via `NextResultAsync()`.
+  [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown, and
+  [docs/USAGE.md](docs/USAGE.md#union-and-pointer-is-asstring-enough) for the empirical case that a
+  typed `AsUnion()` accessor would still be worth adding — columns addressable by position or name,
+  and chained multi-statement results walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
 - Safe disposal ordering: disposing a database out from under a still-open connection, result, or

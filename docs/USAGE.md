@@ -8,10 +8,15 @@ real engine while this guide was written.
 - [Connections](#connections)
 - [Executing Cypher](#executing-cypher)
 - [Prepared statements](#prepared-statements)
+  - [Bind method reference](#bind-method-reference)
 - [Reading results](#reading-results)
+  - [LadybugRow: columns](#ladybugrow-columns)
+  - [LadybugValue: accessor reference](#ladybugvalue-accessor-reference)
   - [Type coverage](#type-coverage)
   - [INT128 and UUID](#int128-and-uuid)
   - [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths)
+  - [Graph values: LadybugNode, LadybugRel, LadybugPath, LadybugInternalId](#graph-values-ladybugnode-ladybugrel-ladybugpath-ladybuginternalid)
+  - [UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough)
 - [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
@@ -20,6 +25,14 @@ real engine while this guide was written.
 - [What's deferred](#whats-deferred)
 
 ## Opening and configuring a database
+
+`LadybugDatabase` member reference:
+
+| Member | Description |
+|---|---|
+| `LadybugDatabase(string path, LadybugConfig? config = null)` | Opens (creating if necessary) the database directory at `path`. Throws `LadybugException` if the engine fails to open it, `ArgumentException` if `path` is null/whitespace. |
+| `ConnectAsync(CancellationToken = default)` | Opens a `LadybugConnection`. Multiple connections may share one database. |
+| `Dispose()` | Closes the database - see [Disposal and lifetime](#disposal-and-lifetime) for the full "closed for new work immediately, destroyed once nothing else still needs it" contract. |
 
 ```csharp
 using LadybugDb.Client;
@@ -58,6 +71,15 @@ using var db = new LadybugDatabase("./mydb", config);
 | `EnableMultiWrites` | `bool` | `false` | Maps to the engine's `enable_multi_writes` setting. Measured to genuinely lift LadybugDB's one-write-transaction-at-a-time restriction — see [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint) for the numbers. |
 
 ## Connections
+
+`LadybugConnection` member reference:
+
+| Member | Description |
+|---|---|
+| `QueryAsync(string cypher, CancellationToken = default)` | Executes a Cypher statement, returns a `LadybugQueryResult`. See [Executing Cypher](#executing-cypher). |
+| `PrepareAsync(string cypher, CancellationToken = default)` | Compiles a parameterized Cypher statement, returns a `LadybugPreparedStatement`. See [Prepared statements](#prepared-statements). |
+| `BeginTransactionAsync(CancellationToken = default)` | Issues `BEGIN TRANSACTION`, returns a `LadybugTransaction`. See [Transactions](#transactions). |
+| `DisposeAsync()` | Closes the connection. Safe even if the parent database was disposed first. |
 
 ```csharp
 await using var conn = await db.ConnectAsync();
@@ -160,6 +182,52 @@ code to avoid (e.g. by not doing that), not something this client can resolve on
 need a specific value in a specific execution, don't call `Bind` and `ExecuteAsync` for the same
 statement concurrently from different threads.
 
+### Bind method reference
+
+All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
+
+| Method | Cypher parameter type | Notes |
+|---|---|---|
+| `Bind(string, bool)` | `BOOL` | |
+| `Bind(string, sbyte)` | `INT8` | |
+| `Bind(string, short)` | `INT16` | |
+| `Bind(string, int)` | `INT32` | |
+| `Bind(string, long)` | `INT64` | |
+| `Bind(string, byte)` | `UINT8` | |
+| `Bind(string, ushort)` | `UINT16` | |
+| `Bind(string, uint)` | `UINT32` | |
+| `Bind(string, ulong)` | `UINT64` | |
+| `Bind(string, float)` | `FLOAT` | |
+| `Bind(string, double)` | `DOUBLE` | |
+| `Bind(string, string)` | `STRING` | |
+| `Bind(string, DateOnly)` | `DATE` | |
+| `Bind(string, TimeSpan)` | `INTERVAL` | Built via the engine's own `lbug_interval_from_difftime`. |
+| `Bind(string, DateTime)` | `TIMESTAMP` (microsecond) | `Local` normalized to UTC first; `Unspecified` assumed already UTC. |
+| `Bind(string, DateTimeOffset)` | `TIMESTAMP_TZ` | Uses `UtcTicks`; the engine does not retain a distinct source offset. |
+| `BindTimestampSeconds(string, DateTime)` | `TIMESTAMP_SEC` | Same UTC normalization as `Bind(string, DateTime)`. |
+| `BindTimestampMilliseconds(string, DateTime)` | `TIMESTAMP_MS` | Same UTC normalization. |
+| `BindTimestampNanoseconds(string, DateTime)` | `TIMESTAMP_NS` | Exact - a `DateTime` tick is 100ns, no truncation. |
+| `Bind(string, Guid)` | `UUID` | Bound via the value's string form, like `AsGuid()` reads it. |
+| `Bind(string, Int128)` | `INT128` | Split into a blittable `{low,high}` pair; `Int128` itself never crosses the native boundary. |
+| `Bind(string, BigDecimal)` | `DECIMAL` | See [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below - lossless, all 38 digits. |
+| `BindNull(string)` | typed `NULL` | Binds a `NULL` of the parameter's own type. |
+| `ExecuteAsync(CancellationToken = default)` | - | Runs the statement with the currently bound values; may be called more than once. |
+| `DisposeAsync()` | - | Destroys the prepared statement. Safe even if the parent connection/database was disposed first. |
+
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Multi(id INT64, flag BOOL, big INT128, tag UUID, note STRING, PRIMARY KEY(id))")) { }
+
+await using var stmt = await conn.PrepareAsync(
+    "CREATE (n:Multi {id: $id, flag: $flag, big: $big, tag: $tag, note: $note})");
+stmt.Bind("id", 1L);
+stmt.Bind("flag", true);
+stmt.Bind("big", Int128.MaxValue);
+stmt.Bind("tag", Guid.NewGuid());
+stmt.BindNull("note");
+await using (var _ = await stmt.ExecuteAsync()) { }
+```
+
 ## Reading results
 
 ```csharp
@@ -175,6 +243,15 @@ await foreach (var row in result)
 way to read a result — each iteration advances one row. A `LadybugRow` is fully marshalled into
 managed memory the moment it's yielded; nothing in it holds a native pointer, so it's safe to keep
 around after the enumerator moves past it.
+
+`LadybugQueryResult` member reference (beyond the `IAsyncEnumerable<LadybugRow>` it implements):
+
+| Member | Description |
+|---|---|
+| `GetAsyncEnumerator(CancellationToken = default)` | What `await foreach` calls under the hood. Single-pass - see below. |
+| `HasNext` | `true` if at least one more row is available, without advancing. |
+| `NextResultAsync(CancellationToken = default)` | Advances to the next statement's result in a multi-statement script. See below. |
+| `DisposeAsync()` | Closes the result. Safe even if the parent database was disposed first. |
 
 **A result is single-pass.** There is one native cursor behind a result, not one per enumerator,
 so calling `GetAsyncEnumerator()` (what `await foreach` does under the hood) a second time throws
@@ -194,34 +271,160 @@ row.GetColumnName(0)            // the column's name (an alias, if the Cypher us
 row["label"]                    // by name
 ```
 
-Every value type the engine can return marshals to a typed `LadybugValue` — `AsInt64()`,
-`AsString()`, `AsBoolean()`, `AsDateTime()`, `AsList()`, `AsNode()`, `AsInternalId()`, and so on.
-Call the accessor matching `row.GetValue(i).Type`; calling the wrong one throws
-`InvalidOperationException`. See [Type coverage](#type-coverage) below for the precise list.
+### LadybugRow: columns
+
+`LadybugRow` is a `readonly struct` returned by `LadybugQueryResult`'s enumerator. Full member reference:
+
+| Member | Description |
+|---|---|
+| `ColumnCount` | Number of columns in this row. `0` for `default(LadybugRow)` rather than throwing. |
+| `GetValue(int index)` | The value at `index`. Throws `IndexOutOfRangeException` if out of range. |
+| `GetColumnName(int index)` | The column's name at `index` (an alias, if the Cypher used `AS`). |
+| `this[string columnName]` | The value of the column named `columnName`. Throws `ArgumentException` if no column has that name; resolves to the first match if more than one column shares a name (e.g. `RETURN n.a AS x, n.b AS x` - the same "leftmost wins" rule `System.Data`'s `DataRow[string]` uses). |
+| `ToString()` | `{col: value, ...}` rendering for debugger/diagnostic output. `default(LadybugRow)` renders as `{}`. |
+
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+await using (var _ = await conn.QueryAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+
+await using var r = await conn.QueryAsync("MATCH (o:Object) RETURN o.dbref, o.name AS label");
+await using var e = r.GetAsyncEnumerator();
+await e.MoveNextAsync();
+var row = e.Current;
+
+Console.WriteLine(row.ColumnCount);            // 2
+Console.WriteLine(row.GetColumnName(1));        // label
+Console.WriteLine(row["label"].AsString());     // Limbo
+Console.WriteLine(row);                         // {o.dbref: 42, label: Limbo}
+```
+
+A `LadybugRow` you declare directly (e.g. `default(LadybugRow)`, or as an uninitialized field)
+instead of obtaining from a query result carries no columns: `ColumnCount` reads `0` and
+`ToString()` reads `"{}"`, but `GetValue`/`GetColumnName`/`this[string]` throw
+`InvalidOperationException` rather than silently returning nothing - `LadybugQueryResult`'s own
+enumerator never hands one out, so reaching this is always a sign of declaring a `LadybugRow`
+outside the normal path.
+
+### LadybugValue: accessor reference
+
+`LadybugValue` is a `readonly struct`. Every value type the engine can return maps to exactly one
+`As*` accessor; calling any accessor other than the one matching `Type` throws
+`InvalidOperationException`.
+
+| Accessor | `LadybugType` | .NET type |
+|---|---|---|
+| `AsBoolean()` | `Boolean` | `bool` |
+| `AsSByte()` | `Int8` | `sbyte` |
+| `AsInt16()` | `Int16` | `short` |
+| `AsInt32()` | `Int32` | `int` |
+| `AsInt64()` | `Int64` | `long` |
+| `AsByte()` | `UInt8` | `byte` |
+| `AsUInt16()` | `UInt16` | `ushort` |
+| `AsUInt32()` | `UInt32` | `uint` |
+| `AsUInt64()` | `UInt64` | `ulong` |
+| `AsInt128()` | `Int128` | `System.Int128` |
+| `AsSingle()` | `Single` | `float` |
+| `AsDouble()` | `Double` | `double` |
+| `AsDecimal()` | `Decimal` | `decimal` (throws beyond ~28-29 significant digits) |
+| `AsBigDecimal()` | `Decimal` | `ExtendedNumerics.BigDecimal` (always lossless, all 38 digits) |
+| `AsString()` | `String`, plus **any** type whose payload happens to be a string (currently only `Unsupported` - see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
+| `AsBlob()` | `Blob` | `byte[]` (a fresh copy every call) |
+| `AsGuid()` | `Uuid` | `Guid` |
+| `AsDateOnly()` | `Date` | `DateOnly` |
+| `AsDateTime()` | `Timestamp` | `DateTime` (always UTC) |
+| `AsDateTimeOffset()` | `TimestampTz` | `DateTimeOffset` (offset always `TimeSpan.Zero`) |
+| `AsTimeSpan()` | `Interval` | `TimeSpan` (lossy - see below) |
+| `AsList()` | `List` | `IReadOnlyList<LadybugValue>` |
+| `AsStruct()` | `Struct` | `IReadOnlyDictionary<string, LadybugValue>` |
+| `AsMap()` | `Map` | `IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>>` |
+| `AsNode()` | `Node` | `LadybugNode` |
+| `AsRel()` | `Rel` | `LadybugRel` |
+| `AsPath()` | `Path` | `LadybugPath` |
+| `AsInternalId()` | `InternalId` | `LadybugInternalId` |
+
+Beyond the accessors:
+
+| Member | Description |
+|---|---|
+| `Type` | The `LadybugType` this value was read as. |
+| `IsNull` | `true` if `Type == LadybugType.Null`. |
+| `Equals(LadybugValue)` / `Equals(object?)` | Structural equality: same `Type` and an equal payload, recursing element-by-element into containers (`List`/`Struct`/`Map`/`Node`/`Rel`/`Path`) rather than comparing references. |
+| `GetHashCode()` | Consistent with `Equals`, recursing the same way. |
+| `ToString()` | A human-readable rendering (the payload's natural form, or the type name for `null`), for debugger/diagnostic output - not for parsing. |
+
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Flags(id INT64, active BOOL, tags STRING[], PRIMARY KEY(id))")) { }
+await using (var _ = await conn.QueryAsync(
+    "CREATE (n:Flags {id: 1, active: true, tags: ['a', 'b']})")) { }
+
+await using var r = await conn.QueryAsync("MATCH (n:Flags) RETURN n.active, n.tags");
+await using var e = r.GetAsyncEnumerator();
+await e.MoveNextAsync();
+var row = e.Current;
+
+var active = row.GetValue(0);
+Console.WriteLine($"{active.Type} {active.AsBoolean()}"); // Boolean True
+
+var tags = row.GetValue(1);
+Console.WriteLine(tags.Type);              // List
+Console.WriteLine(tags);                   // [a, b]
+Console.WriteLine(tags.AsList().Count);    // 2
+
+try
+{
+    active.AsInt64(); // wrong accessor for a Boolean value
+}
+catch (InvalidOperationException ex)
+{
+    Console.WriteLine(ex.Message); // Value is Boolean, not Int64.
+}
+
+var seen = new HashSet<LadybugValue>(); // uses Equals/GetHashCode
+seen.Add(tags);
+Console.WriteLine(seen.Contains(tags)); // True - structural, not reference, equality
+```
 
 ### Type coverage
 
-No LadybugDB value type is unreadable. Covered, each reading as its own `LadybugType`/accessor pair:
+No LadybugDB value type is unreadable. Every `LadybugType` member, the engine type(s) it covers, and its accessor:
 
-- **Scalars:** `BOOL`, every signed/unsigned integer width (`INT8`…`INT64`, `UINT8`…`UINT64`),
-  `INT128` (`AsInt128()`, see [INT128 and UUID](#int128-and-uuid) below), `FLOAT`, `DOUBLE`,
-  `STRING`, `BLOB`, `UUID` (`AsGuid()`), `DECIMAL` (see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal)
-  below).
-- **Temporal:** `DATE`, `TIMESTAMP` (and its `_SEC`/`_MS`/`_NS` variants, all normalized to one
-  `DateTime` representation), `TIMESTAMP_TZ`, `INTERVAL` (see the lossy-conversion note above).
-- **Containers:** `LIST`/`ARRAY` (`AsList()`), `STRUCT` (`AsStruct()`), `MAP` (`AsMap()`).
-- **Graph:** `NODE` (`AsNode()`), `REL` (`AsRel()`), `RECURSIVE_REL` (`AsPath()`, a variable-length
-  path match — see [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths)
-  below), and `INTERNAL_ID` (`AsInternalId()`) — the last of these is what a bare `RETURN id(n)`
-  produces, distinct from the `Id` property already on `AsNode()`/`AsRel()`'s own result.
+| `LadybugType` | Engine type(s) | Accessor |
+|---|---|---|
+| `Null` | `NULL` | `IsNull` (no `As*` call needed) |
+| `Boolean` | `BOOL` | `AsBoolean()` |
+| `Int8` | `INT8` | `AsSByte()` |
+| `Int16` | `INT16` | `AsInt16()` |
+| `Int32` | `INT32` | `AsInt32()` |
+| `Int64` | `INT64`, `SERIAL` | `AsInt64()` |
+| `UInt8` | `UINT8` | `AsByte()` |
+| `UInt16` | `UINT16` | `AsUInt16()` |
+| `UInt32` | `UINT32` | `AsUInt32()` |
+| `UInt64` | `UINT64` | `AsUInt64()` |
+| `Int128` | `INT128` | `AsInt128()` — see [INT128 and UUID](#int128-and-uuid) below |
+| `Single` | `FLOAT` | `AsSingle()` |
+| `Double` | `DOUBLE` | `AsDouble()` |
+| `Decimal` | `DECIMAL` | `AsDecimal()` / `AsBigDecimal()` — see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below |
+| `String` | `STRING` | `AsString()` |
+| `Blob` | `BLOB` | `AsBlob()` |
+| `Uuid` | `UUID` | `AsGuid()` — see [INT128 and UUID](#int128-and-uuid) below |
+| `Date` | `DATE` | `AsDateOnly()` |
+| `Timestamp` | `TIMESTAMP`, `TIMESTAMP_SEC`, `TIMESTAMP_MS`, `TIMESTAMP_NS` (all normalized to one `DateTime` representation) | `AsDateTime()` |
+| `TimestampTz` | `TIMESTAMP_TZ` | `AsDateTimeOffset()` |
+| `Interval` | `INTERVAL` | `AsTimeSpan()` (lossy — see the note above) |
+| `List` | `LIST`, `ARRAY` | `AsList()` |
+| `Struct` | `STRUCT` | `AsStruct()` |
+| `Map` | `MAP` | `AsMap()` |
+| `Node` | `NODE` | `AsNode()` |
+| `Rel` | `REL` | `AsRel()` |
+| `Path` | `RECURSIVE_REL` (a variable-length path match) | `AsPath()` — see [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths) below |
+| `InternalId` | `INTERNAL_ID` | `AsInternalId()` — what a bare `RETURN id(n)`/`id(r)` produces, distinct from the `Id` property already on `AsNode()`/`AsRel()`'s own result |
+| `Unsupported` | `UNION`, `POINTER` (no dedicated typed accessor) | `AsString()` only — see [UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough) below |
 
-**`UNION` and `POINTER` have no dedicated typed accessor**, but are still readable rather than a
-dead end: both report `LadybugType.Unsupported`, and — unlike every other type on this
-list — `AsString()` on that type returns the engine's own generic string rendering of the value
-(via `lbug_value_to_string`) instead of throwing. In practice you are only likely to see this on
-`UNION`: `POINTER` has no schema syntax that reaches it through ordinary Cypher at all —
-`CREATE NODE TABLE t(v POINTER, ...)` is rejected outright ("POINTER is neither an internal type
-nor a user defined type"), confirmed empirically against the real engine, not assumed.
+Every accessor other than the one matching a given value's `Type` throws `InvalidOperationException`
+— see [LadybugValue: accessor reference](#ladybugvalue-accessor-reference) above for the full list.
 
 ### INT128 and UUID
 
@@ -274,6 +477,156 @@ await using (var r = await conn.QueryAsync(
 `LadybugPath.Nodes`/`.Relationships` are ordered start to end, and each element is a plain
 `LadybugNode`/`LadybugRel` — marshalled exactly like a `NODE`/`REL` value returned on its own, so
 node/relationship properties are read the same way either way.
+
+### Graph values: LadybugNode, LadybugRel, LadybugPath, LadybugInternalId
+
+Full member reference for the four graph value types:
+
+| Type | Member | .NET type | Description |
+|---|---|---|---|
+| `LadybugNode` | `Id` | `LadybugInternalId` | This node's internal id. |
+| | `Label` | `string` | The node table label this node belongs to. |
+| | `Properties` | `IReadOnlyDictionary<string, LadybugValue>` | This node's properties, keyed by property name. |
+| `LadybugRel` | `Id` | `LadybugInternalId` | This relationship's internal id. |
+| | `SourceId` | `LadybugInternalId` | The internal id of the source node this relationship points from. |
+| | `DestinationId` | `LadybugInternalId` | The internal id of the destination node this relationship points to. |
+| | `Label` | `string` | The relationship table label. |
+| | `Properties` | `IReadOnlyDictionary<string, LadybugValue>` | This relationship's properties. |
+| `LadybugPath` | `Nodes` | `IReadOnlyList<LadybugNode>` | The nodes visited along this path, in path order. |
+| | `Relationships` | `IReadOnlyList<LadybugRel>` | The relationships traversed along this path, in path order. |
+| `LadybugInternalId` | `TableId` | `ulong` | The id of the table this row belongs to. |
+| | `Offset` | `ulong` | The row's offset within `TableId`. |
+
+`LadybugNode`, `LadybugRel`, and `LadybugPath` all override `Equals`/`GetHashCode`/`ToString` with
+structural equality (same id/label/properties, recursively), and define `==`/`!=` to match —
+without that operator overload, `==` on two references would silently fall back to the default
+reference equality a plain `class` gets, which is exactly the kind of asymmetry `LadybugValue`
+itself guards against (see [LadybugValue: accessor reference](#ladybugvalue-accessor-reference)
+above). `LadybugInternalId` is a `readonly record struct`, so it gets structural equality,
+`GetHashCode`, `ToString`, and `==`/`!=` for free from the language.
+
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
+await using (var _ = await conn.QueryAsync(
+    "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
+await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
+await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
+await using (var _ = await conn.QueryAsync(
+    "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
+
+await using var r = await conn.QueryAsync("MATCH (a:Person)-[k:Knows]->(b:Person) RETURN a, k, b");
+await using var e = r.GetAsyncEnumerator();
+await e.MoveNextAsync();
+var row = e.Current;
+
+var a = row.GetValue(0).AsNode();
+var k = row.GetValue(1).AsRel();
+Console.WriteLine($"{a.Label} id={a.Id.TableId}/{a.Id.Offset} name={a.Properties["name"].AsString()}");
+Console.WriteLine($"{k.Label} since={k.Properties["since"].AsInt64()} src={k.SourceId == a.Id}");
+```
+
+### UNION and POINTER: is `AsString()` enough?
+
+`UNION` and `POINTER` are the two engine types with no dedicated `LadybugType`/accessor pair — both
+read as `LadybugType.Unsupported`, and `AsString()` on that type returns the engine's own generic
+string rendering (via `lbug_value_to_string`) instead of throwing. This section is the empirical
+investigation behind that design choice, not just a restatement of it.
+
+**POINTER: confirmed unreachable through every path tried.** POINTER is `LBUG_POINTER` in the C
+API's own type enum — an internal physical type, not a Cypher-level one. Every attempt to obtain a
+`POINTER` value through a public path failed:
+
+| Attempt | Result |
+|---|---|
+| `CREATE NODE TABLE t(v POINTER, ...)` | Rejected: *"Catalog exception: POINTER is neither an internal type nor a user defined type."* |
+| `RETURN CAST(1 AS POINTER)` | Same rejection. |
+| `RETURN pointer(1)` | Rejected: *"Catalog exception: function POINTER does not exist."* — there is no such Cypher function. |
+| `CALL SHOW_TABLES()` / `CALL current_setting(...)` | Succeed, but return ordinary `STRING`/scalar catalog metadata — never a `POINTER`-typed value. |
+
+There is no DDL, expression, function, or catalog query that produces a `POINTER` value through
+this client's public surface. It is engine-internal only. **Nothing further is needed here beyond
+the one-line note already in the `LadybugType.Unsupported` doc comment and the table above** — a
+typed accessor for a value type no caller can ever obtain would be dead code.
+
+**UNION: reachable, and `AsString()` is demonstrably *not* sufficient — confirmed by construction,
+not assumed.** `UNION` is reachable through ordinary DDL and the `union_value(member := value)`
+constructor function:
+
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE UN(id INT64, val UNION(a INT64, b STRING), PRIMARY KEY(id))")) { }
+await using (var _ = await conn.QueryAsync(
+    "CREATE (n:UN {id: 1, val: union_value(a := 42)})")) { }   // variant 'a' (INT64) = 42
+await using (var _ = await conn.QueryAsync(
+    "CREATE (n:UN {id: 2, val: union_value(b := '42')})")) { } // variant 'b' (STRING) = "42"
+await using (var _ = await conn.QueryAsync(
+    "CREATE (n:UN {id: 3, val: union_value(b := 'hello')})")) { }
+
+await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
+await foreach (var row in r)
+{
+    var val = row.GetValue(1);
+    Console.WriteLine($"id={row.GetValue(0).AsInt64()} type={val.Type} asString='{val.AsString()}'");
+}
+```
+
+Output, against the real engine:
+
+```
+id=1 type=Unsupported asString='42'
+id=2 type=Unsupported asString='42'
+id=3 type=Unsupported asString='hello'
+```
+
+**Row 1 (the INT64 variant `a`, value `42`) and row 2 (the STRING variant `b`, value `"42"`) render
+identically through `AsString()`.** A caller reading only the string form cannot tell whether the
+active member was the integer `42` or the three-character string `"42"` — the two are genuinely
+indistinguishable, and there is no way to recover which one it was, or even which .NET type it
+should be parsed back into, from `AsString()` alone. This is not a hypothetical edge case; it is
+the direct, reproducible result of the schema above. **`AsString()` alone is not sufficient for a
+caller who needs to know which variant is present, or its real type — this is a genuine gap, not
+just a convenience gap.**
+
+**A richer accessor is more feasible than it first appears, because the engine already exposes
+UNION's physical structure through an API this client already uses for `STRUCT`.** The C header
+documents `lbug_value_get_struct_field_name`/`lbug_value_get_struct_field_value` as operating on
+"physical type STRUCT (STRUCT, NODE, REL, RECURSIVE_REL, UNION)" — UNION is explicitly included.
+Probed directly (a throwaway spike against `ValueReader`, since this needs the raw `lbug_value*`
+before it is stringified — not shipped, deleted after this investigation): for the `UN(a INT64, b
+STRING)` schema above, `lbug_value_get_struct_num_fields` on a UNION value reports **3 fields**:
+
+| Index | Field name | Value for row 1 (`a:=42`) | Value for row 2 (`b:='42'`) |
+|---|---|---|---|
+| 0 | `tag` | `Int64` / `42` | `String` / `"42"` |
+| 1 | `a` | `LbugError` (read fails) | `LbugError` (read fails) |
+| 2 | `b` | `LbugError` (read fails) | `LbugError` (read fails) |
+
+Field `0` (`"tag"`) always succeeds and hands back the **currently active member's value, already
+correctly typed** (`Int64` vs `String` — not a stringified rendering) — strictly more than
+`AsString()` gives you, and it would resolve exactly the row-1-vs-row-2 ambiguity above, reusing
+the same tested `ReadStruct` machinery this client already ships. **But fields `1` and `2` (the
+named members `a`/`b`) never succeed, regardless of which one is actually active** — confirmed
+again with a same-typed-members schema, `UN2(a INT64, c INT64)`, where `a:=42` and `c:=42` produce
+identical output (`Int64`/`42` at field `0`) with fields `1`/`2` still both failing. **The member's
+*name* is not recoverable from this API at all — only its physical type and value.** For members
+with distinct physical types (the `UN` example above), the type alone happens to disambiguate which
+member is active; for members sharing a physical type (`UN2`), nothing in the C API surface — not
+`AsString()`, not the physical struct-field API, nothing this client's own code could add on top —
+can tell you which named member produced the value. That is an engine/C-API-level limitation, not
+a gap this client's own code could close with more effort.
+
+**Recommendation: not "leave as-is" — specify what would be needed.** `AsString()` should stay
+(it is still the only path for POINTER, and remains useful for logging/display), but a
+`LadybugType.Union`/`AsUnion()` accessor is worth adding: cheap to implement (route `LBUG_UNION`
+through the existing `ReadStruct` field-`0` read instead of `lbug_value_to_string`), and it
+strictly improves on `AsString()` for the common case of a UNION whose members have distinct
+physical types — the exact ambiguity demonstrated above. Its documentation must be explicit about
+the limit that is real and not fixable client-side: it can report the active value's own type and
+content, but **not** which named member produced it when two members share a physical type, because
+the engine's own C API does not expose that. This is a genuine API defect worth fixing, scoped
+precisely to what the engine can actually support — not a larger "full union member name" feature
+the C API cannot deliver.
 
 ### DECIMAL: `AsDecimal()` vs `AsBigDecimal()`
 
@@ -394,6 +747,15 @@ statement in the script never read through any result at all), rather than faili
 
 ## Transactions
 
+`LadybugTransaction` member reference:
+
+| Member | Description |
+|---|---|
+| `IsCompleted` | `true` once `CommitAsync`/`RollbackAsync` has run - successfully, or via the automatic rollback `DisposeAsync` performs. |
+| `CommitAsync(CancellationToken = default)` | Commits by issuing `COMMIT`. Throws `InvalidOperationException` if already completed. A failed commit is terminal - not retryable on this instance. |
+| `RollbackAsync(CancellationToken = default)` | Rolls back by issuing `ROLLBACK`. Throws `InvalidOperationException` if already completed. Also terminal on failure. |
+| `DisposeAsync()` | Rolls back if neither `CommitAsync` nor `RollbackAsync` ran yet; otherwise a no-op. Never throws. |
+
 If you need a single logical write to span more than one statement, use
 `conn.BeginTransactionAsync()`:
 
@@ -446,13 +808,10 @@ that getting it wrong here doesn't throw, it takes the process down.
 
 Two exception types, both under `LadybugDb.Client`:
 
-- **`LadybugException`** — a general engine error: bad Cypher, a missing table, a type mismatch,
-  a failed database open. Carries the failing statement (`ex.Statement`, when known) and folds it
-  into `ex.Message`. Not retryable by itself — the statement or schema is wrong and retrying
-  unchanged will fail the same way.
-- **`LadybugWriteConflictException`** — a `LadybugException` subtype thrown when the engine
-  refuses a write because another write transaction is already active. This *is* retryable: see
-  [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint).
+| Type | `Statement` | Meaning |
+|---|---|---|
+| `LadybugException` | `string?` — the Cypher statement that produced the error, when known; folded into `Message` too. | A general engine error: bad Cypher, a missing table, a type mismatch, a failed database open. Not retryable by itself. |
+| `LadybugWriteConflictException` (`: LadybugException`) | Inherited. | Thrown when the engine refuses a write because another write transaction is already active. *Is* retryable — see [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint). |
 
 ```csharp
 try
@@ -714,7 +1073,9 @@ storage scans many rows of few columns well, and fetches few rows of many column
 one row per attribute (or a narrow, fixed set of columns) over one row holding a bag of values.
 
 **Bulk load with `COPY`, not per-row `CREATE`.** 1,000,000 rows in 0.5 s versus 296 s — roughly
-600× — for the same data inserted one `CREATE` at a time:
+600× — for the same data inserted one `CREATE` at a time. Illustrative, not run as part of this
+guide's verification: it needs a real CSV file at `csvPath` to execute successfully, which this
+snippet doesn't provide:
 
 ```csharp
 // COPY FROM's source path is a string literal, not a bindable parameter - there is no prepared-
@@ -731,9 +1092,18 @@ not 10×.
 
 ## What's deferred
 
-No functional gaps remain in the API surface this guide documents. See
-[docs/MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for smaller, reviewed
-implementation-detail items (test coverage, interop breadth) that don't affect the public API.
+Every value type the engine can return is readable, and every public member is documented above.
+One genuine, scoped gap was identified while writing this guide, not fixed here (see
+[UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough) for the full
+empirical case): **a typed `LadybugType.Union`/`AsUnion()` accessor is worth adding** — `AsString()`
+alone cannot distinguish a UNION's INT64 member holding `42` from its STRING member holding `"42"`,
+demonstrated directly against the real engine, and a straightforward fix (reusing the already-tested
+`ReadStruct` machinery on the physical field the C API already exposes for UNION) would resolve that
+specific case, though not the narrower case of two members sharing an identical physical type, which
+the C API itself has no way to disambiguate. This has been reported for review, not implemented here
+per this task's constraints. See [docs/MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for
+smaller, reviewed implementation-detail items (test coverage, interop breadth) that don't affect the
+public API.
 
 Two items worth calling out explicitly, since earlier versions of this guide listed them as
 missing entirely:
