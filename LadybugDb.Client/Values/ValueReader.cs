@@ -150,9 +150,17 @@ internal static class ValueReader
         lbug_date_t native;
         var state = LbugNative.lbug_value_get_date(value, &native);
         ThrowIfFailed(state, "date");
-        // native.days is days since 1970-01-01.
-        var date = DateOnly.FromDayNumber(new DateOnly(1970, 1, 1).DayNumber + native.days);
-        return new LadybugValue(LadybugType.Date, date);
+        try
+        {
+            // native.days is days since 1970-01-01. checked() so an out-of-range day count throws
+            // instead of silently wrapping before DateOnly.FromDayNumber ever sees it.
+            var date = DateOnly.FromDayNumber(checked(new DateOnly(1970, 1, 1).DayNumber + native.days));
+            return new LadybugValue(LadybugType.Date, date);
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
+        {
+            throw ConversionFailed("date", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadTimestamp(lbug_value* value)
@@ -160,8 +168,15 @@ internal static class ValueReader
         lbug_timestamp_t native;
         var state = LbugNative.lbug_value_get_timestamp(value, &native);
         ThrowIfFailed(state, "timestamp");
-        // native.value is microseconds since 1970-01-01T00:00:00Z.
-        return new LadybugValue(LadybugType.Timestamp, FromMicros(native.value));
+        try
+        {
+            // native.value is microseconds since 1970-01-01T00:00:00Z.
+            return new LadybugValue(LadybugType.Timestamp, FromMicros(native.value));
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
+        {
+            throw ConversionFailed("timestamp", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadTimestampSec(lbug_value* value)
@@ -169,8 +184,15 @@ internal static class ValueReader
         lbug_timestamp_sec_t native;
         var state = LbugNative.lbug_value_get_timestamp_sec(value, &native);
         ThrowIfFailed(state, "timestamp_sec");
-        // native.value is seconds since 1970-01-01T00:00:00Z.
-        return new LadybugValue(LadybugType.Timestamp, DateTime.UnixEpoch.AddSeconds(native.value));
+        try
+        {
+            // native.value is seconds since 1970-01-01T00:00:00Z.
+            return new LadybugValue(LadybugType.Timestamp, DateTime.UnixEpoch.AddSeconds(native.value));
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
+        {
+            throw ConversionFailed("timestamp_sec", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadTimestampMs(lbug_value* value)
@@ -178,8 +200,15 @@ internal static class ValueReader
         lbug_timestamp_ms_t native;
         var state = LbugNative.lbug_value_get_timestamp_ms(value, &native);
         ThrowIfFailed(state, "timestamp_ms");
-        // native.value is milliseconds since 1970-01-01T00:00:00Z.
-        return new LadybugValue(LadybugType.Timestamp, DateTime.UnixEpoch.AddMilliseconds(native.value));
+        try
+        {
+            // native.value is milliseconds since 1970-01-01T00:00:00Z.
+            return new LadybugValue(LadybugType.Timestamp, DateTime.UnixEpoch.AddMilliseconds(native.value));
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
+        {
+            throw ConversionFailed("timestamp_ms", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadTimestampNs(lbug_value* value)
@@ -187,9 +216,16 @@ internal static class ValueReader
         lbug_timestamp_ns_t native;
         var state = LbugNative.lbug_value_get_timestamp_ns(value, &native);
         ThrowIfFailed(state, "timestamp_ns");
-        // native.value is nanoseconds since 1970-01-01T00:00:00Z; a DateTime tick is 100ns, so this
-        // truncates sub-100ns precision that DateTime cannot represent.
-        return new LadybugValue(LadybugType.Timestamp, DateTime.UnixEpoch.AddTicks(native.value / 100));
+        try
+        {
+            // native.value is nanoseconds since 1970-01-01T00:00:00Z; a DateTime tick is 100ns, so
+            // this truncates sub-100ns precision that DateTime cannot represent.
+            return new LadybugValue(LadybugType.Timestamp, DateTime.UnixEpoch.AddTicks(native.value / 100));
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
+        {
+            throw ConversionFailed("timestamp_ns", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadTimestampTz(lbug_value* value)
@@ -197,9 +233,16 @@ internal static class ValueReader
         lbug_timestamp_tz_t native;
         var state = LbugNative.lbug_value_get_timestamp_tz(value, &native);
         ThrowIfFailed(state, "timestamp_tz");
-        // native.value is microseconds since 1970-01-01T00:00:00Z; LadybugDB does not retain a
-        // distinct source offset, so this is always reported at a zero UTC offset.
-        return new LadybugValue(LadybugType.TimestampTz, new DateTimeOffset(FromMicros(native.value), TimeSpan.Zero));
+        try
+        {
+            // native.value is microseconds since 1970-01-01T00:00:00Z; LadybugDB does not retain a
+            // distinct source offset, so this is always reported at a zero UTC offset.
+            return new LadybugValue(LadybugType.TimestampTz, new DateTimeOffset(FromMicros(native.value), TimeSpan.Zero));
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or OverflowException)
+        {
+            throw ConversionFailed("timestamp_tz", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadInterval(lbug_value* value)
@@ -207,11 +250,24 @@ internal static class ValueReader
         lbug_interval_t native;
         var state = LbugNative.lbug_value_get_interval(value, &native);
         ThrowIfFailed(state, "interval");
-        // Lossy: months has no TimeSpan equivalent, so LadybugValue.AsTimeSpan documents that months
-        // are converted at a fixed 30 days each before being added to days/micros.
-        var span = TimeSpan.FromDays(native.months * 30 + native.days)
-                 + TimeSpan.FromTicks(native.micros * (TimeSpan.TicksPerMillisecond / 1000));
-        return new LadybugValue(LadybugType.Interval, span);
+
+        // Convert via the engine's own lbug_interval_to_difftime rather than hand-rolled C#
+        // arithmetic: this is not one of the 12 excluded *_to_tm/*_from_tm functions (those are
+        // excluded because struct tm has no portable ABI; this one takes/returns a plain double of
+        // seconds), and it avoids re-deriving the months-to-days convention ourselves. Empirically
+        // confirmed (native probe against liblbug) that it applies exactly 30 days/month - e.g.
+        // months=1 -> 2,592,000s (= 30 days) - matching what this client previously assumed by
+        // hand, but this is now the engine's authoritative answer, not a guess.
+        double seconds;
+        LbugNative.lbug_interval_to_difftime(native, &seconds);
+        try
+        {
+            return new LadybugValue(LadybugType.Interval, TimeSpan.FromSeconds(seconds));
+        }
+        catch (Exception ex) when (ex is ArgumentException or OverflowException)
+        {
+            throw ConversionFailed("interval", ex);
+        }
     }
 
     private static unsafe LadybugValue ReadBlob(lbug_value* value)
@@ -222,21 +278,34 @@ internal static class ValueReader
         ThrowIfFailed(state, "blob");
         try
         {
-            var bytes = new byte[length];
-            if (length > 0)
-                new ReadOnlySpan<byte>(raw, checked((int)length)).CopyTo(bytes);
-            return new LadybugValue(LadybugType.Blob, bytes);
+            try
+            {
+                var bytes = new byte[length];
+                if (length > 0)
+                    new ReadOnlySpan<byte>(raw, checked((int)length)).CopyTo(bytes);
+                return new LadybugValue(LadybugType.Blob, bytes);
+            }
+            catch (OverflowException ex)
+            {
+                throw ConversionFailed("blob", ex);
+            }
         }
         finally
         {
             // The blob buffer from lbug_value_get_blob is caller-owned per third-party/lbug.h and
-            // must be released exactly once, on every path, mirroring NativeString.TakeOwnership.
+            // must be released exactly once, on every path (including the throw above), mirroring
+            // NativeString.TakeOwnership.
             LbugNative.lbug_destroy_blob(raw);
         }
     }
 
     private static DateTime FromMicros(long micros) =>
-        DateTime.UnixEpoch.AddTicks(micros * (TimeSpan.TicksPerMillisecond / 1000));
+        // checked() so an out-of-range microsecond count throws instead of silently wrapping
+        // before AddTicks ever sees it.
+        DateTime.UnixEpoch.AddTicks(checked(micros * (TimeSpan.TicksPerMillisecond / 1000)));
+
+    private static LadybugException ConversionFailed(string kind, Exception inner) =>
+        new($"A {kind} value read from the engine could not be represented as .NET data.", inner);
 
     private static void ThrowIfFailed(lbug_state state, string kind)
     {

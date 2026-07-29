@@ -105,9 +105,15 @@ public readonly struct LadybugValue
     /// <summary>Reads this value as a <see cref="TimeSpan"/>. Applies to <see cref="LadybugType.Interval"/>.</summary>
     /// <remarks>
     /// Lossy: the native interval carries a separate months component that <see cref="TimeSpan"/> has no
-    /// concept of, so months are converted at a fixed 30 days each (LadybugDB's own convention) and added
-    /// to the days/microseconds components. A caller doing calendar-aware arithmetic — where a month is
-    /// not uniformly 30 days — should not rely on this conversion.
+    /// concept of. The conversion is delegated to the engine's own <c>lbug_interval_to_difftime</c>
+    /// (seconds), not computed by this client — empirically, that function converts months at a fixed
+    /// 30 days each before adding the days/microseconds components. A caller doing calendar-aware
+    /// arithmetic — where a month is not uniformly 30 days — should not rely on this conversion.
+    /// An interval whose true magnitude does not fit in a <see cref="TimeSpan"/> is caught while the
+    /// row is materialized (<c>ReadRowAsync</c>) and surfaces there as a <see cref="LadybugException"/>
+    /// rather than reaching this accessor as a silently wrapped value; a <see cref="LadybugValue"/> of
+    /// type <see cref="LadybugType.Interval"/> already holds a converted <see cref="TimeSpan"/> by the
+    /// time this is callable.
     /// </remarks>
     /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Interval"/>.</exception>
     public TimeSpan AsTimeSpan() => As<TimeSpan>(LadybugType.Interval);
