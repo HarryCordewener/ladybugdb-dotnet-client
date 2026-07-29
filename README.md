@@ -71,20 +71,25 @@ Supported today:
   multi-statement results walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
-- Safe disposal ordering: disposing a database out from under a still-open connection or result
-  throws `ObjectDisposedException`, not a crash.
+- Safe disposal ordering: disposing a database out from under a still-open connection, result, or
+  transaction throws `ObjectDisposedException` (or completes cleanly), never crashes the process.
+- Transactions (`LadybugConnection.BeginTransactionAsync` / `LadybugTransaction`), a thin,
+  hard-to-misuse wrapper over `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` - the C API has no native
+  transaction primitive, so that is genuinely all this is under the hood. Disposing a transaction
+  without committing or rolling it back first rolls it back automatically.
+- `LadybugConfig.EnableMultiWrites`, mapping to the engine's `enable_multi_writes` setting.
+  Measured, not assumed: turning it on genuinely lifts LadybugDB's default one-write-transaction-
+  -at-a-time restriction (zero conflicts across four runs at up to 8 concurrent writers, versus
+  conflicts climbing into the tens of thousands per run with it off). See
+  [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the numbers and
+  the retry pattern still needed when it's off (the default).
+- Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`), with
+  typed `Bind` overloads for all twenty engine scalar/temporal types plus `BindNull`, so a
+  statement executed repeatedly with different values only gets planned once.
 
-Not yet supported (see [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for the
-full, reviewed list):
-
-- Parameterized queries. Every statement is a plain string you build yourself.
-- Explicit transaction control beyond issuing `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` as plain
-  Cypher statements.
-- Internal write serialization. LadybugDB allows exactly one write transaction at a time and
-  rejects a second rather than queuing it; this client surfaces that rejection as
-  `LadybugWriteConflictException` rather than hiding it behind an internal queue. See
-  [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the retry
-  pattern this implies.
+No known functional gaps remain in the API surface listed above. See
+[docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for smaller, reviewed
+implementation-detail items (test coverage, interop breadth) that don't affect the public API.
 
 ## Supported platforms
 

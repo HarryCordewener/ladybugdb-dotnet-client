@@ -11,5 +11,12 @@
   <ItemGroup>
     <ProjectReference Include="..\LadybugDb.Client\LadybugDb.Client.csproj" />
     <ProjectReference Include="..\LadybugDb.Client.Native\LadybugDb.Client.Native.csproj" />
+    <!--
+      Not used for its API - referenced so MSBuild builds it and copies its output (and native
+      dependencies) next to this project's own, giving TransactionDisposalOrderingTests a
+      reliable AppContext.BaseDirectory-relative path to launch it from as a subprocess. See that
+      class for why a subprocess, not an in-process call, is required here.
+    -->
+    <ProjectReference Include="..\LadybugDb.Client.CrashRepro\LadybugDb.Client.CrashRepro.csproj" />
   </ItemGroup>
 </Project>

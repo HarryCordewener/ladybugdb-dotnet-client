@@ -50,6 +50,7 @@ using var db = new LadybugDatabase("./mydb", config);
 | `EnableCompression` | `bool` | `true` | Compress supported types on disk. Leave this on unless you have a specific reason to trade disk space for CPU. |
 | `ReadOnly` | `bool` | `false` | Opens the database read-only. No write transaction is permitted; use this for a process that only ever queries a database another process (or an earlier run) writes to. |
 | `MaxDbSize` | `ulong` | `0` (engine default) | Max database size in bytes. |
+| `EnableMultiWrites` | `bool` | `false` | Maps to the engine's `enable_multi_writes` setting. Measured to genuinely lift LadybugDB's one-write-transaction-at-a-time restriction — see [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint) for the numbers. |
 
 ## Connections
 
@@ -81,9 +82,11 @@ await using (var _ = await conn.QueryAsync(
     "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
 ```
 
-`QueryAsync` takes a plain Cypher string and returns a `LadybugQueryResult`. There is no
-parameterized-query API yet (see [What's deferred](#whats-deferred)) — build the statement
-yourself, and be deliberate about what you interpolate into it. Every `QueryAsync` call returns a
+`QueryAsync` takes a plain Cypher string and returns a `LadybugQueryResult`. For a statement you
+run repeatedly with different values, prefer `conn.PrepareAsync(cypher)` and the resulting
+`LadybugPreparedStatement`'s typed `Bind` overloads over interpolating values into the string
+yourself — it avoids re-planning the same query on every call, and avoids interpolation being the
+only thing standing between you and a Cypher injection bug. Every `QueryAsync` call returns a
 result, even for statements like `CREATE TABLE` that don't produce rows; disposing it discards
 that result and frees the underlying native resources. The `await using (var _ = ...) { }` shape
 above is the idiom for "run this statement, I don't need to read anything back."
@@ -175,7 +178,8 @@ try
 }
 catch (LadybugWriteConflictException ex)
 {
-    // Retryable: another connection holds the single write transaction.
+    // Retryable: another connection holds the single write transaction (with the default
+    // LadybugConfig.EnableMultiWrites = false).
 }
 catch (LadybugException ex)
 {
@@ -195,9 +199,10 @@ connection, or result used after its own disposal, or after an ancestor's dispos
 
 ## Disposal and lifetime
 
-`LadybugDatabase` is `IDisposable`; `LadybugConnection` and `LadybugQueryResult` are
-`IAsyncDisposable`. Disposal is safe in any order — it never corrupts state or crashes the
-process — but children should normally be disposed before the database they came from:
+`LadybugDatabase` is `IDisposable`; `LadybugConnection`, `LadybugQueryResult`, and
+`LadybugTransaction` are `IAsyncDisposable`. Disposal is safe in any order — it never corrupts
+state or crashes the process — but children should normally be disposed before the database they
+came from:
 
 ```csharp
 var db = new LadybugDatabase(path);
@@ -232,6 +237,31 @@ catch (ObjectDisposedException)
 await conn.DisposeAsync(); // still safe, even now
 ```
 
+**This includes an open transaction.** If a connection still has a `LadybugTransaction` open on
+it (`BeginTransactionAsync` called, neither `CommitAsync` nor `RollbackAsync` run yet) when its
+database is disposed, the database rolls that transaction back itself, before releasing its own
+handle, then the transaction and connection can be disposed afterward — in any order — with no
+further effect:
+
+```csharp
+var db = new LadybugDatabase(path);
+var conn = await db.ConnectAsync();
+var tx = await conn.BeginTransactionAsync();
+await conn.QueryAsync("CREATE (n:Object {dbref: 1})"); // never committed
+
+db.Dispose(); // rolls the open transaction back first, then releases its own handle
+
+await tx.DisposeAsync();   // already rolled back; a no-op
+await conn.DisposeAsync(); // still safe
+```
+
+This is not optional cleanup — it is why disposal is safe in any order at all. LadybugDB's own
+`lbug_connection_destroy` auto-rolls-back any transaction still open on the connection it is
+destroying, and that auto-rollback needs the database to be alive; without the database-side
+rollback above running first, destroying a connection with an open transaction *after* its
+database was already disposed would ask the engine to roll back against a database that no longer
+exists.
+
 One subtlety: post-dispose behavior is memory-safe but not strictly *deterministic* in timing.
 Each handle only actually closes once every outstanding lease on it has drained — a call already
 in flight on another thread when `Dispose()` runs may still complete normally instead of throwing,
@@ -241,15 +271,15 @@ finish draining. A call that starts after the handle has fully closed always thr
 
 ## Concurrency and the single-writer constraint
 
-LadybugDB permits exactly one write transaction at a time and **rejects** a second rather than
-queuing it. Under contention this is expected, not exceptional, and it's surfaced as the typed,
-retryable `LadybugWriteConflictException` rather than a raw engine error string.
+By default, LadybugDB permits exactly one write transaction at a time and **rejects** a second
+rather than queuing it. Under contention this is expected, not exceptional, and it's surfaced as
+the typed, retryable `LadybugWriteConflictException` rather than a raw engine error string.
 
-This was benchmarked, not assumed: throughput is flat from 1 to 8 concurrent writers
-(~450 mutations/sec) while conflict retries climb past 10,000 over the same run. The client does
-not serialize writes internally today — if you open multiple connections and write from more than
-one at a time, you *will* see this exception, by design. A retry loop at the call site is the
-expected pattern:
+This was benchmarked, not assumed: with the default configuration, throughput was flat from 1 to
+8 concurrent writers (~450 mutations/sec) while conflict retries climbed past 10,000 over the same
+run. The client does not serialize writes internally — if you open multiple connections and write
+from more than one at a time with the default configuration, you *will* see this exception, by
+design. A retry loop at the call site is the expected pattern:
 
 ```csharp
 async Task<LadybugQueryResult> ExecuteWithRetryAsync(
@@ -269,10 +299,52 @@ async Task<LadybugQueryResult> ExecuteWithRetryAsync(
 }
 ```
 
-If you need a single logical write to span more than one statement, wrap it with `BEGIN
-TRANSACTION` / `COMMIT` (or `ROLLBACK`) as plain Cypher — there's no dedicated transaction API yet
-(see [What's deferred](#whats-deferred)), but the engine's own transaction statements work today
-and are what holds the write lock for the duration.
+### `EnableMultiWrites`: measured, not assumed
+
+`LadybugConfig.EnableMultiWrites` maps to the engine's `enable_multi_writes` setting, and it was
+an open question — since the very first benchmark in this project — whether it actually changes
+anything. It does. Set on a database, the same 1/2/4/8-concurrent-writer workload above produced
+**zero** `LadybugWriteConflictException`s at any writer count, across four separate 3-second runs,
+and throughput rose with concurrency instead of staying flat (roughly 2,600-2,900 mutations/sec at
+one writer, up to 3,500-3,900/sec at four to eight). With it off (the default), conflicts climbed
+with writer count in every run of the same experiment (0 → ~2,700 → ~8,000 → ~18,000 over the same
+3-second window) while throughput stayed essentially flat.
+
+```csharp
+var config = new LadybugConfig { EnableMultiWrites = true };
+using var db = new LadybugDatabase("./mydb", config);
+```
+
+Because the flag genuinely lifts the restriction at the engine level, this client does not add a
+client-side write lock on top of it — concurrency is the engine's business once you've told it
+`EnableMultiWrites = true`. If you leave it off (the default), the retry-loop pattern above is
+still the expected approach; the client makes no attempt to serialize writers for you either way.
+
+If you need a single logical write to span more than one statement, use
+`conn.BeginTransactionAsync()`:
+
+```csharp
+await using (var tx = await conn.BeginTransactionAsync())
+{
+    await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})");
+    await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})");
+    await tx.CommitAsync();
+}
+```
+
+`LadybugTransaction` is a thin wrapper, not a native primitive — **the C API has no transaction
+functions at all.** `BeginTransactionAsync` issues `BEGIN TRANSACTION`, `CommitAsync` issues
+`COMMIT`, and `RollbackAsync` issues `ROLLBACK`, all as ordinary Cypher through the exact same
+query path as `QueryAsync`. What it buys you over issuing those statements yourself: disposing a
+transaction that was never committed or rolled back rolls it back automatically (including when
+its database is disposed first — see [Disposal and lifetime](#disposal-and-lifetime)), a second
+commit or rollback throws `InvalidOperationException` instead of silently doing nothing or hitting
+the engine again, and beginning a second transaction on a connection that already has one open
+throws `InvalidOperationException` client-side rather than sending a nested `BEGIN TRANSACTION`
+that the engine would reject in a way that invalidates the *first* transaction, not just the
+second call. Every statement run on the connection while a transaction is open — not just ones
+issued through the `LadybugTransaction` object — participates in it, because the transaction lives
+on the connection itself, matching what `BEGIN TRANSACTION` means to the engine.
 
 ## Schema guidance
 
@@ -312,14 +384,21 @@ not 10×.
 
 ## What's deferred
 
-These are explicitly out of scope for this milestone — reviewed and triaged, not overlooked. See
-[docs/MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for the complete, reviewed list with
-rationale for each item. In summary:
+No functional gaps remain in the API surface this guide documents. See
+[docs/MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for smaller, reviewed
+implementation-detail items (test coverage, interop breadth) that don't affect the public API.
 
-- **Parameterized queries.** No `$param`-style placeholders bound from an object or dictionary —
-  every statement is a plain string.
-- **A dedicated transaction API.** `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` work as plain
-  Cypher statements today; there's no typed `Transaction` object wrapping them.
-- **Internal write serialization.** The client does not queue concurrent writers for you; it
-  surfaces the engine's own rejection as `LadybugWriteConflictException` (see
-  [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)).
+Two items worth calling out explicitly, since earlier versions of this guide listed them as
+missing entirely:
+
+- **Internal write serialization** is still not something the client does for you — it surfaces
+  the engine's own rejection as `LadybugWriteConflictException` when `EnableMultiWrites` is off
+  (the default). That is a deliberate design choice, not a gap: see
+  [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)
+  for the measurement that settled it - turning the flag on genuinely lifts the restriction at the
+  engine level, so a second, client-side lock on top of it would just be redundant.
+- **A dedicated transaction API** now exists (`BeginTransactionAsync` / `LadybugTransaction`), but
+  it is a wrapper over `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` Cypher, not a native engine
+  primitive - the C API has no transaction functions at all. See
+  [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)
+  for the full contract.

@@ -15,6 +15,13 @@ public sealed class LadybugConnection : IAsyncDisposable
     private readonly LadybugDatabase _database;
     private readonly LbugConnectionHandle _handle;
 
+    /// <summary>
+    /// The transaction currently open on this connection, if any. Non-null exactly when a
+    /// <see cref="LadybugTransaction"/> has been begun and not yet committed, rolled back, or
+    /// disposed - see <see cref="BeginTransactionAsync"/> and <see cref="OnTransactionCompleted"/>.
+    /// </summary>
+    private LadybugTransaction? _activeTransaction;
+
     internal LadybugConnection(LadybugDatabase database, LbugConnectionHandle handle)
     {
         _database = database;
@@ -96,12 +103,57 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// exactly once, or let disposal roll back automatically.
     /// </summary>
     /// <param name="cancellationToken">Forwarded to the underlying <c>BEGIN TRANSACTION</c> query.</param>
-    public ValueTask<LadybugTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-        LadybugTransaction.BeginAsync(this, cancellationToken);
+    /// <exception cref="InvalidOperationException">
+    /// This connection already has an active (not yet committed, rolled back, or disposed)
+    /// transaction. Checked and rejected here, client-side, before any <c>BEGIN TRANSACTION</c>
+    /// reaches the engine - the engine also detects a nested <c>BEGIN TRANSACTION</c> and raises
+    /// its own <see cref="LadybugException"/> for it, but doing so leaves the FIRST transaction
+    /// invalid on the engine side (a subsequent <c>COMMIT</c> on it fails with "No active
+    /// transaction for COMMIT" instead of the clean, documented result), not just the second
+    /// call. Never sending the nested <c>BEGIN TRANSACTION</c> in the first place is the only way
+    /// to keep the original transaction usable.
+    /// </exception>
+    public async ValueTask<LadybugTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_activeTransaction is not null)
+            throw new InvalidOperationException(
+                "This connection already has an active transaction. Commit or roll it back (or " +
+                "dispose it) before beginning another - sending a nested BEGIN TRANSACTION to " +
+                "the engine would invalidate the first transaction rather than merely rejecting " +
+                "the second call.");
+
+        var transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
+        _activeTransaction = transaction;
+        _database.TrackTransactionOpened(this);
+        return transaction;
+    }
+
+    /// <summary>
+    /// Called by <see cref="LadybugTransaction"/> once it has committed, rolled back, or
+    /// otherwise closed itself out, so this connection stops considering it active. Not for
+    /// direct use.
+    /// </summary>
+    internal void OnTransactionCompleted(LadybugTransaction transaction)
+    {
+        if (!ReferenceEquals(_activeTransaction, transaction)) return;
+        _activeTransaction = null;
+        _database.TrackTransactionClosed(this);
+    }
+
+    /// <summary>
+    /// Closes out this connection's active transaction (if any) synchronously, swallowing any
+    /// failure, so that this connection's own <see cref="DisposeAsync"/> - or its parent
+    /// <see cref="LadybugDatabase"/>'s <see cref="LadybugDatabase.Dispose"/> - never lets a still
+    /// -open transaction reach native connection destruction. See
+    /// <see cref="LadybugTransaction.EnsureClosedForDispose"/> for why that native call is unsafe
+    /// otherwise. Not for direct use.
+    /// </summary>
+    internal void EnsureNoOpenTransactionForDispose() => _activeTransaction?.EnsureClosedForDispose();
 
     /// <summary>Closes the connection. Safe to call even if the parent database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {
+        EnsureNoOpenTransactionForDispose();
         _handle.Dispose();
         return ValueTask.CompletedTask;
     }

@@ -22,6 +22,20 @@ public sealed class LadybugDatabase : IDisposable
 {
     private readonly LbugDatabaseHandle _handle;
 
+    /// <summary>
+    /// Every <see cref="LadybugConnection"/> opened from this database that currently has an
+    /// active <see cref="LadybugTransaction"/> on it. Populated by
+    /// <see cref="TrackTransactionOpened"/>/<see cref="TrackTransactionClosed"/>, which
+    /// <see cref="LadybugConnection"/> calls as transactions begin and end. Existing solely so
+    /// <see cref="Dispose"/> can find and force-close any of them before releasing this
+    /// database's own handle - see <see cref="Dispose"/> and
+    /// <see cref="LadybugTransaction.EnsureClosedForDispose"/> for why that ordering matters.
+    /// </summary>
+    private readonly HashSet<LadybugConnection> _connectionsWithOpenTransactions = [];
+
+    /// <summary>Guards <see cref="_connectionsWithOpenTransactions"/> against concurrent connections opening or closing transactions, and against a concurrent <see cref="Dispose"/>.</summary>
+    private readonly Lock _transactionTrackingGate = new();
+
     /// <summary>Opens (creating if necessary) the LadybugDB database at <paramref name="path"/>.</summary>
     /// <param name="path">Filesystem path to the database directory.</param>
     /// <param name="config">Runtime configuration. <see langword="null"/> selects engine defaults.</param>
@@ -64,6 +78,27 @@ public sealed class LadybugDatabase : IDisposable
     private static byte ToNativeBool(bool value) => value ? (byte)1 : (byte)0;
 
     /// <summary>
+    /// Records that <paramref name="connection"/> now has an active transaction, so
+    /// <see cref="Dispose"/> knows to close it out first if this database is disposed before the
+    /// caller does. Called by <see cref="LadybugConnection.BeginTransactionAsync"/>. Not for
+    /// direct use.
+    /// </summary>
+    internal void TrackTransactionOpened(LadybugConnection connection)
+    {
+        lock (_transactionTrackingGate) _connectionsWithOpenTransactions.Add(connection);
+    }
+
+    /// <summary>
+    /// Undoes <see cref="TrackTransactionOpened"/> once <paramref name="connection"/>'s
+    /// transaction has committed, rolled back, or otherwise closed. Called by
+    /// <see cref="LadybugConnection.OnTransactionCompleted"/>. Not for direct use.
+    /// </summary>
+    internal void TrackTransactionClosed(LadybugConnection connection)
+    {
+        lock (_transactionTrackingGate) _connectionsWithOpenTransactions.Remove(connection);
+    }
+
+    /// <summary>
     /// Closes the database. Connections, results, and other objects opened from it should not be
     /// used afterward; disposing them first is still the intended order. Doing so anyway is
     /// always memory-safe - it never corrupts state or crashes the process - but it is not
@@ -76,8 +111,30 @@ public sealed class LadybugDatabase : IDisposable
     /// draining. A call that starts after the handle has fully closed throws
     /// <see cref="ObjectDisposedException"/>.
     /// </summary>
+    /// <remarks>
+    /// Before releasing this database's own handle, forces every connection that still has an
+    /// open <see cref="LadybugTransaction"/> to roll it back first, while this handle is still
+    /// usable - see <see cref="LadybugTransaction.EnsureClosedForDispose"/> for exactly why that
+    /// ordering, and not simply leaving the transaction for the connection's own eventual
+    /// disposal to discover, is required: a transaction still open when the underlying
+    /// <c>lbug_connection_destroy</c> runs triggers the engine's own internal auto-rollback, which
+    /// needs a live database and calls <c>std::terminate()</c> - killing the process, not merely
+    /// throwing - if this database was destroyed first. Closing every open transaction out here
+    /// keeps the "disposing out of order is always memory-safe" guarantee above true for
+    /// transactions too, not just for the plain query/result objects it originally covered.
+    /// </remarks>
     public void Dispose()
     {
+        LadybugConnection[] connectionsToClose;
+        lock (_transactionTrackingGate)
+        {
+            connectionsToClose = [.. _connectionsWithOpenTransactions];
+            _connectionsWithOpenTransactions.Clear();
+        }
+
+        foreach (var connection in connectionsToClose)
+            connection.EnsureNoOpenTransactionForDispose();
+
         _handle.Dispose();
     }
 }

@@ -70,6 +70,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
         }
 
         _completed = true;
+        _connection.OnTransactionCompleted(this);
     }
 
     /// <summary>Rolls back the transaction by issuing <c>ROLLBACK</c>.</summary>
@@ -85,6 +86,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
         }
 
         _completed = true;
+        _connection.OnTransactionCompleted(this);
     }
 
     private void ThrowIfCompleted()
@@ -126,6 +128,78 @@ public sealed class LadybugTransaction : IAsyncDisposable
         finally
         {
             _completed = true;
+            _connection.OnTransactionCompleted(this);
+        }
+    }
+
+    /// <summary>
+    /// Closes this transaction out synchronously - rolling it back if it is not already
+    /// completed - without ever letting the failure surface. Called by
+    /// <see cref="LadybugConnection"/> and <see cref="LadybugDatabase"/>, never directly by user
+    /// code, from their own <c>Dispose</c>/<c>DisposeAsync</c> paths when this transaction might
+    /// still be open at that point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists at all, not just <see cref="DisposeAsync"/>.</b> The native
+    /// <c>lbug_connection_destroy</c> auto-rolls-back any transaction still open on that
+    /// connection as part of destroying it - reasonable on its own, since a connection going away
+    /// with an open transaction has to be resolved somehow. That auto-rollback needs the database
+    /// the transaction belongs to to still be alive. If the database was destroyed FIRST (an
+    /// ordering this library has otherwise always treated as safe - see
+    /// <see cref="LadybugDatabase.Dispose"/> - because every other native call in this library
+    /// leases the ancestor's handle and throws a catchable <see cref="ObjectDisposedException"/>
+    /// instead of touching freed memory), that auto-rollback cannot do that, and - verified
+    /// directly against the real engine, reproducibly, 100% of attempts - calls
+    /// <c>std::terminate()</c> instead of raising anything catchable. A C++ exception unwinding
+    /// out of a P/Invoke call is undefined behaviour the CLR does not intercept; the process is
+    /// killed (SIGABRT) before any C# <c>catch</c>, including this type's own in
+    /// <see cref="DisposeAsync"/>, ever runs.
+    /// </para>
+    /// <para>
+    /// <b>The invariant this method exists to guarantee: <c>lbug_connection_destroy</c> must
+    /// never be invoked while this transaction is still open.</b> Both
+    /// <see cref="LadybugConnection.DisposeAsync"/> (a connection disposed directly, transaction
+    /// never touched) and <see cref="LadybugDatabase.Dispose"/> (the database disposed while some
+    /// connection it owns still has one open - the crash-report scenario) call this method first,
+    /// synchronously, while the pieces they still individually control - respectively, this
+    /// connection's own handle, and the database's handle - are still guaranteed usable. That
+    /// closes the transaction out at the ENGINE level (a real <c>ROLLBACK</c> reaches the engine
+    /// successfully) before either dispose path lets <c>lbug_connection_destroy</c> run, so its
+    /// internal auto-rollback always finds nothing left to do - not merely "nothing this managed
+    /// wrapper knows about", but nothing open at all.
+    /// </para>
+    /// <para>
+    /// Synchronous, not <c>async</c>: <see cref="LadybugConnection"/>'s query methods are
+    /// documented to always complete synchronously today (embedded engine, CPU/disk-bound work,
+    /// no genuine offload yet), so retrieving <see cref="ValueTask{TResult}.Result"/> directly off
+    /// an already-completed <see cref="ValueTask{TResult}"/> here does not block - it is exactly
+    /// what <c>await</c>ing the same, already-finished task would do, without forcing this method
+    /// (and its two callers' own <c>Dispose</c>/<c>DisposeAsync</c>, both intentionally
+    /// synchronous call sites) to become <c>async</c> for a genuine yield that never happens.
+    /// </para>
+    /// </remarks>
+    internal void EnsureClosedForDispose()
+    {
+        if (_completed) return;
+
+        try
+        {
+            var result = _connection.QueryAsync("ROLLBACK").Result;
+            result.DisposeAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Swallowed - see remarks above: called from a Dispose path that must not throw,
+            // and there is nothing a caller could usefully do differently even if this
+            // surfaced. If this failed because the database is already gone, there is nothing
+            // left for the native auto-rollback to conflict with either - the transaction was
+            // never going to survive this connection's destruction regardless.
+        }
+        finally
+        {
+            _completed = true;
+            _connection.OnTransactionCompleted(this);
         }
     }
 }

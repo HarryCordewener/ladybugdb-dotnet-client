@@ -3,4 +3,5 @@
   <Project Path="LadybugDb.Client.Native/LadybugDb.Client.Native.csproj" />
   <Project Path="LadybugDb.Client.Tests/LadybugDb.Client.Tests.csproj" />
   <Project Path="LadybugDb.Client.IntegrationTests/LadybugDb.Client.IntegrationTests.csproj" />
+  <Project Path="LadybugDb.Client.CrashRepro/LadybugDb.Client.CrashRepro.csproj" />
 </Solution>
