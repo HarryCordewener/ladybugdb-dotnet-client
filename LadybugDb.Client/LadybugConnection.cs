@@ -116,6 +116,9 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// call. Never sending the nested <c>BEGIN TRANSACTION</c> in the first place is the only way
     /// to keep the original transaction usable.
     /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// The parent <see cref="LadybugDatabase"/> is already fully closed.
+    /// </exception>
     public async ValueTask<LadybugTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
         if (_activeTransaction is not null)
@@ -125,15 +128,34 @@ public sealed class LadybugConnection : IAsyncDisposable
                 "the engine would invalidate the first transaction rather than merely rejecting " +
                 "the second call.");
 
-        var transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
+        // Reserve a long-lived hold on the database BEFORE issuing BEGIN TRANSACTION to the
+        // engine, not after it succeeds - see LbugConnectionHandle's remarks. The engine
+        // considers a transaction open the instant its BEGIN TRANSACTION call returns success,
+        // which is before ANY of this method's own bookkeeping below would otherwise run
+        // (including LadybugTransaction.BeginAsync's own disposal of that call's result). A
+        // concurrent LadybugDatabase.Dispose() racing this call must never be able to complete
+        // inside that window with nothing holding the database open - taking the hold first is
+        // what makes that impossible rather than merely unlikely.
+        if (!_handle.TryAcquireDatabaseHoldForTransaction())
+            throw new ObjectDisposedException(nameof(LadybugDatabase));
+
+        LadybugTransaction transaction;
+        try
+        {
+            transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
+        }
+        catch
+        {
+            // BEGIN TRANSACTION did not open anything at the engine level (or cancellation means
+            // we can no longer be sure it will) - release the hold immediately rather than
+            // leaving it for a completion that will never come, which would otherwise wedge a
+            // concurrent LadybugDatabase.Dispose() forever.
+            _handle.ReleaseDatabaseHoldForTransaction();
+            throw;
+        }
+
         _activeTransaction = transaction;
         _database.TrackTransactionOpened(this);
-        // Holds a long-lived reference on the database for as long as this transaction is open -
-        // see LbugConnectionHandle's remarks for why this, not just TrackTransactionOpened above,
-        // is required: TrackTransactionOpened only helps along the explicit db.Dispose() path;
-        // this is what keeps the database alive even if everything is abandoned without disposal
-        // and only the GC finalizer path ever runs.
-        _handle.MarkTransactionOpen();
         return transaction;
     }
 
@@ -147,7 +169,7 @@ public sealed class LadybugConnection : IAsyncDisposable
         if (!ReferenceEquals(_activeTransaction, transaction)) return;
         _activeTransaction = null;
         _database.TrackTransactionClosed(this);
-        _handle.MarkTransactionClosed();
+        _handle.ReleaseDatabaseHoldForTransaction();
     }
 
     /// <summary>

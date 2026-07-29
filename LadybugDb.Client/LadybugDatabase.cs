@@ -30,6 +30,15 @@ namespace LadybugDb.Client;
 /// GC behaviour - see that type's remarks for the full explanation and why relying on the
 /// observed order alone was not good enough.
 /// </para>
+/// <para>
+/// This includes racing <see cref="Dispose"/> against a concurrent
+/// <see cref="LadybugConnection.BeginTransactionAsync"/> on one of this database's connections,
+/// not just against an already-open transaction. The same reference-counted lease is taken
+/// BEFORE <c>BEGIN TRANSACTION</c> is issued to the engine, not after it succeeds - the engine
+/// considers a transaction open the instant that call returns, which is earlier than any of this
+/// library's own bookkeeping would otherwise run, so the lease has to already be in place by
+/// then rather than applied afterward. See <see cref="Interop.LbugConnectionHandle"/>'s remarks.
+/// </para>
 /// </remarks>
 public sealed class LadybugDatabase : IDisposable
 {

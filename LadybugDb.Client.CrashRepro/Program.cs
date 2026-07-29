@@ -12,10 +12,13 @@ using LadybugDb.Client;
 // separate executable instead of an in-process TUnit assertion, and hence the test that spawns
 // it inspects Process.ExitCode rather than catching anything itself.
 //
-// Usage: LadybugDb.Client.CrashRepro <scenario> <db-path>
+// Usage: LadybugDb.Client.CrashRepro <scenario> <db-path> [iterations]
 // Scenarios: db-first-open, db-first-committed, conn-first-open, conn-first-committed (explicit
-// dispose orderings) and gc-abandon-open (abandons everything without disposing anything and
-// forces the real GC finalizer path - see AbandonWithoutDisposal_TransactionLeftOpen).
+// dispose orderings); gc-abandon-open (abandons everything without disposing anything and
+// forces the real GC finalizer path - see AbandonWithoutDisposal_TransactionLeftOpen); and
+// begin-vs-dispose (BeginTransactionAsync racing a concurrent db.Dispose() - live concurrency,
+// no GC, no abandonment; [iterations] controls how many fresh-database attempts to loop through
+// in this one process, default 500 - see BeginTransactionRacingDatabaseDispose).
 // Exit 0 and "DONE" on stdout: the scenario completed and the process is healthy.
 // Exit 1 and "MANAGED_EXCEPTION:...": a normal (non-fatal) exception was thrown and caught here.
 // Any other exit code (e.g. 134 = SIGABRT, 139 = SIGSEGV on Linux): the process was killed.
@@ -49,6 +52,16 @@ try
             await AbandonWithoutDisposal_TransactionLeftOpen(path);
             ForceFullGarbageCollection();
             break;
+        case "begin-vs-dispose":
+            // Uses path-0, path-1, ... (a fresh database per iteration) rather than a single
+            // reopenable path at the end - see BeginTransactionRacingDatabaseDispose. Reports
+            // its own completion and returns directly instead of falling into the shared
+            // single-database "reopen and report ROW_COUNT" epilogue below.
+            var iterations = args.Length > 2 ? int.Parse(args[2]) : 500;
+            await BeginTransactionRacingDatabaseDispose(path, iterations);
+            Console.WriteLine($"ITERATIONS:{iterations}");
+            Console.WriteLine("DONE");
+            return 0;
         default:
             Console.Error.WriteLine($"unknown scenario: {scenario}");
             return 2;
@@ -165,5 +178,73 @@ static void ForceFullGarbageCollection()
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
+    }
+}
+
+// conn.BeginTransactionAsync() racing a concurrent db.Dispose() on the owning database - pure
+// live concurrency, no GC and no abandonment involved. A Barrier forces both operations to start
+// at the same instant: the engine-level BEGIN TRANSACTION can succeed and open a transaction
+// before ANY C# bookkeeping registers it, and if the database is destroyed inside that window
+// the connection is later left holding a transaction the engine considers open against memory
+// that no longer exists.
+//
+// The window this is trying to hit is narrow (a handful of native/managed instructions), so a
+// single Barrier-synchronized attempt is not reliable on every machine/scheduler - looped many
+// times within one process (fresh database each time) rather than relying on the outer test
+// re-invoking the whole process per attempt, since process startup cost would otherwise dominate
+// and starve the loop of attempts within any reasonable time budget.
+static async Task BeginTransactionRacingDatabaseDispose(string basePath, int iterations)
+{
+    for (var i = 0; i < iterations; i++)
+    {
+        var path = $"{basePath}-{i}";
+        try
+        {
+            var db = new LadybugDatabase(path);
+            var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+
+            using var barrier = new Barrier(2);
+            var beginTask = Task.Run(async () =>
+            {
+                barrier.SignalAndWait();
+                try
+                {
+                    await using var tx = await conn.BeginTransactionAsync();
+                }
+                catch
+                {
+                    // Any managed exception here (ObjectDisposedException, LadybugException,
+                    // etc.) is fine - this scenario is only hunting for a process crash, not a
+                    // specific outcome.
+                }
+            });
+            var disposeTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                db.Dispose();
+            });
+
+            await Task.WhenAll(beginTask, disposeTask);
+
+            try
+            {
+                await conn.DisposeAsync();
+            }
+            catch
+            {
+                // Best effort - the race above may have already left the connection in a state
+                // where this itself throws a normal managed exception, which is fine.
+            }
+        }
+        finally
+        {
+            foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })
+            {
+                try { if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
+            }
+            try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best effort */ }
+        }
     }
 }

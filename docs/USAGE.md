@@ -280,6 +280,15 @@ connection needs it to safely close out that transaction. Still write `using`/`a
 relying on finalization means your data changes reach disk on the GC's schedule, not yours — but
 forgetting to is not a crash risk.
 
+**And if `BeginTransactionAsync` itself races a concurrent `Dispose()`.** Calling
+`conn.BeginTransactionAsync()` on one thread while another thread calls `db.Dispose()` on the
+owning database is safe, even though the engine considers the transaction open the instant its
+`BEGIN TRANSACTION` succeeds - before this library's own bookkeeping has a chance to run. The
+long-lived hold mentioned above is taken *before* `BEGIN TRANSACTION` is issued, not after it
+succeeds, specifically so that window cannot be raced into: either the hold is acquired first (and
+the database cannot be destroyed until the attempt resolves one way or the other), or the database
+is already gone and `BeginTransactionAsync` throws `ObjectDisposedException` instead of proceeding.
+
 ## Concurrency and the single-writer constraint
 
 By default, LadybugDB permits exactly one write transaction at a time and **rejects** a second
