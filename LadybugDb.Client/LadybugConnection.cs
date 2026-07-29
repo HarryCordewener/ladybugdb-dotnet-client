@@ -66,7 +66,7 @@ public sealed class LadybugConnection : IAsyncDisposable
                 throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
-            return new LadybugQueryResult(_database.Handle, handle);
+            return LadybugQueryResult.Create(_database.Handle, handle);
         }
         finally
         {

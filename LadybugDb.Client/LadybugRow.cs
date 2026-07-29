@@ -25,13 +25,20 @@ public readonly struct LadybugRow
 
     /// <summary>Gets the value at <paramref name="index"/>.</summary>
     /// <param name="index">The zero-based column index.</param>
+    /// <exception cref="IndexOutOfRangeException"><paramref name="index"/> is negative or &gt;= <see cref="ColumnCount"/>.</exception>
     public LadybugValue GetValue(int index) => _values[index];
 
     /// <summary>Gets the name of the column at <paramref name="index"/>.</summary>
     /// <param name="index">The zero-based column index.</param>
+    /// <exception cref="IndexOutOfRangeException"><paramref name="index"/> is negative or &gt;= <see cref="ColumnCount"/>.</exception>
     public string GetColumnName(int index) => _columnNames[index];
 
-    /// <summary>Gets the value of the column named <paramref name="columnName"/>.</summary>
+    /// <summary>
+    /// Gets the value of the column named <paramref name="columnName"/>. If more than one column
+    /// has this name - legal Cypher, e.g. <c>RETURN n.a AS x, n.b AS x</c> - resolves to the
+    /// first match, the same "leftmost wins" behavior <c>System.Data</c>'s
+    /// <c>DataRow[string]</c>/ADO.NET column lookups use for duplicate column names.
+    /// </summary>
     /// <param name="columnName">The column name, as returned by the query (an alias, if the Cypher used <c>AS</c>).</param>
     /// <exception cref="ArgumentException">No column has this name.</exception>
     public LadybugValue this[string columnName]

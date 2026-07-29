@@ -187,4 +187,190 @@ public class EnumerationTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    /// <summary>
+    /// Walks a chain deeper than one link (3 statements, 2 <c>NextResultAsync</c> hops) using the
+    /// only pattern the native API supports safely: always advancing from the most recently
+    /// returned result (<c>current = await current.NextResultAsync();</c>), never re-calling it on
+    /// an earlier one. No test previously exercised more than one hop, which is how the
+    /// single-shared-cursor behavior documented on <see cref="LadybugQueryResult.NextResultAsync"/>
+    /// went unnoticed - a two-statement chain never calls <c>NextResultAsync</c> more than once at
+    /// all, so it can't distinguish "single cursor" from "one cursor per result".
+    /// </summary>
+    /// <remarks>
+    /// Every link stays open (undisposed) until the whole chain has been walked and every link's
+    /// rows read, then all are disposed root-last: the first link IS <c>_root</c> for every
+    /// descendant (see <see cref="LadybugQueryResult"/>'s remarks), so disposing it early - before
+    /// the rest of the chain has been used - is expected to invalidate the remainder, exactly like
+    /// <see cref="NextResultAsync_OriginalDisposedFirst_ChildThrowsObjectDisposedException"/> pins
+    /// deliberately. That is not what this test is checking.
+    /// </remarks>
+    [Test]
+    public async Task NextResultAsync_WalksChainDeeperThanOneLink()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE Z(id INT64, PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:Z {id: 1})")) { }
+
+            var script = "MATCH (n:Z) RETURN n.id; MATCH (n:Z) RETURN count(*); MATCH (n:Z) RETURN n.id + 100;";
+
+            var chain = new List<LadybugQueryResult> { await conn.QueryAsync(script) };
+            while (await chain[^1].NextResultAsync() is { } next)
+                chain.Add(next);
+            await Assert.That(chain.Count).IsEqualTo(3);
+
+            var seen = new List<long>();
+            foreach (var result in chain)
+                await foreach (var row in result)
+                    seen.Add(row.GetValue(0).AsInt64());
+            await Assert.That(seen).IsEquivalentTo(new List<long> { 1, 1, 101 });
+
+            // Root-last: see remarks.
+            for (var i = chain.Count - 1; i >= 0; i--)
+                await chain[i].DisposeAsync();
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// Pins the guard <see cref="LadybugQueryResult.NextResultAsync"/> now raises instead of
+    /// silently returning a stale duplicate: calling it again on a result that already returned a
+    /// real "next" once must throw, not re-read the shared cursor's current (further-advanced)
+    /// position.
+    /// </summary>
+    [Test]
+    public async Task NextResultAsync_CalledTwiceOnSameResult_ThrowsInvalidOperationException()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE ZZ(id INT64, PRIMARY KEY(id))")) { }
+
+            await using var root = await conn.QueryAsync(
+                "MATCH (n:ZZ) RETURN n.id; MATCH (n:ZZ) RETURN count(*); MATCH (n:ZZ) RETURN 1;");
+            await using var first = await root.NextResultAsync();
+            await Assert.That(first).IsNotNull();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await root.NextResultAsync());
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// Pins the guard <see cref="LadybugQueryResult.GetAsyncEnumerator"/> now raises instead of
+    /// silently vending a second enumerator that shares the same already-partially-consumed native
+    /// cursor as the first - exactly the failure mode BCL <c>System.Linq.AsyncEnumerable</c>
+    /// operators like <c>CountAsync</c>-then-<c>ToListAsync</c> would trigger for free.
+    /// </summary>
+    [Test]
+    public async Task GetAsyncEnumerator_CalledTwice_ThrowsInvalidOperationException()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE ZZZ(id INT64, PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:ZZZ {id: 1})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:ZZZ) RETURN n.id");
+            await foreach (var _ in r) { }
+
+            Assert.Throws<InvalidOperationException>(() => r.GetAsyncEnumerator());
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// <c>Current</c> must throw <see cref="InvalidOperationException"/>, never
+    /// <see cref="NullReferenceException"/>, both before the first successful
+    /// <c>MoveNextAsync</c> and after one has returned <see langword="false"/>.
+    /// </summary>
+    [Test]
+    public async Task Enumerator_CurrentOutsideAValidPosition_ThrowsInvalidOperationException()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE W(id INT64, PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:W {id: 1})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:W) RETURN n.id");
+            await using var e = r.GetAsyncEnumerator();
+
+            Assert.Throws<InvalidOperationException>(() => _ = e.Current);
+
+            await Assert.That(await e.MoveNextAsync()).IsTrue();
+            _ = e.Current; // does not throw once positioned on a row
+
+            await Assert.That(await e.MoveNextAsync()).IsFalse();
+            Assert.Throws<InvalidOperationException>(() => _ = e.Current);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    [Test]
+    public async Task LadybugRow_OutOfRangeAccessors_ThrowExpectedExceptions()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE V(id INT64, PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:V {id: 1})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:V) RETURN n.id");
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
+
+            await Assert.That(row.ColumnCount).IsEqualTo(1);
+            Assert.Throws<IndexOutOfRangeException>(() => row.GetValue(99));
+            Assert.Throws<IndexOutOfRangeException>(() => row.GetColumnName(99));
+            Assert.Throws<ArgumentException>(() => _ = row["no-such-column"]);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// <c>RETURN n.a AS x, n.b AS x</c> is legal Cypher; <see cref="LadybugRow.this[string]"/>
+    /// documents "first match wins" for that case rather than throwing or picking arbitrarily.
+    /// </summary>
+    [Test]
+    public async Task LadybugRow_DuplicateColumnNames_IndexerResolvesToFirstMatch()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE U(a INT64, b INT64, PRIMARY KEY(a))")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:U {a: 1, b: 2})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:U) RETURN n.a AS dup, n.b AS dup");
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
+
+            await Assert.That(row.GetColumnName(0)).IsEqualTo("dup");
+            await Assert.That(row.GetColumnName(1)).IsEqualTo("dup");
+            await Assert.That(row["dup"].AsInt64()).IsEqualTo(1L);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

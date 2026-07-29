@@ -105,7 +105,19 @@ await foreach (var row in result)
 `LadybugQueryResult` implements `IAsyncEnumerable<LadybugRow>`, so `await foreach` is the normal
 way to read a result — each iteration advances one row. A `LadybugRow` is fully marshalled into
 managed memory the moment it's yielded; nothing in it holds a native pointer, so it's safe to keep
-around after the enumerator moves past it. Columns are addressable three ways:
+around after the enumerator moves past it.
+
+**A result is single-pass.** There is one native cursor behind a result, not one per enumerator,
+so calling `GetAsyncEnumerator()` (what `await foreach` does under the hood) a second time throws
+`InvalidOperationException` instead of silently handing back an enumerator that shares — and
+therefore appears to have already consumed — the same underlying rows as the first. This matters
+even if you never call `GetAsyncEnumerator()` yourself: .NET 10's in-box `System.Linq.AsyncEnumerable`
+LINQ operators call it too, so `await result.CountAsync()` followed by `await result.ToListAsync()`
+on the same result would otherwise silently return an empty list from the second call. If you need
+the rows more than once, materialize them yourself once — `var rows = await result.ToListAsync();`
+— and reuse the list.
+
+Columns are addressable three ways:
 
 ```csharp
 row.GetValue(0)                 // by position
@@ -127,13 +139,22 @@ script that runs more than one Cypher statement in a single `QueryAsync` call, w
 results with `NextResultAsync()`:
 
 ```csharp
-await using var first = await conn.QueryAsync("MATCH (o:Object) RETURN o.name; MATCH (o:Object) RETURN count(*);");
-await foreach (var row in first) { /* ... */ }
-
-await using var second = await first.NextResultAsync(); // the count(*) result, or null if there wasn't one
-if (second is not null)
-    await foreach (var row in second) { /* ... */ }
+var current = await conn.QueryAsync("MATCH (o:Object) RETURN o.name; MATCH (o:Object) RETURN count(*);");
+while (current is not null)
+{
+    await foreach (var row in current) { /* ... */ }
+    current = await current.NextResultAsync();
+}
 ```
+
+**`NextResultAsync` is also single-pass, and shares one cursor across the whole chain** — measured
+against the real engine, not assumed from the (silent-on-this-point) C header. There is exactly
+one native cursor behind a multi-statement script, not one per result: only ever call
+`NextResultAsync()` on the most recently returned result, as the loop above does
+(`current = await current.NextResultAsync();`). Calling it again on an *earlier* result after a
+*later* one already advanced further throws `InvalidOperationException` — without that guard, it
+would silently hand back a stale duplicate of a result already in hand (and can leave a later
+statement in the script never read through any result at all), rather than failing loudly.
 
 ## Error handling
 
