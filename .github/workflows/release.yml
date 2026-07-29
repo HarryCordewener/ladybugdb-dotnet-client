@@ -92,10 +92,12 @@ jobs:
         uses: NuGet/login@v1
         id: login
         with:
-          # nuget.org profile (username), not email - set by the repo owner
-          # as a repository variable. See docs/RELEASING.md for the one-time
-          # setup this depends on.
-          user: ${{ vars.NUGET_USER }}
+          # nuget.org profile name (not email). Hardcoded deliberately: a
+          # profile name is public - it appears in the nuget.org profile URL -
+          # so it is not a secret, and inlining it removes a setup step and a
+          # silent failure mode (an unset variable resolves to empty, which
+          # fails the exchange with no useful error).
+          user: harrycordewener
 
       - name: Push LadybugDb.Client
         run: >-

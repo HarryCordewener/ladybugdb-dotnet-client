@@ -72,8 +72,8 @@ local/CI builds that never publish). This means:
 
 ## One-time setup the repo owner must do
 
-None of this can be done by an agent or from this repository — it requires the owner's nuget.org
-account and this repo's GitHub settings.
+There is exactly one step, and it requires the owner's nuget.org account — it cannot be done from
+this repository.
 
 1. **Create the nuget.org Trusted Publishing policy.** On nuget.org, sign in as the account that
    should own these packages, go to your profile → **Trusted Publishing**, and add a policy with
@@ -92,14 +92,14 @@ account and this repo's GitHub settings.
    and locks to this repo's owner/repository IDs on the first successful publish — expect that
    window, and don't be alarmed if the policy shows as "pending" until the first tag ships.
 
-2. **Set the `NUGET_USER` repository variable.** The workflow's `NuGet/login@v1` step needs your
-   nuget.org **profile name** (not email address) as the `user` input, and this repo doesn't know
-   it — it's wired as `${{ vars.NUGET_USER }}` deliberately rather than guessed or hardcoded. In
-   this repo's GitHub Settings → **Secrets and variables** → **Actions** → **Variables** tab, add:
-   - Name: `NUGET_USER`
-   - Value: your nuget.org profile name (as shown in the nuget.org account URL/profile page)
+That is the whole setup. There is no variable or secret to configure: the `NuGet/login@v1` step's
+`user` input is hardcoded to `harrycordewener` in `release.yml`. A nuget.org profile name is public
+(it appears in the profile URL), so it is not a secret, and inlining it removes both a setup step
+and a silent failure mode — an unset repository variable resolves to an empty string, which fails
+the token exchange with no useful error.
 
-That is the whole setup — two steps, no third.
+**If the packages ever change nuget.org owner**, edit that `user:` value in `release.yml` to match
+the new profile, and create a Trusted Publishing policy under that account.
 
 > **If you later want a manual approval gate** between "tag pushed" and "packages published",
 > create a GitHub Environment (Settings → **Environments**) with required reviewers, add
