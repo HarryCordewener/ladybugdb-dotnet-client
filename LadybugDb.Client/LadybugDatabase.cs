@@ -128,15 +128,17 @@ public sealed class LadybugDatabase : IDisposable
     /// <summary>
     /// Closes the database. Connections, results, and other objects opened from it should not be
     /// used afterward; disposing them first is still the intended order. Doing so anyway is
-    /// always memory-safe - it never corrupts state or crashes the process - but it is not
-    /// guaranteed to throw <see cref="ObjectDisposedException"/> immediately. <c>Dispose</c>
-    /// releases this object's own baseline reference on the underlying handle; the handle is only
-    /// actually closed once every outstanding lease on it has also been released (see
-    /// <see cref="Interop.LbugStructHandle.Acquire"/>), so a call already in flight on another
-    /// thread when <c>Dispose</c> runs may still complete normally instead of throwing, and a
-    /// burst of concurrent calls can keep succeeding for some time afterward while leases keep
-    /// draining. A call that starts after the handle has fully closed throws
-    /// <see cref="ObjectDisposedException"/>.
+    /// always memory-safe - it never corrupts state or crashes the process. <c>Dispose</c> rejects
+    /// any NEW call against this database immediately, throwing <see cref="ObjectDisposedException"/>
+    /// - but the underlying native storage is only actually destroyed once every OTHER thing still
+    /// depending on it (a call already in flight on another thread, or a still-undisposed child
+    /// object such as a connection or query result - see
+    /// <see cref="Interop.LbugStructHandle.AcquireParentHolds"/>) has finished with it. A call
+    /// already in flight on another thread when <c>Dispose</c> runs may therefore still complete
+    /// normally instead of throwing, and a burst of concurrent calls can keep succeeding for some
+    /// time afterward while those finish draining - but a call that STARTS after this method
+    /// returns always throws <see cref="ObjectDisposedException"/>, regardless of what else is
+    /// still keeping this database's native storage alive underneath.
     /// </summary>
     /// <remarks>
     /// Before releasing this database's own handle, forces every connection that still has an
