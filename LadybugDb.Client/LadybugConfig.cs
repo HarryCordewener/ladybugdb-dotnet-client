@@ -38,6 +38,15 @@ public sealed record LadybugConfig
     /// one-write-transaction-at-a-time restriction; it is not a no-op. Because of that, this
     /// client does not serialize writers itself - see <see cref="LadybugDatabase"/>'s remarks.
     /// </para>
+    /// <para>
+    /// The specific numbers above are this machine's, not a portable benchmark result - an
+    /// independent spot-check on different hardware/load saw materially different absolute
+    /// throughput (602 to 1,248 mut/s, versus roughly 2,600 to 3,900 here) but the identical
+    /// qualitative result: conflicts present and climbing with the flag off, zero with it on.
+    /// Treat the shape of the result (does the flag eliminate conflicts, does throughput scale
+    /// with concurrency) as the finding; treat the specific mutations/sec figures as this
+    /// machine's, not a guarantee for yours.
+    /// </para>
     /// </remarks>
     public bool EnableMultiWrites { get; init; }
 }

@@ -269,6 +269,17 @@ and a burst of concurrent calls can keep succeeding for a short time afterward w
 finish draining. A call that starts after the handle has fully closed always throws
 `ObjectDisposedException`. It never falls through to unmanaged memory either way.
 
+**This also holds if you never dispose anything at all.** Neither `LadybugDatabase` nor
+`LadybugConnection` has a finalizer of its own — only their underlying native handles do — so
+abandoning a database, connection, and open transaction without a `using`/`await using` anywhere
+relies entirely on the GC's finalizer path, whose order between two independently-finalizable
+objects the CLR does not guarantee. A connection is engineered to hold its owning database alive
+(via a reference-counted lease, for as long as it has an open transaction) specifically so that,
+whichever order the finalizers actually run in, the database is never gone by the time the
+connection needs it to safely close out that transaction. Still write `using`/`await using` —
+relying on finalization means your data changes reach disk on the GC's schedule, not yours — but
+forgetting to is not a crash risk.
+
 ## Concurrency and the single-writer constraint
 
 By default, LadybugDB permits exactly one write transaction at a time and **rejects** a second
@@ -309,6 +320,13 @@ and throughput rose with concurrency instead of staying flat (roughly 2,600-2,90
 one writer, up to 3,500-3,900/sec at four to eight). With it off (the default), conflicts climbed
 with writer count in every run of the same experiment (0 → ~2,700 → ~8,000 → ~18,000 over the same
 3-second window) while throughput stayed essentially flat.
+
+These specific mutations/sec figures are this machine's, not a portable number - an independent
+spot-check on different hardware/load saw 602-1,248 mut/s instead of ~2,600-3,900, with the same
+conflict counts scaling into the thousands with the flag off. What travels is the *shape* of the
+result (conflicts present and climbing with the flag off, zero with it on, throughput flat vs.
+scaling), not the absolute rate - re-measure on your own hardware if the exact numbers matter to
+you.
 
 ```csharp
 var config = new LadybugConfig { EnableMultiWrites = true };

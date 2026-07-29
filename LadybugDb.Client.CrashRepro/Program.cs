@@ -13,6 +13,9 @@ using LadybugDb.Client;
 // it inspects Process.ExitCode rather than catching anything itself.
 //
 // Usage: LadybugDb.Client.CrashRepro <scenario> <db-path>
+// Scenarios: db-first-open, db-first-committed, conn-first-open, conn-first-committed (explicit
+// dispose orderings) and gc-abandon-open (abandons everything without disposing anything and
+// forces the real GC finalizer path - see AbandonWithoutDisposal_TransactionLeftOpen).
 // Exit 0 and "DONE" on stdout: the scenario completed and the process is healthy.
 // Exit 1 and "MANAGED_EXCEPTION:...": a normal (non-fatal) exception was thrown and caught here.
 // Any other exit code (e.g. 134 = SIGABRT, 139 = SIGSEGV on Linux): the process was killed.
@@ -41,6 +44,10 @@ try
             break;
         case "conn-first-committed":
             await ConnectionDisposedFirst_TransactionAlreadyCommitted(path);
+            break;
+        case "gc-abandon-open":
+            await AbandonWithoutDisposal_TransactionLeftOpen(path);
+            ForceFullGarbageCollection();
             break;
         default:
             Console.Error.WriteLine($"unknown scenario: {scenario}");
@@ -131,4 +138,32 @@ static async Task ConnectionDisposedFirst_TransactionAlreadyCommitted(string pat
     await tx.CommitAsync();
 
     await conn.DisposeAsync();
+}
+
+// No `using`/`await using` and no explicit Dispose/DisposeAsync call anywhere below - once this
+// method returns, db/conn/tx are reachable from nowhere else, so the GC is free to collect and
+// finalize them whenever it likes. LadybugDatabase and LadybugConnection have no finalizers of
+// their own; only the underlying SafeHandles (LbugDatabaseHandle/LbugConnectionHandle) do, and
+// their finalization order relative to each other is not guaranteed by the CLR - this scenario
+// exists specifically to exercise that real GC finalizer path end to end, not just the explicit
+// Dispose/DisposeAsync paths the other scenarios above cover.
+static async Task AbandonWithoutDisposal_TransactionLeftOpen(string path)
+{
+    var db = new LadybugDatabase(path);
+    var conn = await db.ConnectAsync();
+    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+
+    var tx = await conn.BeginTransactionAsync();
+    await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+
+    _ = tx; // never committed, rolled back, or disposed - and neither are conn or db
+}
+
+static void ForceFullGarbageCollection()
+{
+    for (var i = 0; i < 3; i++)
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+    }
 }

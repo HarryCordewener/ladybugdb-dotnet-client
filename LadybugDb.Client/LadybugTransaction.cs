@@ -30,9 +30,57 @@ namespace LadybugDb.Client;
 public sealed class LadybugTransaction : IAsyncDisposable
 {
     private readonly LadybugConnection _connection;
-    private bool _completed;
+
+    /// <summary>
+    /// 0 while open, 1 once completed. An <c>int</c>, not a <c>bool</c>, specifically so the
+    /// open-to-completed transition can go through <see cref="Interlocked.CompareExchange(ref int, int, int)"/>
+    /// instead of a plain check-then-set - see <see cref="TryClaimCompletion"/> for why that
+    /// matters: <see cref="LadybugConnection.DisposeAsync"/> and
+    /// <see cref="LadybugDatabase.Dispose"/> can both call this transaction's close-out path for
+    /// the same still-open transaction from different threads (a database disposed on one thread
+    /// concurrently with the connection it owns being disposed on another - not a contrived
+    /// case, e.g. two independent shutdown paths racing), and a plain <c>if (_completed) return;
+    /// _completed = true;</c> has a window where both threads read <see langword="false"/>
+    /// before either writes <see langword="true"/>, letting both issue a native call against the
+    /// same connection concurrently. Measured directly: instrumented and forced with a
+    /// <see cref="System.Threading.Barrier"/>, that window was hit in every single contended
+    /// iteration attempted before this fix existed.
+    /// </summary>
+    private int _completed;
+
+    /// <summary>
+    /// Test-only diagnostic: the number of callers that ever successfully won
+    /// <see cref="TryClaimCompletion"/>'s race for this transaction. Structurally always exactly
+    /// 0 or 1 given <see cref="Interlocked.CompareExchange(ref int, int, int)"/>'s own atomicity
+    /// guarantee - not something production code reads - but exposed so
+    /// <c>TransactionConcurrentDisposalTests</c> can directly confirm "exactly one native
+    /// ROLLBACK, ever, no matter how many threads race to close this transaction out" rather than
+    /// inferring it indirectly from on-disk state, which the fix-round-2 investigation found does
+    /// not reliably differ between the racy and fixed versions of this code (both can leave
+    /// correct on-disk state most of the time even when two threads did both reach the native
+    /// call).
+    /// </summary>
+    internal int CompletionClaimCount => _completionClaimCount;
+
+    private int _completionClaimCount;
 
     private LadybugTransaction(LadybugConnection connection) => _connection = connection;
+
+    /// <summary>
+    /// Atomically claims this transaction's open-to-completed transition. Returns
+    /// <see langword="true"/> for exactly one caller, ever, across however many threads race to
+    /// call this concurrently - every other caller (including ones already inside
+    /// <see cref="CommitAsync"/>, <see cref="RollbackAsync"/>, <see cref="DisposeAsync"/>, or
+    /// <see cref="EnsureClosedForDispose"/> at the same moment) gets <see langword="false"/> and
+    /// must not attempt the corresponding native call. See <see cref="_completed"/> for why a
+    /// plain check-then-set is not good enough here.
+    /// </summary>
+    private bool TryClaimCompletion()
+    {
+        var won = Interlocked.CompareExchange(ref _completed, 1, 0) == 0;
+        if (won) Interlocked.Increment(ref _completionClaimCount);
+        return won;
+    }
 
     /// <summary>
     /// Issues <c>BEGIN TRANSACTION</c> on <paramref name="connection"/> and returns the
@@ -55,47 +103,68 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// run on this transaction - successfully, or via the automatic rollback
     /// <see cref="DisposeAsync"/> performs when neither ran first.
     /// </summary>
-    public bool IsCompleted => _completed;
+    public bool IsCompleted => Volatile.Read(ref _completed) != 0;
 
     /// <summary>Commits the transaction by issuing <c>COMMIT</c>.</summary>
     /// <param name="cancellationToken">Forwarded to the underlying <c>COMMIT</c> query.</param>
     /// <exception cref="InvalidOperationException">
-    /// This transaction was already committed or rolled back.
+    /// This transaction was already committed or rolled back - including by a concurrent
+    /// <see cref="DisposeAsync"/>/<see cref="EnsureClosedForDispose"/> that won the race to close
+    /// it out first; see <see cref="_completed"/>.
     /// </exception>
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
-        ThrowIfCompleted();
-        await using (var _ = await _connection.QueryAsync("COMMIT", cancellationToken))
+        if (!TryClaimCompletion()) throw AlreadyCompleted();
+
+        try
         {
+            await using (var _ = await _connection.QueryAsync("COMMIT", cancellationToken))
+            {
+            }
+        }
+        catch
+        {
+            // The claim above is only valid once the commit actually happens - give it back so
+            // a caller can retry or fall back to RollbackAsync, matching the pre-existing
+            // behaviour of only marking this transaction completed after COMMIT/ROLLBACK
+            // actually succeeded.
+            Volatile.Write(ref _completed, 0);
+            throw;
         }
 
-        _completed = true;
         _connection.OnTransactionCompleted(this);
     }
 
     /// <summary>Rolls back the transaction by issuing <c>ROLLBACK</c>.</summary>
     /// <param name="cancellationToken">Forwarded to the underlying <c>ROLLBACK</c> query.</param>
     /// <exception cref="InvalidOperationException">
-    /// This transaction was already committed or rolled back.
+    /// This transaction was already committed or rolled back - including by a concurrent
+    /// <see cref="DisposeAsync"/>/<see cref="EnsureClosedForDispose"/> that won the race to close
+    /// it out first; see <see cref="_completed"/>.
     /// </exception>
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
-        ThrowIfCompleted();
-        await using (var _ = await _connection.QueryAsync("ROLLBACK", cancellationToken))
+        if (!TryClaimCompletion()) throw AlreadyCompleted();
+
+        try
         {
+            await using (var _ = await _connection.QueryAsync("ROLLBACK", cancellationToken))
+            {
+            }
+        }
+        catch
+        {
+            // See CommitAsync's identical catch: give the claim back so a retry is possible.
+            Volatile.Write(ref _completed, 0);
+            throw;
         }
 
-        _completed = true;
         _connection.OnTransactionCompleted(this);
     }
 
-    private void ThrowIfCompleted()
-    {
-        if (_completed)
-            throw new InvalidOperationException(
-                "This transaction has already been completed (committed or rolled back). " +
-                "Start a new one with BeginTransactionAsync for further work.");
-    }
+    private static InvalidOperationException AlreadyCompleted() => new(
+        "This transaction has already been completed (committed or rolled back). " +
+        "Start a new one with BeginTransactionAsync for further work.");
 
     /// <summary>
     /// Rolls back the transaction if neither <see cref="CommitAsync"/> nor
@@ -115,7 +184,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        if (_completed) return;
+        if (!TryClaimCompletion()) return;
 
         try
         {
@@ -123,11 +192,12 @@ public sealed class LadybugTransaction : IAsyncDisposable
         }
         catch
         {
-            // Swallowed - see remarks above.
+            // Swallowed - see remarks above. Unlike CommitAsync/RollbackAsync, the claim is NOT
+            // given back on failure here: disposal must not leave this transaction in a state
+            // where something could still try to commit or roll it back again.
         }
         finally
         {
-            _completed = true;
             _connection.OnTransactionCompleted(this);
         }
     }
@@ -178,10 +248,26 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// (and its two callers' own <c>Dispose</c>/<c>DisposeAsync</c>, both intentionally
     /// synchronous call sites) to become <c>async</c> for a genuine yield that never happens.
     /// </para>
+    /// <para>
+    /// <b>Callable concurrently from both callers at once - by design, not by luck.</b>
+    /// <see cref="LadybugConnection.DisposeAsync"/> and <see cref="LadybugDatabase.Dispose"/> can
+    /// legitimately race: a database disposed on one thread while the connection it owns is
+    /// disposed on another (two independent shutdown paths, not a contrived scenario) can both
+    /// reach this method for the SAME still-open transaction at the same time. <see cref="TryClaimCompletion"/>
+    /// - not a plain <c>if (_completed) return;</c> - is what makes that safe: exactly one caller
+    /// ever proceeds to issue the native <c>ROLLBACK</c>, and every other concurrent caller
+    /// (here, or in <see cref="CommitAsync"/>/<see cref="RollbackAsync"/>/<see cref="DisposeAsync"/>)
+    /// returns immediately instead. Without this, two threads could both observe "not completed
+    /// yet" and both issue a native call against the same connection concurrently - measured
+    /// directly (forced with a <see cref="System.Threading.Barrier"/>) to happen on effectively
+    /// every contended attempt before this method used <see cref="TryClaimCompletion"/>, and
+    /// two concurrent native calls on one connection with no engine-side lock between them is
+    /// exactly the kind of thing that can work by chance for a long time and then not.
+    /// </para>
     /// </remarks>
     internal void EnsureClosedForDispose()
     {
-        if (_completed) return;
+        if (!TryClaimCompletion()) return;
 
         try
         {
@@ -198,7 +284,6 @@ public sealed class LadybugTransaction : IAsyncDisposable
         }
         finally
         {
-            _completed = true;
             _connection.OnTransactionCompleted(this);
         }
     }

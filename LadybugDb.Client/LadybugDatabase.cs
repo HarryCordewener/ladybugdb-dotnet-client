@@ -8,6 +8,7 @@ namespace LadybugDb.Client;
 /// constructed and disposed synchronously; connections and results are async-disposable.
 /// </summary>
 /// <remarks>
+/// <para>
 /// This client does not serialize write transactions on the caller's behalf, and holds no
 /// lock of its own around them. Whether concurrent writers can proceed is entirely
 /// <see cref="LadybugConfig.EnableMultiWrites"/>'s call - see its remarks for the measurement
@@ -17,6 +18,18 @@ namespace LadybugDb.Client;
 /// not this client's - an earlier design reserved a <c>SemaphoreSlim</c> here specifically to
 /// take on that job client-side, but measurement showed the flag already does it, so the lock
 /// was removed rather than adding a second, redundant serialization point.
+/// </para>
+/// <para>
+/// Safe to abandon without disposing anything, including with an open <see cref="LadybugTransaction"/>
+/// still on one of its connections - not just to dispose out of order. Neither this type nor
+/// <see cref="LadybugConnection"/> has a finalizer of its own; only their underlying native
+/// handles do, and those two handles' finalizers would otherwise run independently, in whichever
+/// order the GC happens to pick. <see cref="Interop.LbugConnectionHandle"/> closes that gap by
+/// holding a reference-counted lease on its owning database's handle for as long as a transaction
+/// is open on it, which is what makes the ordering safe by construction rather than by observed
+/// GC behaviour - see that type's remarks for the full explanation and why relying on the
+/// observed order alone was not good enough.
+/// </para>
 /// </remarks>
 public sealed class LadybugDatabase : IDisposable
 {

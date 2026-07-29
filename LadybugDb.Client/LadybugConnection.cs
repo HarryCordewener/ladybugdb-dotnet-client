@@ -28,6 +28,9 @@ public sealed class LadybugConnection : IAsyncDisposable
         _handle = handle;
     }
 
+    /// <summary>This connection's underlying handle, mirroring <see cref="LadybugDatabase.Handle"/>.</summary>
+    internal LbugConnectionHandle Handle => _handle;
+
     /// <summary>
     /// Executes a Cypher statement and returns its result.
     /// </summary>
@@ -125,6 +128,12 @@ public sealed class LadybugConnection : IAsyncDisposable
         var transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
         _activeTransaction = transaction;
         _database.TrackTransactionOpened(this);
+        // Holds a long-lived reference on the database for as long as this transaction is open -
+        // see LbugConnectionHandle's remarks for why this, not just TrackTransactionOpened above,
+        // is required: TrackTransactionOpened only helps along the explicit db.Dispose() path;
+        // this is what keeps the database alive even if everything is abandoned without disposal
+        // and only the GC finalizer path ever runs.
+        _handle.MarkTransactionOpen();
         return transaction;
     }
 
@@ -138,6 +147,7 @@ public sealed class LadybugConnection : IAsyncDisposable
         if (!ReferenceEquals(_activeTransaction, transaction)) return;
         _activeTransaction = null;
         _database.TrackTransactionClosed(this);
+        _handle.MarkTransactionClosed();
     }
 
     /// <summary>
