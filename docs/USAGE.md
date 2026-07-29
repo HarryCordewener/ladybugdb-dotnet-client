@@ -141,6 +141,25 @@ the *Cypher* references a name that was never bound, which fails at `ExecuteAsyn
 `LadybugException` ("Parameter name not found."), not at `Bind`. Double-check your parameter names
 against the Cypher string itself; nothing else will catch a mismatch for you.
 
+**`Bind`/`BindNull` calls on the SAME `LadybugPreparedStatement` are safe to call concurrently, from
+multiple threads.** The engine's own bound-value storage for a prepared statement
+(`lbug_prepared_statement`'s `_bound_values`) is mutable state the engine does not lock internally —
+unlike a `LadybugConnection`, which the native header documents as thread-safe, a prepared statement
+carries no such guarantee, and unsynchronized concurrent `Bind` calls on one statement corrupt the
+native heap and crash the process (reproduced directly: two threads binding on one statement, no
+synchronization, crashed on effectively every run). This client serializes every `Bind`/`BindNull`
+call on an instance internally, so calling them concurrently is memory-safe.
+
+**What that serialization does NOT give you: a defined ordering between a `Bind` and a concurrent
+`ExecuteAsync`.** `ExecuteAsync` is deliberately not part of the same lock — it does not touch
+`_bound_values` itself, only reads whatever the engine already has bound whenever
+`lbug_connection_execute` happens to run. Racing a `Bind` against an `ExecuteAsync` on the same
+statement from different threads is memory-safe (never corrupts state or crashes), but which of the
+racing values ends up in the executed statement is unspecified — a correctness question for your own
+code to avoid (e.g. by not doing that), not something this client can resolve on your behalf. If you
+need a specific value in a specific execution, don't call `Bind` and `ExecuteAsync` for the same
+statement concurrently from different threads.
+
 ## Reading results
 
 ```csharp
@@ -513,6 +532,33 @@ catch (ObjectDisposedException)
 await conn.DisposeAsync(); // still safe, even now
 ```
 
+**A result obtained BEFORE the database was disposed is also safe to dispose, or let the GC
+finalize, AFTER — including a DML result (`CREATE`/`SET`/`DELETE`/...), not just a read one.**
+
+```csharp
+var db = new LadybugDatabase(path);
+var conn = await db.ConnectAsync();
+await using (var _ = await conn.QueryAsync("CREATE NODE TABLE Object(dbref INT64, PRIMARY KEY(dbref))")) { }
+
+var result = await conn.QueryAsync("CREATE (o:Object {dbref: 1})"); // a DML result, kept alive
+
+db.Dispose(); // disposed while `result` is still alive and undisposed
+
+await result.DisposeAsync(); // still safe, even for a DML result destroyed after its database
+await conn.DisposeAsync();
+```
+
+This did not always hold: a DML result's own destroy touches memory the database owns (its
+materialized result table lives in the database's own buffer manager), and every native object in
+this client used to protect only its OWN storage against its OWN disposal - nothing made an
+ancestor outlive a descendant that still needed it. A plain read result happened to not exercise
+that path and was safe by accident; a DML result was not, and destroying one after its database
+had already been disposed segfaulted the process outright (not a catchable exception) before this
+was fixed. Every native handle in this client - connections, results, prepared statements - now
+holds a reference on its parent(s) for its own entire lifetime, not merely for the call that
+created it (see the model described below), which closes this for every object, not just this one
+reproduction.
+
 **This includes an open transaction.** If a connection still has a `LadybugTransaction` open on
 it (`BeginTransactionAsync` called, neither `CommitAsync` nor `RollbackAsync` run yet) when its
 database is disposed, the database rolls that transaction back itself, before releasing its own
@@ -538,32 +584,44 @@ rollback above running first, destroying a connection with an open transaction *
 database was already disposed would ask the engine to roll back against a database that no longer
 exists.
 
-One subtlety: post-dispose behavior is memory-safe but not strictly *deterministic* in timing.
-Each handle only actually closes once every outstanding lease on it has drained — a call already
-in flight on another thread when `Dispose()` runs may still complete normally instead of throwing,
-and a burst of concurrent calls can keep succeeding for a short time afterward while those leases
-finish draining. A call that starts after the handle has fully closed always throws
-`ObjectDisposedException`. It never falls through to unmanaged memory either way.
+**The model underneath all of this: `Dispose()`/`DisposeAsync()` means "closed for new work
+immediately", not "destroyed immediately".** Every native object this client wraps - a database, a
+connection, a query result, a prepared statement - rejects any NEW call against it the instant its
+own `Dispose`/`DisposeAsync` runs, always, regardless of anything else still depending on it. But
+the underlying native object is only actually destroyed once every OTHER thing still depending on
+it - a call already in progress, or a child object (a connection depending on its database, a
+result depending on its connection and database, and so on) that has not itself been disposed yet
+- has finished with it. A call already in flight on another thread when `Dispose()` runs may
+therefore still complete normally instead of throwing, and a burst of concurrent calls can keep
+succeeding for a short time afterward while those leases finish draining; a call that *starts*
+after the handle has fully closed always throws `ObjectDisposedException`, and the actual
+destroy - the one point where memory safety would be at risk if the ordering were wrong - is
+deferred correctly no matter which order objects are disposed in, or which order the GC happens to
+finalize them. It never falls through to unmanaged memory either way.
 
 **This also holds if you never dispose anything at all.** Neither `LadybugDatabase` nor
 `LadybugConnection` has a finalizer of its own — only their underlying native handles do — so
 abandoning a database, connection, and open transaction without a `using`/`await using` anywhere
 relies entirely on the GC's finalizer path, whose order between two independently-finalizable
-objects the CLR does not guarantee. A connection is engineered to hold its owning database alive
-(via a reference-counted lease, for as long as it has an open transaction) specifically so that,
-whichever order the finalizers actually run in, the database is never gone by the time the
-connection needs it to safely close out that transaction. Still write `using`/`await using` —
-relying on finalization means your data changes reach disk on the GC's schedule, not yours — but
-forgetting to is not a crash risk.
+objects the CLR does not guarantee. Every child handle (a connection, a query result, a prepared
+statement) holds its own reference-counted lease on its parent(s) for its own ENTIRE lifetime - not
+just while a transaction happens to be open - specifically so that, whichever order the finalizers
+actually run in, no object's native destroy ever runs against a parent that has already been torn
+down. Still write `using`/`await using` — relying on finalization means your data changes reach
+disk on the GC's schedule, not yours — but forgetting to is not a crash risk.
 
 **And if `BeginTransactionAsync` itself races a concurrent `Dispose()`.** Calling
 `conn.BeginTransactionAsync()` on one thread while another thread calls `db.Dispose()` on the
 owning database is safe, even though the engine considers the transaction open the instant its
-`BEGIN TRANSACTION` succeeds - before this library's own bookkeeping has a chance to run. The
-long-lived hold mentioned above is taken *before* `BEGIN TRANSACTION` is issued, not after it
-succeeds, specifically so that window cannot be raced into: either the hold is acquired first (and
-the database cannot be destroyed until the attempt resolves one way or the other), or the database
-is already gone and `BeginTransactionAsync` throws `ObjectDisposedException` instead of proceeding.
+`BEGIN TRANSACTION` succeeds - before this library's own bookkeeping has a chance to run. This no
+longer needs a transaction-specific hold at all: a connection's own long-lived reference on its
+database (see above) is established once, when the connection is opened, well before any
+`BEGIN TRANSACTION` could ever be issued on it - so by the time a transaction begins, the database
+is already guaranteed to outlive whatever this call does next, regardless of when the engine
+itself considers the transaction to have started. `db.Dispose()` still closes the database for new
+work immediately, so if it already ran before `BeginTransactionAsync` reaches the engine,
+`BeginTransactionAsync` throws `ObjectDisposedException` instead of proceeding - same outcome as
+before, just without a bespoke mechanism dedicated to this one call.
 
 ## Concurrency and the single-writer constraint
 

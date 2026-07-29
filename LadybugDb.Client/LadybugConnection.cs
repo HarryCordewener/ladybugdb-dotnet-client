@@ -25,7 +25,7 @@ namespace LadybugDb.Client;
 /// racing it against another <see cref="BeginTransactionAsync"/> call on the same connection
 /// deterministically produces exactly one successful transaction and an
 /// <see cref="InvalidOperationException"/> for every other caller - never two open transactions,
-/// and never the leaked-database failure mode <see cref="_transactionGate"/>'s remarks describe.
+/// and never the engine-level invalidation <see cref="_transactionGate"/>'s remarks describe.
 /// This says nothing about the ENGINE-level semantics of what those concurrent operations DO -
 /// see <see cref="LadybugDatabase"/>'s remarks for the single-writer/<see cref="LadybugConfig.EnableMultiWrites"/>
 /// contract that governs whether two transactions can commit concurrently without conflict -
@@ -53,22 +53,18 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// time. Without this, two threads calling <see cref="BeginTransactionAsync"/> on the SAME
     /// connection concurrently could both observe <see cref="_activeTransaction"/> as
     /// <see langword="null"/> before either set it (a classic check-then-act race), and both
-    /// proceed to call <see cref="Interop.LbugConnectionHandle.TryAcquireDatabaseHoldForTransaction"/>
-    /// and issue <c>BEGIN TRANSACTION</c> - the documented client-side nested-transaction guard
-    /// below existed but essentially never fired under the race (measured: 0-1 rejections out of
-    /// 31 racing attempts), so the nested <c>BEGIN TRANSACTION</c> reached the engine almost every
-    /// time despite the guard. Combined with the (then-)boolean hold in
-    /// <see cref="Interop.LbugConnectionHandle"/>, the loser's failure-path release could cancel
-    /// the winner's still-active hold outright, leaking the whole underlying <c>lbug_database</c>
-    /// (its ~8 TiB virtual-address reservation never unmapped) on roughly 40% of racing attempts -
-    /// measured driving VmSize from a flat 8 TiB to 112 TiB over 30 iterations and killing the
-    /// process with a failed <c>mmap</c> soon after. A <see cref="SemaphoreSlim"/> rather than a
-    /// <c>lock</c>/<see cref="Lock"/> specifically because the critical section spans an
-    /// <see langword="await"/> (the <c>BEGIN TRANSACTION</c> query itself) - this type documents
-    /// its async methods as completing synchronously today, but a synchronization primitive whose
-    /// correctness depends on that staying true forever is exactly the kind of thing that breaks
-    /// silently later, so this uses the primitive that is correct regardless. See
-    /// <b>Thread-safety</b> in this type's own remarks for the contract this establishes.
+    /// proceed to issue <c>BEGIN TRANSACTION</c> - the documented client-side nested-transaction
+    /// guard below existed but essentially never fired under the race (measured: 0-1 rejections
+    /// out of 31 racing attempts), so the nested <c>BEGIN TRANSACTION</c> reached the engine
+    /// almost every time despite the guard, invalidating the first transaction at the engine
+    /// level (see the <see cref="InvalidOperationException"/> thrown below). A
+    /// <see cref="SemaphoreSlim"/> rather than a <c>lock</c>/<see cref="Lock"/> specifically
+    /// because the critical section spans an <see langword="await"/> (the <c>BEGIN TRANSACTION</c>
+    /// query itself) - this type documents its async methods as completing synchronously today,
+    /// but a synchronization primitive whose correctness depends on that staying true forever is
+    /// exactly the kind of thing that breaks silently later, so this uses the primitive that is
+    /// correct regardless. See <b>Thread-safety</b> in this type's own remarks for the contract
+    /// this establishes.
     /// </summary>
     private readonly SemaphoreSlim _transactionGate = new(1, 1);
 
@@ -169,13 +165,22 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">
     /// The parent <see cref="LadybugDatabase"/> is already fully closed.
     /// </exception>
+    /// <remarks>
+    /// No separate database hold to take here: this connection's own handle has held a long-lived
+    /// reference on its owning database since <see cref="LadybugDatabase.ConnectAsync"/> opened it - see
+    /// <see cref="Interop.LbugConnectionHandle"/>'s remarks - which already guarantees the database
+    /// cannot be destroyed out from under a transaction opened here, or racing this call itself,
+    /// regardless of when <c>BEGIN TRANSACTION</c> is considered to have taken effect at the engine
+    /// level. What used to require a transaction-specific hold, taken and released around exactly
+    /// this method, is now just a consequence of this connection existing at all.
+    /// </remarks>
     public async ValueTask<LadybugTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
-        // Serializes this whole check-acquire-call-record sequence against every other
-        // concurrent BeginTransactionAsync call (and against OnTransactionCompleted/
+        // Serializes this whole check-then-begin sequence against every other concurrent
+        // BeginTransactionAsync call (and against OnTransactionCompleted/
         // EnsureNoOpenTransactionForDispose) on this same connection - see _transactionGate's
-        // remarks for why an unsynchronized version of exactly this sequence used to leak the
-        // entire underlying database under a race.
+        // remarks for why an unsynchronized version of exactly this sequence used to invalidate
+        // the winner's transaction at the engine level under a race.
         await _transactionGate.WaitAsync(cancellationToken);
         try
         {
@@ -186,31 +191,7 @@ public sealed class LadybugConnection : IAsyncDisposable
                     "the engine would invalidate the first transaction rather than merely rejecting " +
                     "the second call.");
 
-            // Reserve a long-lived hold on the database BEFORE issuing BEGIN TRANSACTION to the
-            // engine, not after it succeeds - see LbugConnectionHandle's remarks. The engine
-            // considers a transaction open the instant its BEGIN TRANSACTION call returns success,
-            // which is before ANY of this method's own bookkeeping below would otherwise run
-            // (including LadybugTransaction.BeginAsync's own disposal of that call's result). A
-            // concurrent LadybugDatabase.Dispose() racing this call must never be able to complete
-            // inside that window with nothing holding the database open - taking the hold first is
-            // what makes that impossible rather than merely unlikely.
-            if (!_handle.TryAcquireDatabaseHoldForTransaction())
-                throw new ObjectDisposedException(nameof(LadybugDatabase));
-
-            LadybugTransaction transaction;
-            try
-            {
-                transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
-            }
-            catch
-            {
-                // BEGIN TRANSACTION did not open anything at the engine level (or cancellation
-                // means we can no longer be sure it will) - release the hold immediately rather
-                // than leaving it for a completion that will never come, which would otherwise
-                // wedge a concurrent LadybugDatabase.Dispose() forever.
-                _handle.ReleaseDatabaseHoldForTransaction();
-                throw;
-            }
+            var transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
 
             _activeTransaction = transaction;
             _database.TrackTransactionOpened(this);
@@ -246,7 +227,6 @@ public sealed class LadybugConnection : IAsyncDisposable
         }
 
         _database.TrackTransactionClosed(this);
-        _handle.ReleaseDatabaseHoldForTransaction();
     }
 
     /// <summary>

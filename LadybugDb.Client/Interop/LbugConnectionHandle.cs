@@ -4,93 +4,62 @@ using LadybugDb.Client.Native;
 namespace LadybugDb.Client.Interop;
 
 /// <summary>
-/// <c>lbug_connection_destroy</c> auto-rolls-back any transaction still open on the connection
-/// it destroys, and that auto-rollback needs the owning <see cref="LbugDatabaseHandle"/> to still
-/// be alive - if the database was already destroyed, the native side calls
+/// <c>lbug_connection_destroy</c> can dereference its owning database's storage - most visibly, it
+/// auto-rolls-back any transaction still open on the connection it destroys, and that auto-rollback
+/// needs the owning <see cref="LbugDatabaseHandle"/> to still be alive, or the native side calls
 /// <c>std::terminate()</c> instead of raising anything catchable (verified directly against the
-/// real engine). <see cref="LadybugConnection"/>/<see cref="LadybugDatabase"/> close out any open
-/// transaction explicitly before either's own <c>Dispose</c>/<c>DisposeAsync</c> can reach this
-/// handle's release, which covers every path that goes through those managed wrappers. It does
-/// NOT cover a caller abandoning <c>LadybugDatabase</c>/<c>LadybugConnection</c>/
-/// <c>LadybugTransaction</c> without disposing anything: only the underlying <c>SafeHandle</c>s
-/// have finalizers (the managed wrappers do not), so in that case the ONLY thing that ever runs
-/// is this handle's own <see cref="ReleaseHandle"/> and <see cref="LbugDatabaseHandle"/>'s -
-/// independently, in an order the CLR does not guarantee (an object reachable only through
-/// another finalizable object is not guaranteed to outlive it during finalization). This type
-/// closes that gap by holding its own <see cref="SafeHandle.DangerousAddRef(ref bool)"/> lease on
-/// <see cref="_ownerDatabase"/> for as long as this connection has an open (or being-opened)
-/// transaction (see <see cref="TryAcquireDatabaseHoldForTransaction"/>/
-/// <see cref="ReleaseDatabaseHoldForTransaction"/>) - not merely for the duration of one call,
-/// unlike <see cref="LbugStructHandle.Acquire"/>. That lease makes it impossible for the
-/// database's own <c>ReleaseHandle</c> to run - <c>SafeHandle</c> only invokes it once every
-/// outstanding reference reaches zero - until this handle's own <see cref="ReleaseHandle"/> has
-/// released it, REGARDLESS of which handle's finalizer the GC happens to run first, or of a
-/// concurrent <c>Dispose</c> racing a concurrent transaction begin. Ordering is enforced by
-/// reference-counting, not by observed GC or thread-scheduling behaviour.
+/// real engine). This handle closes that gap the general way every other <c>LbugStructHandle</c>
+/// with a native parent does (see <see cref="LbugStructHandle.AcquireParentHolds"/>): from the
+/// moment <see cref="Open"/> successfully adopts this connection's storage, it holds its own
+/// <see cref="System.Runtime.InteropServices.SafeHandle.DangerousAddRef(ref bool)"/> lease on
+/// <see cref="LbugDatabaseHandle"/> for this connection's ENTIRE remaining lifetime - not merely
+/// while a transaction happens to be open on it, and not merely for the duration of one call, unlike
+/// <see cref="LbugStructHandle.Acquire"/>. That lease makes it impossible for the database's own
+/// <c>ReleaseHandle</c> to run - <c>SafeHandle</c> only invokes it once every outstanding reference
+/// reaches zero - until this handle's own <see cref="ReleaseHandle"/> has released it, which happens
+/// only AFTER <c>lbug_connection_destroy</c> has already run. That ordering holds REGARDLESS of
+/// which handle's finalizer the GC happens to run first, or of a concurrent <c>Dispose</c> racing a
+/// concurrent transaction begin, or of whether a transaction is open on this connection at all: it
+/// is enforced by reference-counting, not by observed GC or thread-scheduling behaviour, or by any
+/// bookkeeping scoped to transactions specifically.
 /// </summary>
 /// <remarks>
-/// <b>The hold must be acquired BEFORE the engine-level <c>BEGIN TRANSACTION</c> is issued, not
-/// after it succeeds.</b> A second, live-concurrency crash (distinct from the GC-abandonment one
-/// above, found reviewing this same class) proved that the boundary matters: the engine considers
-/// a transaction open the instant its own <c>BEGIN TRANSACTION</c> call returns success - before
-/// <em>any</em> C# bookkeeping runs, including the <c>await using</c> that disposes that call's
-/// own query result inside <c>LadybugTransaction.BeginAsync</c>. If the hold were taken only
-/// after that call returns (as an earlier version of this fix did), a concurrent
-/// <see cref="LadybugDatabase.Dispose"/> could complete FULLY inside that window - nothing is
-/// holding the database open yet - freeing its native memory while the engine still has a live,
-/// completely untracked open transaction on this connection. Reproduced 4/4 as a segfault
-/// (SIGSEGV), not the catchable <c>std::terminate()</c> case above; verified fixed by moving the
-/// acquire to <em>before</em> <see cref="LadybugConnection.BeginTransactionAsync"/> issues
-/// anything to the engine at all, releasing it immediately if the attempt itself then fails (see
-/// that method).
+/// <para>
+/// <b>This used to be a transaction-only special case; it no longer is.</b> An earlier version of
+/// this type took the long-lived database hold only while a transaction was open (or being opened),
+/// tracked by a dedicated <see cref="System.Threading.Interlocked"/> counter, on the theory that
+/// every OTHER connection operation already "captures its product into a self-protecting
+/// <c>SafeHandle</c>" and therefore needed no such hold. That reasoning was wrong: a self-protecting
+/// child <c>SafeHandle</c> (a query result, a prepared statement) only guards its own storage
+/// against ITS OWN disposal - nothing about it makes the DATABASE outlive it, and a query result's
+/// <c>ReleaseHandle</c> reaching into database-owned memory (a DML result's factorized table, for
+/// example) with no database lease at all is exactly as unsafe as the transaction-only case this
+/// type used to guard against alone. Every child handle needing a lifetime reference on its parent
+/// is the general rule, not a property specific to transactions - see
+/// <see cref="LbugQueryResultHandle"/> and <see cref="LbugPreparedStatementHandle"/>, which now use
+/// the same <see cref="LbugStructHandle.AcquireParentHolds"/> mechanism this type does, and
+/// <see cref="LbugStructHandle.AcquireParentHolds"/> itself for the general mechanism. Because a
+/// connection now holds its database for its whole life unconditionally, <c>BeginTransactionAsync</c>
+/// no longer needs (and no longer has) any hold logic of its own - the general rule already covers
+/// it by the time a transaction begins, since the connection was opened, and started holding its
+/// database, before any transaction could exist.
+/// </para>
+/// <para>
+/// <b>The hold is taken while the native <c>lbug_connection_init</c> call's own short-lived database
+/// lease is still active, not after.</b> That lease already guarantees the database's own reference
+/// count is at least 1 at the moment the hold is attempted, which - per
+/// <see cref="LbugStructHandle.AcquireParentHolds"/>'s remarks - makes the attempt itself
+/// structurally guaranteed to succeed there. <see cref="Open"/> still checks the result and handles
+/// failure defensively (destroying the just-inited connection immediately, while the temporary
+/// lease still guarantees the database is safe to call into, then throwing
+/// <see cref="ObjectDisposedException"/> instead of returning a handle nothing would ever be able to
+/// safely release later) for the same reason <see cref="LbugStructHandle.AcquireParentHolds"/>
+/// itself keeps its own per-attempt handling: not because this path is expected to trigger given
+/// today's call shape, but because nothing about the general contract guarantees it never will.
+/// </para>
 /// </remarks>
 internal sealed class LbugConnectionHandle : LbugStructHandle
 {
-    /// <summary>
-    /// This connection's owning database, retained (not merely leased per-call) specifically so
-    /// <see cref="TryAcquireDatabaseHoldForTransaction"/>/<see cref="ReleaseDatabaseHoldForTransaction"/>
-    /// can bracket a transaction attempt (and, once it succeeds, the resulting open transaction)
-    /// with a long-lived <see cref="SafeHandle.DangerousAddRef(ref bool)"/> lease - see this
-    /// class's remarks.
-    /// </summary>
-    private LbugDatabaseHandle? _ownerDatabase;
-
-    /// <summary>
-    /// Reference count for the long-lived database hold - 0 when not held, incremented by
-    /// <see cref="TryAcquireDatabaseHoldForTransaction"/> and decremented by
-    /// <see cref="ReleaseDatabaseHoldForTransaction"/>/<see cref="ReleaseHandle"/>, all via
-    /// <see cref="Interlocked"/> rather than a plain <c>bool</c>. This is deliberate, not
-    /// cosmetic: <see cref="LadybugConnection.BeginTransactionAsync"/> now serializes concurrent
-    /// callers with its own gate so only one acquire/release pair for a given connection is ever
-    /// in flight at a time by construction, but a plain <c>bool</c> here was what let an earlier,
-    /// unsynchronized version of that gate turn into a process-killing leak: two racing callers
-    /// could both pass a check-then-set nested-begin guard and both call
-    /// <see cref="TryAcquireDatabaseHoldForTransaction"/>, and the loser's subsequent failure
-    /// path calling <see cref="ReleaseDatabaseHoldForTransaction"/> would set the boolean back to
-    /// <see langword="false"/> even though the winner's transaction was still open on that same
-    /// hold - so the winner's own eventual release became a no-op and
-    /// <see cref="LbugDatabaseHandle.ReleaseHandle"/> (and therefore <c>lbug_database_destroy</c>,
-    /// which unmaps this database's ~8 TiB virtual-address reservation) never ran. Measured: ~40%
-    /// of racing iterations leaked a whole <c>lbug_database</c>, driving VmSize from a flat 8 TiB
-    /// to 112 TiB by iteration 30 and killing the process with a failed <c>mmap</c> soon after. A
-    /// real reference count makes a loser's release structurally unable to cancel a winner's hold
-    /// - it can only ever decrement, and the underlying <see cref="SafeHandle.DangerousRelease"/>
-    /// only fires when the count actually reaches zero - so this is correct even if some future
-    /// caller reaches this type without going through <see cref="LadybugConnection"/>'s gate.
-    /// </summary>
-    private int _databaseHoldCount;
-
-    /// <summary>
-    /// Test-only diagnostic: the current value of <see cref="_databaseHoldCount"/>. Structurally
-    /// always 0 or 1 given <see cref="LadybugConnection"/>'s own serializing gate - not something
-    /// production code reads - but exposed so a regression test can directly confirm the hold is
-    /// released (count back to 0) after a failed <c>BEGIN TRANSACTION</c> attempt, rather than
-    /// inferring it indirectly. See <see cref="TryAcquireDatabaseHoldForTransaction"/>'s remarks
-    /// for the specific failure mode (an unhandled <see cref="ObjectDisposedException"/> from
-    /// <see cref="SafeHandle.DangerousAddRef(ref bool)"/>) this exists to catch.
-    /// </summary>
-    internal int DatabaseHoldCountForTests => Volatile.Read(ref _databaseHoldCount);
-
     internal static unsafe LbugConnectionHandle Open(LbugDatabaseHandle database)
     {
         var storage = AllocateUnowned((nuint)sizeof(lbug_connection));
@@ -98,26 +67,42 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
         try
         {
             var conn = (lbug_connection*)storage;
+            var handle = new LbugConnectionHandle();
+            var parentHeld = false;
 
-            lbug_state state;
-            using (var lease = database.Acquire())
+            using (var dbLease = database.Acquire())
             {
-                state = LbugNative.lbug_connection_init((lbug_database*)lease.Pointer, conn);
+                var state = LbugNative.lbug_connection_init((lbug_database*)dbLease.Pointer, conn);
+                if (state != lbug_state.LbugSuccess)
+                {
+                    var detail = NativeString.TakeOwnershipOrNull(LbugNative.lbug_get_last_error());
+                    var message = detail is null
+                        ? "Failed to open a LadybugDB connection."
+                        : $"Failed to open a LadybugDB connection: {detail}";
+                    throw new LadybugException(message);
+                }
+
+                // Take the hold this connection keeps on its owning database for its whole
+                // remaining life - see this class's remarks - still inside dbLease above, which
+                // is what makes the attempt structurally guaranteed to succeed here (see
+                // LbugStructHandle.AcquireParentHolds's remarks): dbLease's own outstanding
+                // reference already keeps the database's count above zero.
+                parentHeld = handle.AcquireParentHolds(database);
+                if (!parentHeld)
+                {
+                    // Not expected to be reachable given the above, but handled defensively
+                    // anyway: lbug_connection_init already ran and left a real connection behind
+                    // - destroy it now, while dbLease still guarantees it is safe to do so, rather
+                    // than adopting a handle whose own eventual destroy would have nothing keeping
+                    // the database alive for it.
+                    LbugNative.lbug_connection_destroy(conn);
+                }
             }
 
-            if (state != lbug_state.LbugSuccess)
-            {
-                var detail = NativeString.TakeOwnershipOrNull(LbugNative.lbug_get_last_error());
-                var message = detail is null
-                    ? "Failed to open a LadybugDB connection."
-                    : $"Failed to open a LadybugDB connection: {detail}";
-                throw new LadybugException(message);
-            }
+            if (!parentHeld) throw new ObjectDisposedException(nameof(LadybugDatabase));
 
-            var handle = new LbugConnectionHandle { _ownerDatabase = database };
             // See LbugDatabaseHandle.Open: set before Adopt so a failure here biases toward a
-            // leak (storage never freed) rather than a double free (freed here, then again from
-            // a handle that already believes it owns it).
+            // leak (storage never freed) rather than a double free.
             adopted = true;
             handle.Adopt(storage);
             return handle;
@@ -126,88 +111,6 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
         {
             if (!adopted) FreeUnowned(storage);
         }
-    }
-
-    /// <summary>
-    /// Begins holding a long-lived reference on the owning database for the duration of a
-    /// <c>BEGIN TRANSACTION</c> attempt, and (if it succeeds) for as long as the resulting
-    /// transaction stays open afterward. Called by
-    /// <see cref="LadybugConnection.BeginTransactionAsync"/> BEFORE it issues anything to the
-    /// engine - see this class's remarks for why the ordering, not just the holding, is what
-    /// matters here. Not for direct use.
-    /// </summary>
-    /// <returns>
-    /// <see langword="false"/> if the owning database is already fully closed - the caller must
-    /// not proceed to issue <c>BEGIN TRANSACTION</c> in that case, since there would be nothing
-    /// left for it to safely run against.
-    /// </returns>
-    internal bool TryAcquireDatabaseHoldForTransaction()
-    {
-        // Only the caller that takes the count from 0 to 1 touches the underlying SafeHandle at
-        // all - every later concurrent/nested acquire just adds to the count. In normal operation
-        // LadybugConnection's own gate means this is never actually contended (exactly one
-        // acquire is ever in flight per connection), but the increment-first shape means that
-        // even if it somehow were, no caller can observe "not held" while another caller's hold
-        // is genuinely still outstanding.
-        if (Interlocked.Increment(ref _databaseHoldCount) > 1) return true;
-
-        if (_ownerDatabase is null)
-        {
-            Interlocked.Decrement(ref _databaseHoldCount);
-            return false;
-        }
-
-        // DangerousAddRef throws ObjectDisposedException on a fully-closed handle rather than
-        // returning acquired == false for that case - confirmed against the real SafeHandle
-        // implementation, not assumed from its (silent-on-this-point) doc comment. Without this
-        // catch, that throw unwinds straight past the "if (acquired) ... else decrement" logic
-        // below, leaving _databaseHoldCount at 1 with no real hold behind it: the increment above
-        // already ran, but the corresponding decrement on the failure path never gets a chance to.
-        // A later caller then sees a positive count and short-circuits at the top of this method
-        // (line ~141) believing a hold is already in place - against a database that is actually
-        // gone - and ReleaseHandle eventually sees that same stale positive count and issues an
-        // unmatched DangerousRelease() against a handle nothing here still owns a reference to.
-        var acquired = false;
-        try
-        {
-            _ownerDatabase.DangerousAddRef(ref acquired);
-        }
-        catch (ObjectDisposedException)
-        {
-            // Owner fully closed - acquired stays false, handled identically to the ordinary
-            // "AddRef declined" case below.
-        }
-
-        if (acquired) return true;
-
-        Interlocked.Decrement(ref _databaseHoldCount);
-        return false;
-    }
-
-    /// <summary>
-    /// Releases the reference <see cref="TryAcquireDatabaseHoldForTransaction"/> took - either
-    /// because the <c>BEGIN TRANSACTION</c> attempt it was guarding failed outright (called from
-    /// <see cref="LadybugConnection.BeginTransactionAsync"/>'s own failure path), or because the
-    /// transaction it protected has since committed, rolled back, or otherwise closed (called
-    /// from <see cref="LadybugConnection.OnTransactionCompleted"/>). Not for direct use.
-    /// </summary>
-    internal void ReleaseDatabaseHoldForTransaction()
-    {
-        var afterDecrement = Interlocked.Decrement(ref _databaseHoldCount);
-        if (afterDecrement > 0) return;
-
-        if (afterDecrement < 0)
-        {
-            // A release with no matching acquire outstanding. Restore the floor at zero rather
-            // than let the count run away negative - this must never happen given how the two
-            // callers of this method (LadybugConnection's own begin-failure path and
-            // OnTransactionCompleted) are used today, but if it ever did, the correct response is
-            // to no-op, not to call DangerousRelease a second time for a hold nobody still has.
-            Interlocked.CompareExchange(ref _databaseHoldCount, 0, afterDecrement);
-            return;
-        }
-
-        _ownerDatabase?.DangerousRelease();
     }
 
     protected override unsafe bool ReleaseHandle()
@@ -228,21 +131,20 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
             FreeStorage();
         }
 
-        // Release AFTER the native destroy above, not before: this is what guarantees the
-        // database was still alive for it - regardless of whether this ReleaseHandle is running
-        // from an explicit Dispose or, if this connection was abandoned without one, from this
-        // handle's own finalizer racing arbitrarily against the database handle's finalizer. See
-        // this class's remarks. Never allowed to throw out of here either.
-        if (Interlocked.Exchange(ref _databaseHoldCount, 0) > 0)
+        // Release the hold on the owning database only AFTER the native destroy above, not
+        // before - this is what guarantees the database was still alive for
+        // lbug_connection_destroy's own internal auto-rollback of any transaction still open on
+        // this connection, regardless of whether this ReleaseHandle is running from an explicit
+        // Dispose or (if this connection was abandoned without one) from this handle's own
+        // finalizer racing arbitrarily against the database handle's finalizer. See this class's
+        // remarks and LbugStructHandle.ReleaseParentHolds.
+        try
         {
-            try
-            {
-                _ownerDatabase?.DangerousRelease();
-            }
-            catch
-            {
-                destroyed = false;
-            }
+            ReleaseParentHolds();
+        }
+        catch
+        {
+            destroyed = false;
         }
 
         return destroyed;

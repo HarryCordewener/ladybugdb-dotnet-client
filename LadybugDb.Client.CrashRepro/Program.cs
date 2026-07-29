@@ -18,12 +18,18 @@ using LadybugDb.Client;
 // forces the real GC finalizer path - see AbandonWithoutDisposal_TransactionLeftOpen);
 // begin-vs-dispose (BeginTransactionAsync racing a concurrent db.Dispose() - live concurrency,
 // no GC, no abandonment; [iterations] controls how many fresh-database attempts to loop through
-// in this one process, default 500 - see BeginTransactionRacingDatabaseDispose); and
-// begin-vs-begin (two concurrent BeginTransactionAsync calls racing each other on the SAME
-// connection - regresses the fix-round-4 database-leak finding; [iterations] as above, default
-// 40 - see BeginTransactionRacingBeginTransaction). Prints a VMSIZE:<iteration>:<bytes> line
-// (parsed from /proc/self/status) every 5 iterations so the spawning test can assert the
-// per-database ~8 TiB virtual-address reservation is not accumulating across iterations.
+// in this one process, default 500 - see BeginTransactionRacingDatabaseDispose); begin-vs-begin
+// (two concurrent BeginTransactionAsync calls racing each other on the SAME connection -
+// regresses the fix-round-4 database-leak finding; [iterations] as above, default 40 - see
+// BeginTransactionRacingBeginTransaction); dml-result-outlives-dispose (a DML query result kept
+// alive across a concurrent-free, ordinary db.Dispose() - the refcount-ownership finding: see
+// DmlResultOutlivesDatabaseDispose); read-result-outlives-dispose (the same shape with a plain
+// read result, kept as a control - see ReadResultOutlivesDatabaseDispose); and concurrent-bind
+// (two threads calling Bind on the SAME LadybugPreparedStatement concurrently, many times -
+// [iterations] controls the bind-call count per thread, default 20000 - see
+// ConcurrentBindOnSameStatement). Prints a VMSIZE:<iteration>:<bytes> line (parsed from
+// /proc/self/status) every 5 iterations so the spawning test can assert the per-database ~8 TiB
+// virtual-address reservation is not accumulating across iterations.
 // Exit 0 and "DONE" on stdout: the scenario completed and the process is healthy.
 // Exit 1 and "MANAGED_EXCEPTION:...": a normal (non-fatal) exception was thrown and caught here.
 // Any other exit code (e.g. 134 = SIGABRT, 139 = SIGSEGV on Linux): the process was killed.
@@ -71,6 +77,18 @@ try
             var beginVsBeginIterations = args.Length > 2 ? int.Parse(args[2]) : 40;
             await BeginTransactionRacingBeginTransaction(path, beginVsBeginIterations);
             Console.WriteLine($"ITERATIONS:{beginVsBeginIterations}");
+            Console.WriteLine("DONE");
+            return 0;
+        case "dml-result-outlives-dispose":
+            await DmlResultOutlivesDatabaseDispose(path);
+            break;
+        case "read-result-outlives-dispose":
+            await ReadResultOutlivesDatabaseDispose(path);
+            break;
+        case "concurrent-bind":
+            var concurrentBindIterations = args.Length > 2 ? int.Parse(args[2]) : 20000;
+            await ConcurrentBindOnSameStatement(path, concurrentBindIterations);
+            Console.WriteLine($"ITERATIONS:{concurrentBindIterations}");
             Console.WriteLine("DONE");
             return 0;
         default:
@@ -319,6 +337,88 @@ static long? ReadVmSizeBytes()
     }
 
     return null;
+}
+
+// A DML statement's LadybugQueryResult, kept alive (never disposed) across an ordinary,
+// non-racing db.Dispose() - the refcount-ownership finding this repro calibrates. Every native
+// handle's own eventual destroy (here, the result's - triggered by DisposeAsync below, called
+// AFTER db.Dispose already ran) used to hold no reference of any kind on its ancestor database,
+// so lbug_query_result_destroy on a DML result dereferenced memory the (now-destroyed) database
+// owned - observed reproducibly (4/4) as SIGSEGV (exit 139), the FactorizedTable/
+// MaterializedQueryResult destructor chain, not a catchable managed exception. No concurrency
+// needed at all: this is plain serial code, single-threaded, single-connection.
+static async Task DmlResultOutlivesDatabaseDispose(string path)
+{
+    var db = new LadybugDatabase(path);
+    var conn = await db.ConnectAsync();
+    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+
+    // Deliberately not disposed/awaited-using here - this result must still be alive when
+    // db.Dispose() runs below.
+    var result = await conn.QueryAsync("CREATE (t:T {id: 1})");
+
+    db.Dispose();
+
+    // The crash site: destroying a DML result after its owning database was already disposed.
+    await result.DisposeAsync();
+    await conn.DisposeAsync();
+}
+
+// Same shape as DmlResultOutlivesDatabaseDispose, but with a plain read (MATCH) result instead
+// of a DML one - kept as a control. The crash report that motivated this whole fix found 0/4
+// crashes for a read result in this exact position, only for DML - this scenario exists so a
+// regression here (this control scenario itself starting to crash) is caught as loudly as the
+// DML case regressing would be.
+static async Task ReadResultOutlivesDatabaseDispose(string path)
+{
+    var db = new LadybugDatabase(path);
+    var conn = await db.ConnectAsync();
+    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await using (var _ = await conn.QueryAsync("CREATE (t:T {id: 1})")) { }
+
+    var result = await conn.QueryAsync("MATCH (t:T) RETURN t.id");
+
+    db.Dispose();
+
+    await result.DisposeAsync();
+    await conn.DisposeAsync();
+}
+
+// Two threads calling Bind on the SAME LadybugPreparedStatement concurrently, many times each -
+// the "part b" finding: lbug_prepared_statement._bound_values is mutable engine-side state the
+// engine does not lock (the "each connection is thread-safe" guarantee in the C header does not
+// reach it), so unsynchronized concurrent Bind calls corrupt it and crash. Loops many bind calls
+// per thread within one process/statement rather than one-shot, since a single pair of calls is
+// not reliable odds of landing inside the native call's own unsynchronized window.
+static async Task ConcurrentBindOnSameStatement(string path, int iterationsPerThread)
+{
+    using var db = new LadybugDatabase(path);
+    await using var conn = await db.ConnectAsync();
+    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, name STRING, PRIMARY KEY(id))")) { }
+
+    await using var stmt = await conn.PrepareAsync("CREATE (t:T {id: $id, name: $name})");
+
+    var barrier = new Barrier(2);
+    var taskA = Task.Run(() =>
+    {
+        barrier.SignalAndWait();
+        for (var i = 0; i < iterationsPerThread; i++)
+        {
+            stmt.Bind("id", (long)i);
+            stmt.Bind("name", "a");
+        }
+    });
+    var taskB = Task.Run(() =>
+    {
+        barrier.SignalAndWait();
+        for (var i = 0; i < iterationsPerThread; i++)
+        {
+            stmt.Bind("id", (long)(i + iterationsPerThread));
+            stmt.Bind("name", "b");
+        }
+    });
+
+    await Task.WhenAll(taskA, taskB);
 }
 
 // conn.BeginTransactionAsync() racing a concurrent db.Dispose() on the owning database - pure

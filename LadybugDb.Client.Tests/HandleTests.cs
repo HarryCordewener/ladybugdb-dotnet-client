@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using LadybugDb.Client;
 using LadybugDb.Client.Interop;
@@ -172,6 +173,112 @@ public class HandleTests
         await Assert.That(releases[0]).IsEqualTo(1);
     }
 
+    /// <summary>
+    /// Property 1 from the refcount-ownership fix: a long-held reference must defer a parent's
+    /// real destroy while <see cref="SafeHandle.IsClosed"/> already reports
+    /// <see langword="true"/> immediately once the parent's own <c>Dispose()</c> runs. Both halves
+    /// matter - a hold that also delayed <c>IsClosed</c> would make new work against a "closing"
+    /// parent silently succeed instead of throwing <see cref="ObjectDisposedException"/>, and a
+    /// hold that did not actually defer the destroy would be exactly the original bug this fix
+    /// closes.
+    /// </summary>
+    [Test]
+    public async Task AcquireParentHolds_Success_DefersParentDestroyUntilChildReleases()
+    {
+        var parentReleases = new int[1];
+        var parent = CountingHandle.CreateAdopted(parentReleases);
+        var childReleases = new int[1];
+        var child = CountingHandle.CreateAdopted(childReleases);
+
+        await Assert.That(child.AcquireParentHolds(parent)).IsTrue();
+
+        parent.Dispose();
+
+        // Half 1: "closed for new work" reflects Dispose() immediately - new work against this
+        // parent is refused right away, not "eventually". Checked via IsClosedForNewWork
+        // directly, not the raw SafeHandle.IsClosed: verified separately (see the standalone
+        // probe this fix was calibrated against) that IsClosed itself does NOT flip true here
+        // while the child's hold above keeps the real reference count above zero - only
+        // IsClosedForNewWork does, which is exactly why it exists.
+        await Assert.That(parent.IsClosedForNewWork).IsTrue();
+        Assert.Throws<ObjectDisposedException>(() =>
+        {
+            using var lease = parent.Acquire();
+        });
+
+        // Half 2: the real destroy is nonetheless deferred - not skipped, not run early - while
+        // the child's hold is still outstanding.
+        await Assert.That(parentReleases[0]).IsEqualTo(0);
+
+        child.Dispose();
+
+        // Only once the child (the thing actually holding it) itself releases does the parent's
+        // destroy finally run - exactly once.
+        await Assert.That(parentReleases[0]).IsEqualTo(1);
+        await Assert.That(childReleases[0]).IsEqualTo(1);
+    }
+
+    /// <summary>
+    /// Property 2 from the refcount-ownership fix: a failed acquisition must never leak a
+    /// reference. Regresses the specific mechanism that broke this for the earlier, bespoke
+    /// single-parent version of this idea (<c>LbugConnectionHandle</c>'s old
+    /// <c>_databaseHoldCount</c>): <c>SafeHandle.DangerousAddRef</c> throws
+    /// <see cref="ObjectDisposedException"/> for an already-closed handle instead of returning
+    /// <c>acquired == false</c>, so a caller that pre-increments its own counter before calling it
+    /// - rather than recording success only after - leaks that increment past the throw. This
+    /// covers the multi-parent case specifically: the first parent succeeds, the second (already
+    /// closed) fails, and the direct assertion is that the first parent's hold was actually rolled
+    /// back, not merely that <c>AcquireParentHolds</c> returned <see langword="false"/> - proven by
+    /// the first parent's own subsequent, independent <c>Dispose()</c> destroying it immediately
+    /// and exactly once, which a leaked hold would have deferred or duplicated.
+    /// </summary>
+    [Test]
+    public async Task AcquireParentHolds_PartialFailure_RollsBackEveryAlreadyAcquiredHold()
+    {
+        var openReleases = new int[1];
+        var open = CountingHandle.CreateAdopted(openReleases);
+        var closedReleases = new int[1];
+        var closed = CountingHandle.CreateAdopted(closedReleases);
+        closed.Dispose();
+        await Assert.That(closedReleases[0]).IsEqualTo(1);
+
+        var childReleases = new int[1];
+        var child = CountingHandle.CreateAdopted(childReleases);
+
+        // `open` (first) succeeds, `closed` (second) fails - AcquireParentHolds must roll `open`'s
+        // hold back rather than leaving it acquired with nothing tracking it.
+        await Assert.That(child.AcquireParentHolds(open, closed)).IsFalse();
+
+        // The direct "no leaked ref" assertion: `open` returns to exactly the state it was in
+        // before the failed attempt - a single outstanding (baseline) reference, so its own
+        // Dispose() below destroys it immediately and exactly once. A leaked hold from the failed
+        // attempt would instead have deferred this, or (if double-released) thrown from
+        // ReleaseHandle/corrupted the count.
+        open.Dispose();
+        await Assert.That(openReleases[0]).IsEqualTo(1);
+
+        child.Dispose();
+        await Assert.That(childReleases[0]).IsEqualTo(1);
+    }
+
+    /// <summary>Simplest single-parent shape of <see cref="AcquireParentHolds_PartialFailure_RollsBackEveryAlreadyAcquiredHold"/>: a lone already-closed parent.</summary>
+    [Test]
+    public async Task AcquireParentHolds_ParentAlreadyClosed_ReturnsFalseAndLeaksNothing()
+    {
+        var parentReleases = new int[1];
+        var parent = CountingHandle.CreateAdopted(parentReleases);
+        parent.Dispose();
+        await Assert.That(parentReleases[0]).IsEqualTo(1);
+
+        var childReleases = new int[1];
+        var child = CountingHandle.CreateAdopted(childReleases);
+
+        await Assert.That(child.AcquireParentHolds(parent)).IsFalse();
+
+        child.Dispose();
+        await Assert.That(childReleases[0]).IsEqualTo(1);
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void CreateUnadoptedAndAbandon(int[] releases) => _ = new CountingHandle(releases);
 
@@ -210,6 +317,12 @@ public class HandleTests
         {
             Interlocked.Increment(ref _releases[0]);
             FreeStorage();
+            // Mirrors every real LbugStructHandle's ReleaseHandle ordering: the "destroy" above
+            // (here, just the counter) runs first, then any long-lived parent holds this handle
+            // took via AcquireParentHolds are released - see ReleaseParentHolds's own remarks for
+            // why that order matters. A no-op for every handle in this file that never called
+            // AcquireParentHolds in the first place.
+            ReleaseParentHolds();
             return true;
         }
     }

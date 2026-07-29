@@ -12,12 +12,35 @@ namespace LadybugDb.Client;
 /// as many times as needed, so the engine does not have to re-plan the same query on every call.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Leases only its own <see cref="LbugPreparedStatementHandle"/> for every <c>Bind*</c> call: none
 /// of the <c>lbug_prepared_statement_bind_*</c> entry points take a connection or database
 /// pointer, so - unlike <see cref="ExecuteAsync"/>, which calls <c>lbug_connection_execute</c> and
 /// therefore leases the parent database and connection too, exactly like
 /// <see cref="LadybugConnection.QueryAsync"/> - there is no ancestor storage a bind call could
 /// dereference after it was freed.
+/// </para>
+/// <para>
+/// <b>Concurrent <c>Bind</c> calls on the SAME instance are not safe without <see cref="_bindGate"/>.</b>
+/// <c>lbug_prepared_statement</c> carries a <c>_bound_values</c> pointer the engine mutates in
+/// place on every bind - unlike <c>lbug_connection</c>, the C header documents no thread-safety
+/// guarantee for a prepared statement at all, and reproduced directly: two threads calling
+/// <c>Bind</c> on one <see cref="LadybugPreparedStatement"/> concurrently, with no synchronization,
+/// corrupted the native heap and crashed the process (SIGABRT/SIGSEGV, <c>free(): invalid
+/// pointer</c> on stderr - not a catchable managed exception) on effectively every attempt. Every
+/// <c>Bind*</c>/<see cref="BindNull"/> overload below takes <see cref="_bindGate"/> around its own
+/// native bind call - not merely its own <see cref="Interop.LbugStructHandle.Acquire"/> lease,
+/// which only protects against a concurrent <em>disposal</em>, a separate concern from concurrent
+/// re-entry into the same mutable native state. This is not a hot path relative to the native call
+/// itself, so a plain <see cref="Lock"/> is the right tool - no need for anything fancier.
+/// <see cref="ExecuteAsync"/> deliberately does NOT take this lock: it does not touch
+/// <c>_bound_values</c> itself (the engine reads whatever was bound most recently, whenever
+/// <c>lbug_connection_execute</c> runs), so serializing it against binds would only add contention
+/// without closing any actual gap - see that method's remarks. What <see cref="ExecuteAsync"/> gets
+/// concurrently with a <c>Bind</c> in flight, if a caller races the two, is a query result that
+/// reflects the bound values as of whenever the engine happened to read them - a correctness
+/// question for the CALLER to avoid by not doing that, not a memory-safety one.
+/// </para>
 /// </remarks>
 public sealed class LadybugPreparedStatement : IAsyncDisposable
 {
@@ -27,6 +50,12 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     private readonly LbugConnectionHandle _connection;
     private readonly LbugPreparedStatementHandle _handle;
     private readonly string _cypher;
+
+    /// <summary>
+    /// Serializes every <c>Bind*</c>/<see cref="BindNull"/> call on this instance against every
+    /// other one - see this type's remarks for why concurrent binds are unsafe without it.
+    /// </summary>
+    private readonly Lock _bindGate = new();
 
     /// <summary>
     /// Runs <c>lbug_connection_prepare</c> and checks <c>lbug_prepared_statement_is_success</c>,
@@ -251,6 +280,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
             try
             {
                 lbug_state state;
+                lock (_bindGate)
                 using (var lease = _handle.Acquire())
                 {
                     state = LbugNative.lbug_prepared_statement_bind_string(
@@ -319,6 +349,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
                 try
                 {
                     lbug_state state;
+                    lock (_bindGate)
                     using (var lease = _handle.Acquire())
                     {
                         state = LbugNative.lbug_prepared_statement_bind_value(
@@ -416,6 +447,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
                 try
                 {
                     lbug_state state;
+                    lock (_bindGate)
                     using (var lease = _handle.Acquire())
                     {
                         state = LbugNative.lbug_prepared_statement_bind_value(
@@ -460,6 +492,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         try
         {
             lbug_state state;
+            lock (_bindGate)
             using (var lease = _handle.Acquire())
             {
                 state = LbugNative.lbug_prepared_statement_bind_value(
@@ -504,6 +537,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         try
         {
             lbug_state state;
+            lock (_bindGate)
             using (var lease = _handle.Acquire())
             {
                 state = LbugNative.lbug_prepared_statement_bind_value(
@@ -568,6 +602,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         try
         {
             lbug_state state;
+            lock (_bindGate)
             using (var lease = _handle.Acquire())
             {
                 state = nativeBind((lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, value);

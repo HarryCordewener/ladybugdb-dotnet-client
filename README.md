@@ -99,8 +99,13 @@ Supported today:
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
 - Safe disposal ordering: disposing a database out from under a still-open connection, result, or
   managed transaction (one opened via `BeginTransactionAsync`) throws `ObjectDisposedException` (or
-  completes cleanly), never crashes the process. This guarantee does not extend to the raw-Cypher
-  escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")`) — see
+  completes cleanly), never crashes the process — and a result obtained *before* the database was
+  disposed (including a DML one, e.g. `CREATE`/`SET`/`DELETE`) is always safe to dispose or let the
+  GC finalize *afterward* too, since every native child handle now holds a reference on its parent
+  for its own entire lifetime, not merely for the call that created it. See
+  [docs/USAGE.md](docs/USAGE.md#disposal-and-lifetime) for the "closed for new work immediately,
+  destroyed once the last dependent releases" model this is built on. This guarantee does not
+  extend to the raw-Cypher escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")`) — see
   [docs/USAGE.md](docs/USAGE.md#transactions) for why disposing with an uncommitted raw transaction
   can abort the process instead of throwing.
 - Transactions (`LadybugConnection.BeginTransactionAsync` / `LadybugTransaction`), a thin,
@@ -119,7 +124,11 @@ Supported today:
   binding at any precision the engine supports, and `Guid`/`Int128` overloads for UUID/INT128),
   `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the three
   non-default timestamp precisions, and `BindNull` for a typed NULL — so a statement executed
-  repeatedly with different values only gets planned once.
+  repeatedly with different values only gets planned once. `Bind`/`BindNull` calls on the SAME
+  `LadybugPreparedStatement` are serialized internally, so calling them concurrently from multiple
+  threads is memory-safe (the engine's own bound-value storage is not otherwise safe for that) —
+  see [docs/USAGE.md](docs/USAGE.md#prepared-statements) for what concurrent `Bind` +
+  `ExecuteAsync` does and does not guarantee.
 
 No known functional gaps remain in the API surface listed above. See
 [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for smaller, reviewed

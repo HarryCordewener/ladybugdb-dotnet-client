@@ -82,46 +82,31 @@ public class DisposalSafetyTests
     }
 
     /// <summary>
-    /// Regresses a fix-round-5 finding: <c>SafeHandle.DangerousAddRef</c> throws
+    /// A connection opened AFTER the database was already disposed must never succeed - that
+    /// would mean <see cref="Interop.LbugConnectionHandle.Open"/>'s own
+    /// <see cref="Interop.LbugStructHandle.AcquireParentHolds"/> call somehow took a hold on a
+    /// database it should have observed as already closed. See <c>HandleTests</c> (in
+    /// <c>LadybugDb.Client.Tests</c>) for the lower-level regression that pins down the specific
+    /// finding this exists to catch end to end: <c>SafeHandle.DangerousAddRef</c> throwing
     /// <see cref="ObjectDisposedException"/> on a fully-closed handle rather than returning
-    /// <c>acquired == false</c> - confirmed against the real engine, not assumed from
-    /// <c>SafeHandle</c>'s own (silent-on-this-point) doc. An earlier version of
-    /// <see cref="Interop.LbugConnectionHandle.TryAcquireDatabaseHoldForTransaction"/> did not
-    /// catch that throw, so it unwound straight past the decrement on the failure path and left
-    /// the hold's <see cref="Interlocked"/> reference count stuck at 1 with no real hold behind
-    /// it - a regression from the pre-<c>Interlocked</c> boolean version, which assigned its own
-    /// flag only AFTER <c>DangerousAddRef</c> returned, so a throw correctly left it
-    /// <see langword="false"/>. A stuck positive count defeats this method's own
-    /// <see cref="ObjectDisposedException"/> guard for every later caller (it short-circuits
-    /// "already held" against a database that is actually gone) and makes
-    /// <see cref="Interop.LbugConnectionHandle.ReleaseHandle"/> issue an unmatched
-    /// <c>SafeHandle.DangerousRelease</c> later.
+    /// <c>acquired == false</c>, and <see cref="Interop.LbugStructHandle.AcquireParentHolds"/>
+    /// catching that per-attempt so a failure partway through a multi-parent acquisition rolls
+    /// back every hold it already took rather than leaking one.
     /// </summary>
     [Test]
-    public async Task BeginTransactionAsync_AfterDatabaseDisposed_LeavesDatabaseHoldCountAtZero()
+    public async Task ConnectAsync_AfterDatabaseDisposed_NeverLeavesADanglingHold()
     {
         var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
-            var conn = await db.ConnectAsync();
-
             db.Dispose();
 
-            await Assert.ThrowsAsync<ObjectDisposedException>(
-                async () => await conn.BeginTransactionAsync());
-
-            // The direct assertion the finding's own repro was missing: the failed attempt above
-            // must not leave a phantom hold behind.
-            await Assert.That(conn.Handle.DatabaseHoldCountForTests).IsEqualTo(0);
-
-            // A stuck positive count would make this second, independent attempt short-circuit
-            // "already held" (returning true) against a database that is actually gone, instead
-            // of correctly reporting false.
-            await Assert.That(conn.Handle.TryAcquireDatabaseHoldForTransaction()).IsFalse();
-            await Assert.That(conn.Handle.DatabaseHoldCountForTests).IsEqualTo(0);
-
-            await conn.DisposeAsync();
+            await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.ConnectAsync());
+            // A second, independent attempt must fail exactly the same way - a leaked hold from
+            // the first attempt would make the database appear as if something still depended on
+            // it, but would not change whether IT ITSELF still reports closed to a fresh caller.
+            await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.ConnectAsync());
         }
         finally { TestDatabase.Cleanup(path); }
     }

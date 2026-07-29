@@ -25,19 +25,24 @@ namespace LadybugDb.Client;
 /// <see cref="LadybugConnection"/> has a finalizer of its own; only their underlying native
 /// handles do, and those two handles' finalizers would otherwise run independently, in whichever
 /// order the GC happens to pick. <see cref="Interop.LbugConnectionHandle"/> closes that gap by
-/// holding a reference-counted lease on its owning database's handle for as long as a transaction
-/// is open on it, which is what makes the ordering safe by construction rather than by observed
-/// GC behaviour - see that type's remarks for the full explanation and why relying on the
-/// observed order alone was not good enough.
+/// holding a reference-counted lease on its owning database's handle for the connection's ENTIRE
+/// lifetime - not merely while a transaction happens to be open on it - which is what makes the
+/// ordering safe by construction rather than by observed GC behaviour, regardless of whether a
+/// transaction is involved at all. See that type's remarks (and
+/// <see cref="Interop.LbugStructHandle.AcquireParentHolds"/>, the general mechanism every native
+/// child handle in this library now uses for the same reason) for the full explanation and why
+/// relying on the observed order alone was not good enough.
 /// </para>
 /// <para>
 /// This includes racing <see cref="Dispose"/> against a concurrent
 /// <see cref="LadybugConnection.BeginTransactionAsync"/> on one of this database's connections,
-/// not just against an already-open transaction. The same reference-counted lease is taken
-/// BEFORE <c>BEGIN TRANSACTION</c> is issued to the engine, not after it succeeds - the engine
-/// considers a transaction open the instant that call returns, which is earlier than any of this
-/// library's own bookkeeping would otherwise run, so the lease has to already be in place by
-/// then rather than applied afterward. See <see cref="Interop.LbugConnectionHandle"/>'s remarks.
+/// not just against an already-open transaction. Because a connection's lease on its owning
+/// database is taken once, at <see cref="ConnectAsync"/> time, and held for the
+/// connection's whole life, it is already in place well before any later
+/// <c>BEGIN TRANSACTION</c> is issued - so there is no window for a concurrent
+/// <see cref="Dispose"/> to race into, even though the engine considers a transaction open the
+/// instant its own <c>BEGIN TRANSACTION</c> call returns, earlier than any of this library's own
+/// bookkeeping would otherwise run. See <see cref="Interop.LbugConnectionHandle"/>'s remarks.
 /// </para>
 /// </remarks>
 public sealed class LadybugDatabase : IDisposable
@@ -144,6 +149,15 @@ public sealed class LadybugDatabase : IDisposable
     /// throwing - if this database was destroyed first. Closing every open transaction out here
     /// keeps the "disposing out of order is always memory-safe" guarantee above true for
     /// transactions too, not just for the plain query/result objects it originally covered.
+    /// Each connection's own long-lived hold on this database (see
+    /// <see cref="Interop.LbugConnectionHandle"/>'s remarks) independently guarantees this
+    /// database's native storage cannot actually be freed before that connection's own
+    /// <c>lbug_connection_destroy</c> has run, so <c>std::terminate()</c> is no longer reachable
+    /// even without the eager rollback below - but rolling every open transaction back here, right
+    /// away, is still worth doing on its own merits: it resolves the transaction at the engine
+    /// level as soon as the database is disposed, rather than leaving it open (holding whatever
+    /// locks the engine takes for an open write transaction) until the connection is itself
+    /// disposed or GC'd, which could be arbitrarily later.
     /// </remarks>
     public void Dispose()
     {
