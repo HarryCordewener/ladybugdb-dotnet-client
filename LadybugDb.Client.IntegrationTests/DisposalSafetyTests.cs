@@ -19,13 +19,10 @@ namespace LadybugDb.Client.IntegrationTests;
 /// </summary>
 public class DisposalSafetyTests
 {
-    private static string TempDbPath() =>
-        Path.Combine(Path.GetTempPath(), $"lbug-dispose-{Guid.NewGuid():N}");
-
     [Test]
     public async Task QueryAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -45,7 +42,7 @@ public class DisposalSafetyTests
     [Test]
     public async Task ReadStringAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -72,7 +69,7 @@ public class DisposalSafetyTests
     [Test]
     public async Task ConnectAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -86,7 +83,7 @@ public class DisposalSafetyTests
     [Test]
     public async Task ReverseOrderDisposal_ResultThenConnectionThenDatabase_StillSucceeds()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -111,7 +108,7 @@ public class DisposalSafetyTests
     [Test]
     public async Task OrphanedConnection_FinalizesWithoutCrashingTheProcess()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);

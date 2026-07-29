@@ -15,7 +15,7 @@ public class LeakTests
     [Test]
     public async Task RepeatedQueries_DoNotGrowProcessMemory()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"lbug-leak-{Guid.NewGuid():N}");
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);
@@ -49,6 +49,6 @@ public class LeakTests
             Console.WriteLine($"[LeakTests] baseline={baseline / 1024.0 / 1024.0:F2}MB after={after / 1024.0 / 1024.0:F2}MB growth={growthMb:F2}MB");
             await Assert.That(growthMb).IsLessThan(32);
         }
-        finally { ValueReadTests.Cleanup(path); }
+        finally { TestDatabase.Cleanup(path); }
     }
 }

@@ -10,7 +10,7 @@ public class ValueReadTests
     [Test]
     public async Task ReadString_ReturnsTheStoredValue()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"lbug-val-{Guid.NewGuid():N}");
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);
@@ -26,15 +26,6 @@ public class ValueReadTests
             var name = await result.ReadStringAsync(0);
             await Assert.That(name).IsEqualTo("Master Room");
         }
-        finally { Cleanup(path); }
-    }
-
-    internal static void Cleanup(string path)
-    {
-        foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })
-        {
-            try { if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
-        }
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best effort */ }
+        finally { TestDatabase.Cleanup(path); }
     }
 }

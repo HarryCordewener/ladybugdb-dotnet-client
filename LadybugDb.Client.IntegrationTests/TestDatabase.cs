@@ -8,6 +8,10 @@ namespace LadybugDb.Client.IntegrationTests;
 /// </summary>
 internal static class TestDatabase
 {
+    /// <summary>Generates a fresh, unused temp-database path for one test.</summary>
+    internal static string NewPath() =>
+        Path.Combine(Path.GetTempPath(), $"lbug-test-{Guid.NewGuid():N}");
+
     internal static void Cleanup(string path)
     {
         foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })

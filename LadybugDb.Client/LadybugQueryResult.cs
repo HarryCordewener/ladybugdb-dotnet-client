@@ -97,6 +97,59 @@ public sealed class LadybugQueryResult : IAsyncDisposable
     }
 
     /// <summary>
+    /// Advances one row and reads every column into a fully marshalled <see cref="LadybugRow"/>.
+    /// Returns <see langword="null"/> when there are no more rows.
+    /// </summary>
+    /// <remarks>
+    /// Temporary for Milestone 2 Task 1: Task 4 replaces this with full result-set enumeration.
+    /// It exists now to prove typed value marshalling end to end, alongside
+    /// <see cref="ReadStringAsync"/>.
+    /// </remarks>
+    public ValueTask<LadybugRow?> ReadRowAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(ReadRow());
+    }
+
+    /// <remarks>
+    /// Leases the parent <see cref="LadybugDatabase"/>'s handle for the entire read, the same way
+    /// <see cref="ReadString"/> does and for the same reason: none of the native calls below (the
+    /// has-next check, the column count, the tuple fetch, and one value fetch per column) can run
+    /// safely once the database is gone.
+    /// </remarks>
+    private unsafe LadybugRow? ReadRow()
+    {
+        using var dbLease = _database.Acquire();
+
+        bool hasNext;
+        ulong columnCount;
+        using (var lease = _handle.Acquire())
+        {
+            var result = (lbug_query_result*)lease.Pointer;
+            hasNext = LbugNative.lbug_query_result_has_next(result) != 0;
+            columnCount = LbugNative.lbug_query_result_get_num_columns(result);
+        }
+        if (!hasNext) return null;
+
+        using var tupleHandle = LbugFlatTupleHandle.GetNext(_handle, out var tupleState);
+        if (tupleState != lbug_state.LbugSuccess)
+            throw new LadybugException(WithErrorDetail("Failed to advance to the next row."));
+
+        var values = new LadybugValue[columnCount];
+        for (ulong i = 0; i < columnCount; i++)
+        {
+            using var valueHandle = LbugValueHandle.GetValue(tupleHandle, i, out var valueState);
+            if (valueState != lbug_state.LbugSuccess)
+                throw new LadybugException(WithErrorDetail($"Failed to read column {i}."));
+
+            using var lease = valueHandle.Acquire();
+            values[i] = ValueReader.Read((lbug_value*)lease.Pointer);
+        }
+
+        return new LadybugRow(values);
+    }
+
+    /// <summary>
     /// Folds the engine's own error detail (if any) into <paramref name="message"/>, the same way
     /// <see cref="LbugDatabaseHandle.Open"/> and <see cref="LbugConnectionHandle.Open"/> do.
     /// </summary>

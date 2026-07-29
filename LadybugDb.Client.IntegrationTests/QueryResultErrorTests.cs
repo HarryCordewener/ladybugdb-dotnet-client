@@ -17,9 +17,6 @@ namespace LadybugDb.Client.IntegrationTests;
 /// </summary>
 public class QueryResultErrorTests
 {
-    private static string TempDbPath() =>
-        Path.Combine(Path.GetTempPath(), $"lbug-qerr-{Guid.NewGuid():N}");
-
     private static async Task<(LadybugDatabase db, LadybugConnection conn)> SeedOneRow(string path)
     {
         var db = new LadybugDatabase(path);
@@ -34,7 +31,7 @@ public class QueryResultErrorTests
     [Test]
     public async Task ReadStringAsync_ColumnIndexOutOfRange_ThrowsWithColumnDetail()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var (db, conn) = await SeedOneRow(path);
@@ -53,7 +50,7 @@ public class QueryResultErrorTests
     [Test]
     public async Task ReadStringAsync_ColumnIsNotAString_ThrowsWithColumnDetail()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var (db, conn) = await SeedOneRow(path);
@@ -94,7 +91,7 @@ public class QueryResultErrorTests
     [Test]
     public async Task DirectGetNext_OnExhaustedResult_ReturnsFailureStateNotCrash()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var (db, conn) = await SeedOneRow(path);
