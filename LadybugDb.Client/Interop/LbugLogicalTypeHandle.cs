@@ -10,7 +10,7 @@ internal sealed class LbugLogicalTypeHandle : LbugStructHandle
     /// </summary>
     /// <remarks>
     /// <paramref name="value"/> is a raw pointer, not a handle: this is always called from inside
-    /// a scope that already holds a lease covering it (see <see cref="LadybugDb.Client.ValueReader.Read"/>),
+    /// a scope that already holds a lease covering it (see <see cref="LadybugDb.Client.ValueReader.Read(lbug_value*)"/>),
     /// so a second lease here would be redundant, not safer.
     ///
     /// <c>lbug_value_get_data_type</c> returns <c>void</c> - there is no <see cref="lbug_state"/>

@@ -7,7 +7,7 @@ namespace LadybugDb.Client;
 /// Deliberately holds no native pointer. The <c>lbug_value</c> this was read from is destroyed
 /// when its owning handle's scope ends (typically at the end of the row it came from), so a
 /// <see cref="LadybugValue"/> that kept a pointer into it would be a use-after-free the moment it
-/// outlived that scope. <see cref="ValueReader.Read"/> copies everything needed into the managed
+/// outlived that scope. <see cref="ValueReader.Read(LadybugDb.Client.Native.lbug_value*)"/> copies everything needed into the managed
 /// payload eagerly, before the native value goes away.
 /// </remarks>
 public readonly struct LadybugValue
@@ -126,6 +126,42 @@ public readonly struct LadybugValue
     {
         if (_payload is byte[] blob) return blob;
         throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Blob}.");
+    }
+
+    /// <summary>Reads this value as a list of elements. Applies to <see cref="LadybugType.List"/>, which covers LIST and ARRAY.</summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.List"/>.</exception>
+    public IReadOnlyList<LadybugValue> AsList()
+    {
+        if (_payload is IReadOnlyList<LadybugValue> list) return list;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.List}.");
+    }
+
+    /// <summary>Reads this value as a set of named fields, keyed by field name.</summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Struct"/>.</exception>
+    public IReadOnlyDictionary<string, LadybugValue> AsStruct()
+    {
+        if (_payload is IReadOnlyDictionary<string, LadybugValue> @struct) return @struct;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Struct}.");
+    }
+
+    /// <summary>
+    /// Reads this value as an ordered sequence of key/value pairs. A list rather than a
+    /// dictionary: a MAP key is itself a <see cref="LadybugValue"/>, which is not guaranteed
+    /// hashable in the general case (for example a key that is itself a list or struct).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Map"/>.</exception>
+    public IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> AsMap()
+    {
+        if (_payload is IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> map) return map;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Map}.");
+    }
+
+    /// <summary>Reads this value as a graph node.</summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Node"/>.</exception>
+    public LadybugNode AsNode()
+    {
+        if (_payload is LadybugNode node) return node;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Node}.");
     }
 
     private T As<T>(LadybugType expected) where T : struct

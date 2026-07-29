@@ -7,12 +7,32 @@ namespace LadybugDb.Client;
 internal static class ValueReader
 {
     /// <summary>
+    /// The maximum number of nested container levels (LIST/STRUCT/MAP/NODE) this reader will
+    /// recurse through. Container values are user data with unbounded nesting, so naive recursion
+    /// on them is a stack-overflow vector; past this depth <see cref="Read(lbug_value*, int)"/>
+    /// throws a <see cref="LadybugException"/> instead of continuing to recurse.
+    /// </summary>
+    private const int MaxDepth = 64;
+
+    /// <summary>
     /// Reads <paramref name="value"/> eagerly into a <see cref="LadybugValue"/> that holds only
     /// managed data. Callers must hold whatever lease keeps <paramref name="value"/> alive for the
     /// duration of this call; nothing here retains the pointer afterward.
     /// </summary>
-    internal static unsafe LadybugValue Read(lbug_value* value)
+    internal static unsafe LadybugValue Read(lbug_value* value) => Read(value, 0);
+
+    /// <summary>
+    /// Recursive worker behind <see cref="Read(lbug_value*)"/>. <paramref name="depth"/> counts
+    /// how many container levels have already been entered to read <paramref name="value"/>;
+    /// each container branch (list/struct/map/node) passes <c>depth + 1</c> when it recurses into
+    /// a child element it owns.
+    /// </summary>
+    private static unsafe LadybugValue Read(lbug_value* value, int depth)
     {
+        if (depth > MaxDepth)
+            throw new LadybugException(
+                $"A value's container nesting exceeded the supported maximum depth of {MaxDepth}.");
+
         if (LbugNative.lbug_value_is_null(value) != 0)
             return new LadybugValue(LadybugType.Null, null);
 
@@ -45,6 +65,10 @@ internal static class ValueReader
             lbug_data_type_id.LBUG_TIMESTAMP_TZ => ReadTimestampTz(value),
             lbug_data_type_id.LBUG_INTERVAL => ReadInterval(value),
             lbug_data_type_id.LBUG_BLOB => ReadBlob(value),
+            lbug_data_type_id.LBUG_LIST or lbug_data_type_id.LBUG_ARRAY => ReadList(value, depth),
+            lbug_data_type_id.LBUG_STRUCT => ReadStruct(value, depth),
+            lbug_data_type_id.LBUG_MAP => ReadMap(value, depth),
+            lbug_data_type_id.LBUG_NODE => ReadNode(value, depth),
             _ => new LadybugValue(LadybugType.Unsupported, null),
         };
     }
@@ -297,6 +321,170 @@ internal static class ValueReader
             // NativeString.TakeOwnership.
             LbugNative.lbug_destroy_blob(raw);
         }
+    }
+
+    /// <summary>
+    /// Reads a LIST or ARRAY value. Every element from <c>lbug_value_get_list_element</c> is a new
+    /// <c>lbug_value</c> the caller owns; each is wrapped in an <see cref="LbugValueHandle"/> inside
+    /// a <c>using</c> so it is destroyed exactly once, right after being read recursively.
+    /// </summary>
+    private static unsafe LadybugValue ReadList(lbug_value* value, int depth)
+    {
+        ulong size;
+        var state = LbugNative.lbug_value_get_list_size(value, &size);
+        ThrowIfFailed(state, "list");
+
+        var items = new LadybugValue[size];
+        for (ulong i = 0; i < size; i++)
+        {
+            using var elementHandle = LbugValueHandle.GetListElement(value, i, out var elementState);
+            if (elementState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read list element {i}."));
+
+            using var lease = elementHandle.Acquire();
+            items[i] = Read((lbug_value*)lease.Pointer, depth + 1);
+        }
+
+        return new LadybugValue(LadybugType.List, items);
+    }
+
+    /// <summary>
+    /// Reads a STRUCT value. Every field value from <c>lbug_value_get_struct_field_value</c> is a
+    /// new <c>lbug_value</c> the caller owns; same wrap-in-<c>using</c>-then-recurse discipline as
+    /// <see cref="ReadList"/>. Field names come back as caller-owned <c>char*</c>, so each goes
+    /// through <see cref="NativeString.TakeOwnership"/> like every other native string in this client.
+    /// </summary>
+    private static unsafe LadybugValue ReadStruct(lbug_value* value, int depth)
+    {
+        ulong count;
+        var state = LbugNative.lbug_value_get_struct_num_fields(value, &count);
+        ThrowIfFailed(state, "struct");
+
+        var fields = new Dictionary<string, LadybugValue>();
+        for (ulong i = 0; i < count; i++)
+        {
+            sbyte* namePtr;
+            var nameState = LbugNative.lbug_value_get_struct_field_name(value, i, &namePtr);
+            ThrowIfFailed(nameState, "struct field name");
+            var name = NativeString.TakeOwnership(namePtr);
+
+            using var fieldHandle = LbugValueHandle.GetStructFieldValue(value, i, out var fieldState);
+            if (fieldState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read struct field '{name}'."));
+
+            using var lease = fieldHandle.Acquire();
+            fields[name] = Read((lbug_value*)lease.Pointer, depth + 1);
+        }
+
+        return new LadybugValue(LadybugType.Struct, fields);
+    }
+
+    /// <summary>
+    /// Reads a MAP value as an ordered list of key/value pairs. Both the key from
+    /// <c>lbug_value_get_map_key</c> and the value from <c>lbug_value_get_map_value</c> are new
+    /// <c>lbug_value</c>s the caller owns - two owned values per entry, not one - so each is
+    /// wrapped in its own <see cref="LbugValueHandle"/> and destroyed before moving to the next index.
+    /// </summary>
+    private static unsafe LadybugValue ReadMap(lbug_value* value, int depth)
+    {
+        ulong count;
+        var state = LbugNative.lbug_value_get_map_size(value, &count);
+        ThrowIfFailed(state, "map");
+
+        var entries = new KeyValuePair<LadybugValue, LadybugValue>[count];
+        for (ulong i = 0; i < count; i++)
+        {
+            LadybugValue key;
+            using (var keyHandle = LbugValueHandle.GetMapKey(value, i, out var keyState))
+            {
+                if (keyState != lbug_state.LbugSuccess)
+                    throw new LadybugException(NativeString.WithErrorDetail($"Failed to read map key {i}."));
+
+                using var lease = keyHandle.Acquire();
+                key = Read((lbug_value*)lease.Pointer, depth + 1);
+            }
+
+            LadybugValue mapValue;
+            using (var valueHandle = LbugValueHandle.GetMapValue(value, i, out var valueState))
+            {
+                if (valueState != lbug_state.LbugSuccess)
+                    throw new LadybugException(NativeString.WithErrorDetail($"Failed to read map value {i}."));
+
+                using var lease = valueHandle.Acquire();
+                mapValue = Read((lbug_value*)lease.Pointer, depth + 1);
+            }
+
+            entries[i] = new KeyValuePair<LadybugValue, LadybugValue>(key, mapValue);
+        }
+
+        return new LadybugValue(LadybugType.Map, entries);
+    }
+
+    /// <summary>
+    /// Reads a NODE value's id, label, and properties.
+    /// </summary>
+    /// <remarks>
+    /// Per <c>third-party/lbug.h</c>, <c>lbug_node_val_get_id_val</c>, <c>lbug_node_val_get_label_val</c>,
+    /// and <c>lbug_node_val_get_property_value_at</c> all "return" through a caller-supplied
+    /// <c>out_value</c> they fill in place - the identical shape documented for
+    /// <c>lbug_value_get_list_element</c> et al., not a borrowed pointer into the node. Each is
+    /// therefore wrapped in its own owned <see cref="LbugValueHandle"/> (see
+    /// <see cref="LbugValueHandle.GetNodeIdValue"/>/<see cref="LbugValueHandle.GetNodeLabelValue"/>/
+    /// <see cref="LbugValueHandle.GetNodePropertyValueAt"/>) and destroyed via <c>using</c>, exactly
+    /// like the container element getters. Property names come back as caller-owned <c>char*</c>,
+    /// same as struct field names.
+    /// </remarks>
+    private static unsafe LadybugValue ReadNode(lbug_value* value, int depth)
+    {
+        LadybugInternalId id;
+        using (var idHandle = LbugValueHandle.GetNodeIdValue(value, out var idState))
+        {
+            if (idState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a node's internal id."));
+
+            using var lease = idHandle.Acquire();
+            id = ReadInternalId((lbug_value*)lease.Pointer);
+        }
+
+        string label;
+        using (var labelHandle = LbugValueHandle.GetNodeLabelValue(value, out var labelState))
+        {
+            if (labelState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a node's label."));
+
+            using var lease = labelHandle.Acquire();
+            label = ReadString((lbug_value*)lease.Pointer).AsString();
+        }
+
+        ulong propertyCount;
+        var sizeState = LbugNative.lbug_node_val_get_property_size(value, &propertyCount);
+        ThrowIfFailed(sizeState, "node property count");
+
+        var properties = new Dictionary<string, LadybugValue>();
+        for (ulong i = 0; i < propertyCount; i++)
+        {
+            sbyte* namePtr;
+            var nameState = LbugNative.lbug_node_val_get_property_name_at(value, i, &namePtr);
+            ThrowIfFailed(nameState, "node property name");
+            var name = NativeString.TakeOwnership(namePtr);
+
+            using var propertyHandle = LbugValueHandle.GetNodePropertyValueAt(value, i, out var propertyState);
+            if (propertyState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read node property '{name}'."));
+
+            using var lease = propertyHandle.Acquire();
+            properties[name] = Read((lbug_value*)lease.Pointer, depth + 1);
+        }
+
+        return new LadybugValue(LadybugType.Node, new LadybugNode(id, label, properties));
+    }
+
+    private static unsafe LadybugInternalId ReadInternalId(lbug_value* value)
+    {
+        lbug_internal_id_t native;
+        var state = LbugNative.lbug_value_get_internal_id(value, &native);
+        ThrowIfFailed(state, "internal_id");
+        return new LadybugInternalId(native.table_id, native.offset);
     }
 
     private static DateTime FromMicros(long micros) =>
