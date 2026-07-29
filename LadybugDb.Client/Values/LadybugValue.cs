@@ -82,6 +82,46 @@ public readonly struct LadybugValue
         throw new InvalidOperationException($"Value is {Type}, not a type backed by a string.");
     }
 
+    /// <summary>Reads this value as a <see cref="DateOnly"/>.</summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Date"/>.</exception>
+    public DateOnly AsDateOnly() => As<DateOnly>(LadybugType.Date);
+
+    /// <summary>
+    /// Reads this value as a UTC <see cref="DateTime"/>. Applies to <see cref="LadybugType.Timestamp"/>,
+    /// which covers TIMESTAMP and its SEC/MS/NS variants; all of them are normalized to a single
+    /// UTC <see cref="DateTime"/> representation regardless of the native storage unit.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Timestamp"/>.</exception>
+    public DateTime AsDateTime() => As<DateTime>(LadybugType.Timestamp);
+
+    /// <summary>
+    /// Reads this value as a <see cref="DateTimeOffset"/>. Applies to <see cref="LadybugType.TimestampTz"/>.
+    /// LadybugDB stores TIMESTAMP_TZ as UTC microseconds and does not retain a distinct source offset,
+    /// so the offset component is always <see cref="TimeSpan.Zero"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.TimestampTz"/>.</exception>
+    public DateTimeOffset AsDateTimeOffset() => As<DateTimeOffset>(LadybugType.TimestampTz);
+
+    /// <summary>Reads this value as a <see cref="TimeSpan"/>. Applies to <see cref="LadybugType.Interval"/>.</summary>
+    /// <remarks>
+    /// Lossy: the native interval carries a separate months component that <see cref="TimeSpan"/> has no
+    /// concept of, so months are converted at a fixed 30 days each (LadybugDB's own convention) and added
+    /// to the days/microseconds components. A caller doing calendar-aware arithmetic — where a month is
+    /// not uniformly 30 days — should not rely on this conversion.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Interval"/>.</exception>
+    public TimeSpan AsTimeSpan() => As<TimeSpan>(LadybugType.Interval);
+
+    /// <summary>
+    /// Reads this value as a <see cref="byte"/> array holding a copy of the underlying BLOB bytes.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Blob"/>.</exception>
+    public byte[] AsBlob()
+    {
+        if (_payload is byte[] blob) return blob;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Blob}.");
+    }
+
     private T As<T>(LadybugType expected) where T : struct
     {
         if (Type != expected)
