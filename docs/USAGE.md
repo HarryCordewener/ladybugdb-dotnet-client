@@ -252,6 +252,19 @@ column type is. What that means in practice, established empirically against a r
   genuine sharp edge in this bind path: narrowing the scale does not throw, it loses precision
   silently. If your application can't tolerate that, round or reject on the .NET side before
   binding.
+- **A Cypher *literal* rounds differently than a bound parameter, for the same value.** Confirmed
+  empirically: `CREATE (r:R {v: 1.005})` into a `DECIMAL(18,2)` column stores `1.00`, while
+  `stmt.Bind("v", BigDecimal.Parse("1.005"))` into the identical column stores `1.01`. The literal
+  path parses `1.005` as a binary `double` first — which is actually `1.00499999999999989…` — so
+  rounding that to two places rounds *down*; the bind path carries the exact decimal string
+  `"1.005"` through to the engine, which rounds the true half-way value *away from zero*. This
+  reproduces for other exact-half values too (`1.015`, `1.025`, `-1.005`, `-1.015`), while a value
+  that isn't an exact half in decimal, like `2.675`, happens to agree on both paths (its nearest
+  `double` rounds up anyway). **Practical takeaway: don't rely on a Cypher decimal literal and a
+  bound `BigDecimal` producing the same stored value at the scale boundary — prefer binding
+  (`Bind(string, BigDecimal)`) for any decimal value where the exact rounding matters**, since it's
+  the path this client controls and documents; the literal path's rounding is the engine's own
+  double-parsing behavior, not something this client can promise.
 - **A bound value whose integer part doesn't fit the column's precision is rejected.** Binding
   `BigDecimal.Parse("12345.67")` into a `DECIMAL(5,2)` column (room for only 3 integer digits)
   throws `LadybugException` ("Overflow exception: Decimal Cast Failed: input 12345.67 is not in

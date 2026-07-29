@@ -295,6 +295,44 @@ public class DecimalBidirectionalTests
     }
 
     /// <summary>
+    /// Pins the bind path's rounding direction on an exact half-way value at the scale boundary -
+    /// round-half-away-from-zero, not banker's rounding (round-half-to-even) and not the truncation
+    /// a naive binary-float parse would produce. This is the behaviour this client controls and
+    /// promises via <see cref="LadybugPreparedStatement.Bind(string, BigDecimal)"/>, which carries
+    /// <paramref name="input"/>'s exact decimal digits through to the engine as a string - unlike a
+    /// Cypher decimal literal, which the engine parses as a binary <c>double</c> first (so
+    /// <c>1.005</c> - not exactly representable in binary, and actually
+    /// <c>1.00499999999999989...</c> - rounds *down* to <c>1.00</c> as a literal, but *up* to
+    /// <c>1.01</c> through this bind path). That literal-vs-bind divergence is real (confirmed
+    /// separately, by binding through <c>CREATE (r:R {v: 1.005})</c> directly against this same
+    /// column and comparing) and is documented in docs/USAGE.md, but deliberately isn't asserted
+    /// here: the literal path's rounding is the engine's own double-parsing behaviour, not this
+    /// client's, so pinning it in this suite would freeze an implementation detail this client
+    /// doesn't own and can't promise.
+    /// </summary>
+    [Test]
+    [Arguments("1.005", "1.01")]
+    [Arguments("-1.005", "-1.01")]
+    [Arguments("1.015", "1.02")]
+    [Arguments("1.025", "1.03")]
+    [Arguments("2.675", "2.68")]
+    public async Task BoundValue_ExactHalfAtScaleBoundary_RoundsAwayFromZero(string input, string expected)
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            var (db, conn) = await OpenWithColumn(path, "DECIMAL(18,2)");
+            using var _db = db;
+            await using var _conn = conn;
+
+            var value = await BindAndReadBack(conn, BigDecimal.Parse(input));
+
+            await Assert.That(value.AsString()).IsEqualTo(expected);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
     /// Unlike a scale mismatch, a bound value whose integer part doesn't fit the column's
     /// precision/scale is rejected - the engine throws rather than truncating the whole number.
     /// </summary>
