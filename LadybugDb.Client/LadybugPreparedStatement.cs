@@ -216,21 +216,32 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(value);
         var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
-        var utf8Value = Marshal.StringToCoTaskMemUTF8(value);
         try
         {
-            lbug_state state;
-            using (var lease = _handle.Acquire())
+            // Nested, not two flat allocations before one shared try: if this second allocation
+            // itself throws (e.g. OutOfMemoryException on a very large value), a flat
+            // "both-then-try" shape would leak utf8Name - it was assigned successfully but sits
+            // outside any try that could free it. Nesting means utf8Name's own finally always
+            // runs, on every path, including this one.
+            var utf8Value = Marshal.StringToCoTaskMemUTF8(value);
+            try
             {
-                state = LbugNative.lbug_prepared_statement_bind_string(
-                    (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, (sbyte*)utf8Value);
+                lbug_state state;
+                using (var lease = _handle.Acquire())
+                {
+                    state = LbugNative.lbug_prepared_statement_bind_string(
+                        (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, (sbyte*)utf8Value);
+                }
+                ThrowIfBindFailed(state, name);
             }
-            ThrowIfBindFailed(state, name);
+            finally
+            {
+                Marshal.FreeCoTaskMem(utf8Value);
+            }
         }
         finally
         {
             Marshal.FreeCoTaskMem(utf8Name);
-            Marshal.FreeCoTaskMem(utf8Value);
         }
     }
 

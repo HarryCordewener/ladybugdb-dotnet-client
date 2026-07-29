@@ -22,9 +22,11 @@ namespace LadybugDb.Client;
 /// not just ones issued through this type - participates in it, because the transaction lives
 /// on the connection itself (that is what <c>BEGIN TRANSACTION</c> means to the engine), not on
 /// this managed wrapper. This wrapper only tracks whether <em>this</em> transaction has already
-/// been completed, so a second, unrelated <see cref="LadybugConnection.BeginTransactionAsync"/>
-/// call on the same connection while one is already open is the engine's error to raise, not
-/// this type's.
+/// been completed; a second, unrelated <see cref="LadybugConnection.BeginTransactionAsync"/>
+/// call on the same connection while one is already open is rejected client-side, with an
+/// <see cref="InvalidOperationException"/>, by <see cref="LadybugConnection.BeginTransactionAsync"/>
+/// itself before any <c>BEGIN TRANSACTION</c> reaches the engine - see that method's remarks for
+/// why never sending it is the only way to keep the original transaction usable.
 /// </para>
 /// </remarks>
 public sealed class LadybugTransaction : IAsyncDisposable

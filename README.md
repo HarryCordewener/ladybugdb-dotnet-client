@@ -10,9 +10,11 @@ no daemon, no separate install.
 This is an independent client, not an official LadybugDB project. Upstream ships official
 bindings for Python, NodeJS, Rust, Go, Swift, Java, and C/C++, but none for .NET.
 
-> **Status: foundation milestone, unpublished.** No package is on NuGet yet. What exists is real
-> and tested against the actual engine — open a database, open connections, run Cypher, read
-> string columns back — but the public surface is intentionally small. See
+> **Status: pre-1.0, unpublished.** No package is on NuGet yet. What exists is real and tested
+> against the actual engine — open a database, open one or more connections, run Cypher (plain or
+> prepared/parameterized), read every scalar/temporal/container/graph type back except the six
+> listed under [Current status and limitations](#current-status-and-limitations), and run
+> transactions — but the public surface is still pre-1.0 and can change. See
 > [Current status and limitations](#current-status-and-limitations) before you invest in this.
 
 ## Install
@@ -66,9 +68,12 @@ Supported today:
   count, compression, read-only mode, and max size.
 - Opening one or more connections to a database (`LadybugConnection`).
 - Running a Cypher statement as a plain string and getting back a `LadybugQueryResult`.
-- Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every LadybugDB
-  type marshalled to a typed `LadybugValue`, columns addressable by position or name, and chained
-  multi-statement results walked via `NextResultAsync()`.
+- Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every scalar,
+  temporal, container (LIST/ARRAY/STRUCT/MAP), and graph (NODE/REL/INTERNAL_ID) type the engine
+  can return marshalled to a typed `LadybugValue` — six less-common engine types remain
+  unreachable (`UUID`, `DECIMAL`, `RECURSIVE_REL`, `INT128`, `UNION`, `POINTER`; see
+  [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown) — columns addressable by
+  position or name, and chained multi-statement results walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
 - Safe disposal ordering: disposing a database out from under a still-open connection, result, or
@@ -84,7 +89,7 @@ Supported today:
   [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the numbers and
   the retry pattern still needed when it's off (the default).
 - Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`), with
-  typed `Bind` overloads for all twenty engine scalar/temporal types plus `BindNull`, so a
+  nineteen typed `Bind` overloads covering the engine's scalar/temporal types plus `BindNull`, so a
   statement executed repeatedly with different values only gets planned once.
 
 No known functional gaps remain in the API surface listed above. See

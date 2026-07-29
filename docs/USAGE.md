@@ -9,6 +9,7 @@ real engine while this guide was written.
 - [Executing Cypher](#executing-cypher)
 - [Prepared statements](#prepared-statements)
 - [Reading results](#reading-results)
+  - [Type coverage](#type-coverage)
 - [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
@@ -116,7 +117,7 @@ on every call, which matters for any statement run in a loop. It also sidesteps 
 string interpolation, which is both slower (no plan reuse) and a Cypher-injection risk if any bound
 value comes from outside your program.
 
-`LadybugPreparedStatement` has a `Bind(name, value)` overload for every one of the engine's twenty
+`LadybugPreparedStatement` has nineteen typed `Bind(name, value)` overloads covering the engine's
 scalar and temporal parameter types — every integer width (signed and unsigned), `bool`, `float`,
 `double`, `string`, `DateOnly`, `TimeSpan` (INTERVAL), `DateTime` (TIMESTAMP), `DateTimeOffset`
 (TIMESTAMP_TZ) — plus `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds`
@@ -169,10 +170,38 @@ row.GetColumnName(0)            // the column's name (an alias, if the Cypher us
 row["label"]                    // by name
 ```
 
-Every LadybugDB type marshals to a typed `LadybugValue` — `AsInt64()`, `AsString()`, `AsBoolean()`,
-`AsDateTime()`, `AsList()`, `AsNode()`, and so on for every scalar, temporal, container, and graph
-type the engine has. Call the accessor matching `row.GetValue(i).Type`; calling the wrong one
-throws `InvalidOperationException`.
+Every scalar, temporal, container, and graph type the engine commonly returns marshals to a typed
+`LadybugValue` — `AsInt64()`, `AsString()`, `AsBoolean()`, `AsDateTime()`, `AsList()`, `AsNode()`,
+`AsInternalId()`, and so on. Call the accessor matching `row.GetValue(i).Type`; calling the wrong
+one throws `InvalidOperationException`. See [Type coverage](#type-coverage) below for the precise
+list, including the handful of types this client does not yet marshal.
+
+### Type coverage
+
+Covered, each reading as its own `LadybugType`/accessor pair:
+
+- **Scalars:** `BOOL`, every signed/unsigned integer width (`INT8`…`INT64`, `UINT8`…`UINT64`),
+  `FLOAT`, `DOUBLE`, `STRING`, `BLOB`.
+- **Temporal:** `DATE`, `TIMESTAMP` (and its `_SEC`/`_MS`/`_NS` variants, all normalized to one
+  `DateTime` representation), `TIMESTAMP_TZ`, `INTERVAL` (see the lossy-conversion note above).
+- **Containers:** `LIST`/`ARRAY` (`AsList()`), `STRUCT` (`AsStruct()`), `MAP` (`AsMap()`).
+- **Graph:** `NODE` (`AsNode()`), `REL` (`AsRel()`), and `INTERNAL_ID` (`AsInternalId()`) — the
+  last of these is what a bare `RETURN id(n)` produces, distinct from the `Id` property already on
+  `AsNode()`/`AsRel()`'s own result.
+
+**Not yet covered** — a value of one of these types reads back as `LadybugType.Unsupported` with
+no usable payload, rather than throwing at read time:
+
+- `UUID`
+- `DECIMAL`
+- `RECURSIVE_REL`
+- `INT128`
+- `UNION`
+- `POINTER`
+
+None of these six are reachable through ordinary Cypher in the schemas this guide's own samples
+use; if your schema needs one, `LadybugType.Unsupported` is your signal to check back on a later
+release rather than a silent gap.
 
 **`AsTimeSpan()` on an INTERVAL is lossy.** A native interval carries a separate months component
 that `TimeSpan` has no concept of, so the conversion — delegated to the engine's own
@@ -216,8 +245,8 @@ If you need a single logical write to span more than one statement, use
 ```csharp
 await using (var tx = await conn.BeginTransactionAsync())
 {
-    await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})");
-    await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})");
+    await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})")) { }
+    await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})")) { }
     await tx.CommitAsync();
 }
 ```
@@ -307,6 +336,10 @@ came from:
 var db = new LadybugDatabase(path);
 var conn = await db.ConnectAsync();
 // ... use conn ...
+// Kept as a named variable and disposed explicitly below, not `await using`, specifically to
+// demonstrate the manual multi-step ordering this section is about - the fire-and-forget
+// `await using (var _ = ...) { }` idiom from Executing Cypher still applies whenever you don't
+// need to walk back through the disposal order like this.
 var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
 
 // Correct order: children first, then the database.
@@ -346,7 +379,7 @@ further effect:
 var db = new LadybugDatabase(path);
 var conn = await db.ConnectAsync();
 var tx = await conn.BeginTransactionAsync();
-await conn.QueryAsync("CREATE (n:Object {dbref: 1})"); // never committed
+await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1})")) { } // never committed
 
 db.Dispose(); // rolls the open transaction back first, then releases its own handle
 
@@ -395,10 +428,11 @@ rather than queuing it. Under contention this is expected, not exceptional, and 
 the typed, retryable `LadybugWriteConflictException` rather than a raw engine error string.
 
 This was benchmarked, not assumed: with the default configuration, throughput was flat from 1 to
-8 concurrent writers (~450 mutations/sec) while conflict retries climbed past 10,000 over the same
-run. The client does not serialize writes internally — if you open multiple connections and write
-from more than one at a time with the default configuration, you *will* see this exception, by
-design. A retry loop at the call site is the expected pattern:
+8 concurrent writers (roughly 2,400-2,800 mutations/sec regardless of writer count) while conflict
+retries climbed past 10,000 over the same run. The client does not serialize writes internally —
+if you open multiple connections and write from more than one at a time with the default
+configuration, you *will* see this exception, by design. A retry loop at the call site is the
+expected pattern:
 
 ```csharp
 async Task<LadybugQueryResult> ExecuteWithRetryAsync(
@@ -463,10 +497,12 @@ client you're using, because it's about how LadybugDB itself performs, not about
 
 ```csharp
 // Good: INT64 primary key.
-await conn.QueryAsync("CREATE NODE TABLE Attr(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Attr(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
 
 // Avoid: composite STRING primary key costs ~4.8x an INT64 key at equal row count.
-await conn.QueryAsync("CREATE NODE TABLE AttrByString(key STRING, name STRING, PRIMARY KEY(key))");
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE AttrByString(key STRING, name STRING, PRIMARY KEY(key))")) { }
 ```
 
 **Don't pack many values into one wide column.** A `MAP(STRING,STRING)` holding ten attributes
@@ -479,7 +515,7 @@ one row per attribute (or a narrow, fixed set of columns) over one row holding a
 600× — for the same data inserted one `CREATE` at a time:
 
 ```csharp
-await conn.QueryAsync($"COPY Object FROM '{csvPath}'");
+await using (var _ = await conn.QueryAsync($"COPY Object FROM '{csvPath}'")) { }
 ```
 
 Row-count scaling itself is healthy once the schema is right: 10× the rows costs only 1.8–2.6×,

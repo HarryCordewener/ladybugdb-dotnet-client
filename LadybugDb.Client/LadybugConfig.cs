@@ -21,8 +21,7 @@ public sealed record LadybugConfig
     /// <summary>Maps to the engine's <c>enable_multi_writes</c> setting.</summary>
     /// <remarks>
     /// <para>
-    /// Measured directly against the real engine for Milestone 2 Task 6 (see
-    /// <c>task-6-report.md</c> for the full run output): with this <see langword="false"/> (the
+    /// Measured directly against the real engine: with this <see langword="false"/> (the
     /// default), LadybugDB permits exactly one write transaction at a time and raises rather
     /// than queueing - concurrent writers from separate connections observably collide, and
     /// <see cref="LadybugWriteConflictException"/> exists precisely because they do. Across

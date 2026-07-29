@@ -10,7 +10,7 @@ namespace LadybugDb.Client;
 /// outlived that scope. <see cref="ValueReader.Read(LadybugDb.Client.Native.lbug_value*)"/> copies everything needed into the managed
 /// payload eagerly, before the native value goes away.
 /// </remarks>
-public readonly struct LadybugValue
+public readonly struct LadybugValue : IEquatable<LadybugValue>
 {
     private readonly object? _payload;
 
@@ -120,12 +120,18 @@ public readonly struct LadybugValue
     public TimeSpan AsTimeSpan() => As<TimeSpan>(LadybugType.Interval);
 
     /// <summary>
-    /// Reads this value as a <see cref="byte"/> array holding a copy of the underlying BLOB bytes.
+    /// Reads this value as a <see cref="byte"/> array. Returns a fresh copy on every call: unlike
+    /// the container accessors (<see cref="AsList"/>/<see cref="AsStruct"/>/<see cref="AsMap"/>),
+    /// which return an immutable, read-only-wrapped view over shared internal storage,
+    /// <see cref="byte"/><c>[]</c> itself has no immutable counterpart in this API, so the only way
+    /// to keep this value's internal state (and every other copy of this <see cref="LadybugValue"/>,
+    /// since it is a struct sharing the same underlying payload reference) safe from a caller
+    /// mutating the returned array is to hand out a new array each time rather than the live one.
     /// </summary>
     /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Blob"/>.</exception>
     public byte[] AsBlob()
     {
-        if (_payload is byte[] blob) return blob;
+        if (_payload is byte[] blob) return (byte[])blob.Clone();
         throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Blob}.");
     }
 
@@ -173,10 +179,134 @@ public readonly struct LadybugValue
         throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Rel}.");
     }
 
+    /// <summary>
+    /// Reads this value as a LadybugDB internal id - the result of a bare <c>RETURN id(n)</c> (or
+    /// <c>id(r)</c>), as opposed to the id embedded in a <see cref="AsNode"/>/<see cref="AsRel"/>
+    /// result's own <c>Id</c> property.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.InternalId"/>.</exception>
+    public LadybugInternalId AsInternalId() => As<LadybugInternalId>(LadybugType.InternalId);
+
     private T As<T>(LadybugType expected) where T : struct
     {
         if (Type != expected)
             throw new InvalidOperationException($"Value is {Type}, not {expected}.");
         return (T)_payload!;
+    }
+
+    /// <summary>
+    /// Structural equality: same <see cref="Type"/> and an equal payload, recursing into
+    /// containers (<see cref="LadybugType.List"/>/<see cref="LadybugType.Struct"/>/
+    /// <see cref="LadybugType.Map"/>/<see cref="LadybugType.Node"/>/<see cref="LadybugType.Rel"/>)
+    /// element-by-element rather than by reference. Explicitly implemented rather than left to the
+    /// inherited <see cref="ValueType.Equals(object?)"/>, which boxes this struct's payload and
+    /// compares the box - correct for scalar payloads, silently wrong for reference-typed
+    /// container payloads (<c>byte[]</c>/list/struct/map), where it degenerates to reference
+    /// equality: two independently-read values with identical content would compare unequal
+    /// purely because they are backed by different array/collection instances. That asymmetry
+    /// (works for <see cref="AsInt64"/>, silently breaks for <see cref="AsList"/>) is exactly the
+    /// kind of inconsistency <see cref="Equals(object?)"/>/<see cref="GetHashCode"/>/
+    /// <see cref="Dictionary{TKey,TValue}"/> keys/<c>Distinct()</c> would otherwise hit silently
+    /// rather than loudly.
+    /// </summary>
+    public bool Equals(LadybugValue other)
+    {
+        if (Type != other.Type) return false;
+
+        return (_payload, other._payload) switch
+        {
+            (null, null) => true,
+            (byte[] a, byte[] b) => a.AsSpan().SequenceEqual(b),
+            (IReadOnlyList<LadybugValue> a, IReadOnlyList<LadybugValue> b) => a.SequenceEqual(b),
+            (IReadOnlyDictionary<string, LadybugValue> a, IReadOnlyDictionary<string, LadybugValue> b) =>
+                ValueEqualityHelpers.DictionaryEquals(a, b),
+            (IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> a, IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> b) =>
+                MapEquals(a, b),
+            (LadybugNode a, LadybugNode b) => a.Equals(b),
+            (LadybugRel a, LadybugRel b) => a.Equals(b),
+            _ => object.Equals(_payload, other._payload),
+        };
+    }
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => obj is LadybugValue other && Equals(other);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var payloadHash = _payload switch
+        {
+            null => 0,
+            byte[] blob => HashBlob(blob),
+            IReadOnlyList<LadybugValue> list => HashList(list),
+            IReadOnlyDictionary<string, LadybugValue> @struct => ValueEqualityHelpers.DictionaryHashCode(@struct),
+            IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> map => HashMap(map),
+            _ => _payload.GetHashCode(),
+        };
+        return HashCode.Combine(Type, payloadHash);
+    }
+
+    /// <summary>
+    /// A human-readable rendering of this value - the type name for <see langword="null"/>/
+    /// unsupported payloads, otherwise the payload's own natural representation (recursing into
+    /// containers). Exists specifically so debugger output and failed-assertion messages (e.g.
+    /// <c>Assert.That(row.GetValue(0)).IsEqualTo(...)</c> in a test) show the actual value instead
+    /// of the useless <c>LadybugDb.Client.LadybugValue</c> the inherited <see cref="ValueType.ToString"/>
+    /// would otherwise print for every value regardless of what it holds.
+    /// </summary>
+    public override string ToString()
+    {
+        if (IsNull) return "null";
+
+        return _payload switch
+        {
+            null => Type.ToString(),
+            byte[] blob => $"Blob[{blob.Length}]",
+            IReadOnlyList<LadybugValue> list => "[" + string.Join(", ", list) + "]",
+            IReadOnlyDictionary<string, LadybugValue> @struct => ValueEqualityHelpers.DescribeDictionary(@struct),
+            IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> map =>
+                "{" + string.Join(", ", map.Select(kv => $"{kv.Key}: {kv.Value}")) + "}",
+            _ => _payload.ToString() ?? Type.ToString(),
+        };
+    }
+
+    private static bool MapEquals(
+        IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> a,
+        IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> b)
+    {
+        // Order-sensitive, unlike DictionaryEquals: a MAP is an ordered sequence of entries (see
+        // AsMap's remarks on why it isn't a Dictionary), so two maps with the same entries in a
+        // different order are not the same value.
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!a[i].Key.Equals(b[i].Key) || !a[i].Value.Equals(b[i].Value)) return false;
+        }
+        return true;
+    }
+
+    private static int HashList(IReadOnlyList<LadybugValue> list)
+    {
+        var hash = new HashCode();
+        foreach (var item in list) hash.Add(item);
+        return hash.ToHashCode();
+    }
+
+    private static int HashMap(IReadOnlyList<KeyValuePair<LadybugValue, LadybugValue>> map)
+    {
+        var hash = new HashCode();
+        foreach (var (key, value) in map)
+        {
+            hash.Add(key);
+            hash.Add(value);
+        }
+        return hash.ToHashCode();
+    }
+
+    private static int HashBlob(byte[] blob)
+    {
+        var hash = new HashCode();
+        hash.AddBytes(blob);
+        return hash.ToHashCode();
     }
 }

@@ -66,6 +66,7 @@ internal static class ValueReader
             lbug_data_type_id.LBUG_TIMESTAMP_TZ => ReadTimestampTz(value),
             lbug_data_type_id.LBUG_INTERVAL => ReadInterval(value),
             lbug_data_type_id.LBUG_BLOB => ReadBlob(value),
+            lbug_data_type_id.LBUG_INTERNAL_ID => ReadInternalIdValue(value),
             lbug_data_type_id.LBUG_LIST or lbug_data_type_id.LBUG_ARRAY => ReadList(value, depth),
             lbug_data_type_id.LBUG_STRUCT => ReadStruct(value, depth),
             lbug_data_type_id.LBUG_MAP => ReadMap(value, depth),
@@ -575,6 +576,17 @@ internal static class ValueReader
         ThrowIfFailed(state, "internal_id");
         return new LadybugInternalId(native.table_id, native.offset);
     }
+
+    /// <summary>
+    /// Reads a top-level INTERNAL_ID value - e.g. the result of <c>RETURN id(n)</c>, as opposed to
+    /// the id embedded in a NODE/REL value (<see cref="ReadNode"/>/<see cref="ReadRel"/> call
+    /// <see cref="ReadInternalId"/> directly for that). Shares the same underlying
+    /// <see cref="LadybugInternalId"/> payload and native accessor; only the resulting
+    /// <see cref="LadybugValue.Type"/> differs, since a bare <c>id(n)</c> result is its own column
+    /// value rather than a field of a node or relationship.
+    /// </summary>
+    private static unsafe LadybugValue ReadInternalIdValue(lbug_value* value) =>
+        new(LadybugType.InternalId, ReadInternalId(value));
 
     private static DateTime FromMicros(long micros) =>
         // checked() so an out-of-range microsecond count throws instead of silently wrapping

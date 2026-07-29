@@ -9,7 +9,7 @@ namespace LadybugDb.Client;
 public readonly record struct LadybugInternalId(ulong TableId, ulong Offset);
 
 /// <summary>A NODE value read from a query result, already fully marshalled into managed memory.</summary>
-public sealed class LadybugNode
+public sealed class LadybugNode : IEquatable<LadybugNode>
 {
     internal LadybugNode(LadybugInternalId id, string label, IReadOnlyDictionary<string, LadybugValue> properties)
     {
@@ -26,10 +26,34 @@ public sealed class LadybugNode
 
     /// <summary>This node's properties, keyed by property name.</summary>
     public IReadOnlyDictionary<string, LadybugValue> Properties { get; }
+
+    /// <summary>
+    /// Structural equality: same <see cref="Id"/>, same <see cref="Label"/>, and the same property
+    /// names/values (regardless of enumeration order - see <see cref="ValueEqualityHelpers"/>).
+    /// </summary>
+    public bool Equals(LadybugNode? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Id.Equals(other.Id)
+            && Label == other.Label
+            && ValueEqualityHelpers.DictionaryEquals(Properties, other.Properties);
+    }
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => Equals(obj as LadybugNode);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() =>
+        HashCode.Combine(Id, Label, ValueEqualityHelpers.DictionaryHashCode(Properties));
+
+    /// <inheritdoc/>
+    public override string ToString() =>
+        $"(:{Label} {ValueEqualityHelpers.DescribeDictionary(Properties)})";
 }
 
 /// <summary>A REL value read from a query result, already fully marshalled into managed memory.</summary>
-public sealed class LadybugRel
+public sealed class LadybugRel : IEquatable<LadybugRel>
 {
     internal LadybugRel(
         LadybugInternalId id,
@@ -59,4 +83,31 @@ public sealed class LadybugRel
 
     /// <summary>This relationship's properties, keyed by property name.</summary>
     public IReadOnlyDictionary<string, LadybugValue> Properties { get; }
+
+    /// <summary>
+    /// Structural equality: same <see cref="Id"/>, <see cref="SourceId"/>, <see cref="DestinationId"/>,
+    /// <see cref="Label"/>, and the same property names/values (regardless of enumeration order -
+    /// see <see cref="ValueEqualityHelpers"/>).
+    /// </summary>
+    public bool Equals(LadybugRel? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Id.Equals(other.Id)
+            && SourceId.Equals(other.SourceId)
+            && DestinationId.Equals(other.DestinationId)
+            && Label == other.Label
+            && ValueEqualityHelpers.DictionaryEquals(Properties, other.Properties);
+    }
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => Equals(obj as LadybugRel);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() =>
+        HashCode.Combine(Id, SourceId, DestinationId, Label, ValueEqualityHelpers.DictionaryHashCode(Properties));
+
+    /// <inheritdoc/>
+    public override string ToString() =>
+        $"[:{Label} {ValueEqualityHelpers.DescribeDictionary(Properties)}]";
 }
