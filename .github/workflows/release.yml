@@ -1,0 +1,114 @@
+name: release
+on:
+  push:
+    tags:
+      # v followed by a SemVer version, e.g. v0.2.0 or v0.2.0-beta.1.
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Package version to publish, e.g. 0.2.0 or 0.2.0-beta.1 (no leading
+          'v'). Only used for a manual run; a tag push derives this
+          automatically from the tag name and ignores this input.
+        required: false
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # No GitHub Environment is used. The nuget.org Trusted Publishing policy
+    # must therefore leave its Environment field EMPTY - a policy scoped to an
+    # environment will not match a token minted outside one, and the exchange
+    # fails. If you later add `environment:` here, update the policy to match.
+    permissions:
+      # Required for NuGet/login to obtain a GitHub OIDC token to exchange
+      # for a short-lived nuget.org API key. Without this the OIDC request
+      # silently fails.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Determine package version
+        id: version
+        shell: bash
+        # The tag (or, for a manual run, the `version` input) is the single
+        # source of truth for the published version - it overrides whatever
+        # VersionPrefix/VersionSuffix Directory.Build.props currently has via
+        # `-p:Version=` on every dotnet invocation below, so there is no risk
+        # of accidentally publishing the repo's placeholder pre-release
+        # version under a tag that was meant to ship something else.
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+            if [ -z "$VERSION" ]; then
+              echo "::error::workflow_dispatch requires a non-empty 'version' input when not triggered by a tag push." >&2
+              exit 1
+            fi
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::'$VERSION' is not a valid SemVer version (expected e.g. 0.2.0 or 0.2.0-beta.1)." >&2
+            exit 1
+          fi
+          echo "Publishing version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch native binaries
+        shell: bash
+        run: bash scripts/fetch-liblbug.sh
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Unit tests
+        run: dotnet test LadybugDb.Client.Tests --no-build -c Release
+
+      - name: Integration tests
+        run: dotnet test LadybugDb.Client.IntegrationTests --no-build -c Release
+
+      - name: Pack
+        # Only LadybugDb.Client and LadybugDb.Client.Native are IsPackable;
+        # the two test projects are not, so this produces exactly the two
+        # packages this workflow pushes below.
+        run: dotnet pack --no-build -c Release -p:Version=${{ steps.version.outputs.version }} -o artifacts
+
+      - name: NuGet login (OIDC -> temporary API key)
+        # Requested here, immediately before the push steps, because the
+        # issued key is only valid for 1 hour and each GitHub OIDC token is
+        # single-use - requesting it earlier in the job (e.g. before the
+        # build/test steps above) risks it expiring, or a second unrelated
+        # login attempt failing, before it's actually used.
+        uses: NuGet/login@v1
+        id: login
+        with:
+          # nuget.org profile name (not email). Hardcoded deliberately: a
+          # profile name is public - it appears in the nuget.org profile URL -
+          # so it is not a secret, and inlining it removes a setup step and a
+          # silent failure mode (an unset variable resolves to empty, which
+          # fails the exchange with no useful error).
+          user: harrycordewener
+
+      - name: Push LadybugDb.Client
+        run: >-
+          dotnet nuget push "artifacts/LadybugDb.Client.${{ steps.version.outputs.version }}.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Push LadybugDb.Client.Native
+        run: >-
+          dotnet nuget push "artifacts/LadybugDb.Client.Native.${{ steps.version.outputs.version }}.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
