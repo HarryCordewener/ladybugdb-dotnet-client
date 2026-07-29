@@ -110,7 +110,8 @@ public readonly struct LadybugValue
     /// 30 days each before adding the days/microseconds components. A caller doing calendar-aware
     /// arithmetic — where a month is not uniformly 30 days — should not rely on this conversion.
     /// An interval whose true magnitude does not fit in a <see cref="TimeSpan"/> is caught while the
-    /// row is materialized (<c>ReadRowAsync</c>) and surfaces there as a <see cref="LadybugException"/>
+    /// row is materialized (advancing the enumerator - see <see cref="LadybugQueryResult.GetAsyncEnumerator"/>)
+    /// and surfaces there as a <see cref="LadybugException"/>
     /// rather than reaching this accessor as a silently wrapped value; a <see cref="LadybugValue"/> of
     /// type <see cref="LadybugType.Interval"/> already holds a converted <see cref="TimeSpan"/> by the
     /// time this is callable.

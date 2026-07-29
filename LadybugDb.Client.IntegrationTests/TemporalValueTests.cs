@@ -22,16 +22,18 @@ public class TemporalValueTests
                 "ts: timestamp('2026-07-29 13:45:30'), iv: interval('3 days')})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:E) RETURN n.d, n.ts, n.iv");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            await Assert.That(row!.Value.GetValue(0).AsDateOnly()).IsEqualTo(new DateOnly(2026, 7, 29));
-            var ts = row.Value.GetValue(1).AsDateTime();
+            await Assert.That(row.GetValue(0).AsDateOnly()).IsEqualTo(new DateOnly(2026, 7, 29));
+            var ts = row.GetValue(1).AsDateTime();
             await Assert.That(ts).IsEqualTo(new DateTime(2026, 7, 29, 13, 45, 30, DateTimeKind.Utc));
             // DateTime.Equals compares only Ticks, not Kind - a value equal-by-ticks but reported as
             // DateTimeKind.Unspecified (i.e. silently local-time) would pass the assertion above too,
             // so assert Kind explicitly.
             await Assert.That(ts.Kind).IsEqualTo(DateTimeKind.Utc);
-            await Assert.That(row.Value.GetValue(2).AsTimeSpan()).IsEqualTo(TimeSpan.FromDays(3));
+            await Assert.That(row.GetValue(2).AsTimeSpan()).IsEqualTo(TimeSpan.FromDays(3));
         }
         finally { TestDatabase.Cleanup(path); }
     }
@@ -56,14 +58,15 @@ public class TemporalValueTests
                 "CREATE (n:I {id: 1, iv: interval('100000000 months')})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:I) RETURN n.iv");
+            await using var e = r.GetAsyncEnumerator();
 
-            // Interval conversion happens eagerly while the row is materialized (ReadRowAsync), not
-            // when AsTimeSpan() is later called - so the exception, if any, is thrown here.
-            // The true value (100,000,000 months * 30 days/month) is ~8.2 million years, far beyond
-            // TimeSpan's ~29,247-year range, so the only acceptable outcome is a clean
-            // LadybugException (the value legitimately does not fit in a TimeSpan) - never a row
-            // that materializes successfully with a silently wrong TimeSpan inside it.
-            await Assert.ThrowsAsync<LadybugException>(async () => await r.ReadRowAsync());
+            // Interval conversion happens eagerly while the row is materialized (advancing the
+            // enumerator), not when AsTimeSpan() is later called - so the exception, if any, is
+            // thrown here. The true value (100,000,000 months * 30 days/month) is ~8.2 million
+            // years, far beyond TimeSpan's ~29,247-year range, so the only acceptable outcome is a
+            // clean LadybugException (the value legitimately does not fit in a TimeSpan) - never a
+            // row that materializes successfully with a silently wrong TimeSpan inside it.
+            await Assert.ThrowsAsync<LadybugException>(async () => await e.MoveNextAsync());
         }
         finally { TestDatabase.Cleanup(path); }
     }
@@ -82,9 +85,11 @@ public class TemporalValueTests
                 @"CREATE (n:B {id: 1, data: BLOB('\xDE\xAD\xBE\xEF')})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:B) RETURN n.data");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            await Assert.That(row!.Value.GetValue(0).AsBlob())
+            await Assert.That(row.GetValue(0).AsBlob())
                 .IsEquivalentTo(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
         }
         finally { TestDatabase.Cleanup(path); }

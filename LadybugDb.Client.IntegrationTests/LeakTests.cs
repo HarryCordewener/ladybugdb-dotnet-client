@@ -28,7 +28,8 @@ public class LeakTests
             for (var i = 0; i < 500; i++)
             {
                 await using var warm = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-                _ = await warm.ReadStringAsync(0);
+                await using var warmEnumerator = warm.GetAsyncEnumerator();
+                _ = await warmEnumerator.MoveNextAsync();
             }
             GC.Collect();
             GC.WaitForPendingFinalizers();
@@ -38,7 +39,8 @@ public class LeakTests
             for (var i = 0; i < 5_000; i++)
             {
                 await using var r = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-                _ = await r.ReadStringAsync(0);
+                await using var enumerator = r.GetAsyncEnumerator();
+                _ = await enumerator.MoveNextAsync();
             }
             GC.Collect();
             GC.WaitForPendingFinalizers();

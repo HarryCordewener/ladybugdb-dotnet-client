@@ -23,7 +23,9 @@ public class ValueReadTests
             await using var result = await conn.QueryAsync(
                 "MATCH (o:Obj) WHERE o.dbref = 7 RETURN o.name");
 
-            var name = await result.ReadStringAsync(0);
+            string? name = null;
+            await foreach (var row in result)
+                name = row.GetValue(0).AsString();
             await Assert.That(name).IsEqualTo("Master Room");
         }
         finally { TestDatabase.Cleanup(path); }

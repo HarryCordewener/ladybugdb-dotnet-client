@@ -47,9 +47,9 @@ await using (var _ = await conn.QueryAsync(
     "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
 
 await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
-while (result.HasNext)
+await foreach (var row in result)
 {
-    var name = await result.ReadStringAsync(0);
+    var name = row.GetValue(0).AsString();
     Console.WriteLine(name); // Limbo
 }
 ```
@@ -66,7 +66,9 @@ Supported today:
   count, compression, read-only mode, and max size.
 - Opening one or more connections to a database (`LadybugConnection`).
 - Running a Cypher statement as a plain string and getting back a `LadybugQueryResult`.
-- Reading a result's columns one string at a time (`ReadStringAsync`), row by row.
+- Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every LadybugDB
+  type marshalled to a typed `LadybugValue`, columns addressable by position or name, and chained
+  multi-statement results walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
 - Safe disposal ordering: disposing a database out from under a still-open connection or result
@@ -76,9 +78,6 @@ Not yet supported (see [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVE
 full, reviewed list):
 
 - Parameterized queries. Every statement is a plain string you build yourself.
-- Reading columns as anything other than a string — no typed value marshalling yet.
-- Iterating a result with `await foreach` (`IAsyncEnumerable<T>`) — use `HasNext` and
-  `ReadStringAsync` in a loop instead.
 - Explicit transaction control beyond issuing `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` as plain
   Cypher statements.
 - Internal write serialization. LadybugDB allows exactly one write transaction at a time and

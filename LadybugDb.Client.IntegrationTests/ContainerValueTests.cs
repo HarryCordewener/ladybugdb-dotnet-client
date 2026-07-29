@@ -21,13 +21,15 @@ public class ContainerValueTests
                 "CREATE (n:C {id: 1, tags: ['a','b','c'], attrs: map(['k1','k2'],['v1','v2'])})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:C) RETURN n.tags, n.attrs");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            var list = row!.Value.GetValue(0).AsList();
+            var list = row.GetValue(0).AsList();
             await Assert.That(list.Count).IsEqualTo(3);
             await Assert.That(list[1].AsString()).IsEqualTo("b");
 
-            var map = row.Value.GetValue(1).AsMap();
+            var map = row.GetValue(1).AsMap();
             await Assert.That(map.Count).IsEqualTo(2);
             await Assert.That(map[0].Key.AsString()).IsEqualTo("k1");
             await Assert.That(map[0].Value.AsString()).IsEqualTo("v1");
@@ -48,9 +50,11 @@ public class ContainerValueTests
             await using (var _ = await conn.QueryAsync("CREATE (n:P {id: 7, name: 'Limbo'})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:P) RETURN n");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            var node = row!.Value.GetValue(0).AsNode();
+            var node = row.GetValue(0).AsNode();
             await Assert.That(node.Label).IsEqualTo("P");
             await Assert.That(node.Properties["name"].AsString()).IsEqualTo("Limbo");
             await Assert.That(node.Properties["id"].AsInt64()).IsEqualTo(7L);
@@ -76,11 +80,13 @@ public class ContainerValueTests
                 "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
 
             await using var r = await conn.QueryAsync("MATCH (a:Person)-[k:Knows]->(b:Person) RETURN a, k, b");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            var source = row!.Value.GetValue(0).AsNode();
-            var rel = row.Value.GetValue(1).AsRel();
-            var destination = row.Value.GetValue(2).AsNode();
+            var source = row.GetValue(0).AsNode();
+            var rel = row.GetValue(1).AsRel();
+            var destination = row.GetValue(2).AsNode();
 
             await Assert.That(rel.Label).IsEqualTo("Knows");
             await Assert.That(rel.SourceId).IsEqualTo(source.Id);

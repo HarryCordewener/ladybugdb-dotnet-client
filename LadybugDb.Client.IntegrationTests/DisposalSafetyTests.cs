@@ -40,7 +40,7 @@ public class DisposalSafetyTests
     }
 
     [Test]
-    public async Task ReadStringAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
+    public async Task Enumeration_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
         var path = TestDatabase.NewPath();
         try
@@ -53,11 +53,12 @@ public class DisposalSafetyTests
                 "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
 
             var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
+            await using var enumerator = result.GetAsyncEnumerator();
 
             db.Dispose();
 
             await Assert.ThrowsAsync<ObjectDisposedException>(
-                async () => await result.ReadStringAsync(0));
+                async () => await enumerator.MoveNextAsync());
 
             // The result and connection must still be safely disposable afterward.
             await result.DisposeAsync();
@@ -94,7 +95,9 @@ public class DisposalSafetyTests
                 "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
 
             var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-            var name = await result.ReadStringAsync(0);
+            string? name = null;
+            await foreach (var row in result)
+                name = row.GetValue(0).AsString();
             await Assert.That(name).IsEqualTo("Limbo");
 
             // Correct order: descendant objects disposed before their ancestor. Must not throw.

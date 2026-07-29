@@ -95,20 +95,45 @@ A statement that fails throws `LadybugException` or `LadybugWriteConflictExcepti
 
 ```csharp
 await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
-while (result.HasNext)
+await foreach (var row in result)
 {
-    var name = await result.ReadStringAsync(0);
+    var name = row.GetValue(0).AsString();
     Console.WriteLine(name);
 }
 ```
 
-`HasNext` reports whether another row is available. `ReadStringAsync(columnIndex)` advances to
-that row *and* reads the given column as a string in one call — there's no separate "advance"
-step. This is a deliberate, temporary shape: it exists to prove the tuple/value ownership chain
-end to end for the foundation milestone, and only string columns are readable today. It returns
-`null` once there are no more rows. Milestone 2 replaces this with `IAsyncEnumerable<LadybugRow>`
-and typed column access (see [What's deferred](#whats-deferred)); don't build on the "advance and
-read are the same call" behavior lasting.
+`LadybugQueryResult` implements `IAsyncEnumerable<LadybugRow>`, so `await foreach` is the normal
+way to read a result — each iteration advances one row. A `LadybugRow` is fully marshalled into
+managed memory the moment it's yielded; nothing in it holds a native pointer, so it's safe to keep
+around after the enumerator moves past it. Columns are addressable three ways:
+
+```csharp
+row.GetValue(0)                 // by position
+row.GetColumnName(0)            // the column's name (an alias, if the Cypher used AS)
+row["label"]                    // by name
+```
+
+Every LadybugDB type marshals to a typed `LadybugValue` — `AsInt64()`, `AsString()`, `AsBoolean()`,
+`AsDateTime()`, `AsList()`, `AsNode()`, and so on for every scalar, temporal, container, and graph
+type the engine has. Call the accessor matching `row.GetValue(i).Type`; calling the wrong one
+throws `InvalidOperationException`.
+
+`await foreach` honours a `CancellationToken` between rows via `result.WithCancellation(token)` —
+it can't interrupt a single row already being read (there's no `await` point inside the native
+call for that), but it's checked before every row starts.
+
+A `HasNext` property is also available if you need to peek without an `await foreach` loop. For a
+script that runs more than one Cypher statement in a single `QueryAsync` call, walk the chained
+results with `NextResultAsync()`:
+
+```csharp
+await using var first = await conn.QueryAsync("MATCH (o:Object) RETURN o.name; MATCH (o:Object) RETURN count(*);");
+await foreach (var row in first) { /* ... */ }
+
+await using var second = await first.NextResultAsync(); // the count(*) result, or null if there wasn't one
+if (second is not null)
+    await foreach (var row in second) { /* ... */ }
+```
 
 ## Error handling
 
@@ -272,11 +297,6 @@ rationale for each item. In summary:
 
 - **Parameterized queries.** No `$param`-style placeholders bound from an object or dictionary —
   every statement is a plain string.
-- **Typed value reading.** `ReadStringAsync` is the only column reader; no int/bool/date/etc.
-  marshalling yet, and it advances a row *and* reads a column in one call rather than separating
-  those concerns.
-- **`await foreach` iteration.** No `IAsyncEnumerable<T>` over a result; use `HasNext` and
-  `ReadStringAsync` in a loop.
 - **A dedicated transaction API.** `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` work as plain
   Cypher statements today; there's no typed `Transaction` object wrapping them.
 - **Internal write serialization.** The client does not queue concurrent writers for you; it

@@ -25,19 +25,21 @@ public class ScalarValueTests
 
             await using var r = await conn.QueryAsync(
                 "MATCH (n:S) RETURN n.b, n.i8, n.i16, n.i32, n.u8, n.u16, n.u32, n.u64, n.f, n.d, n.s");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            await Assert.That(row!.Value.GetValue(0).AsBoolean()).IsTrue();
-            await Assert.That(row.Value.GetValue(1).AsSByte()).IsEqualTo((sbyte)-8);
-            await Assert.That(row.Value.GetValue(2).AsInt16()).IsEqualTo((short)-16);
-            await Assert.That(row.Value.GetValue(3).AsInt32()).IsEqualTo(-32);
-            await Assert.That(row.Value.GetValue(4).AsByte()).IsEqualTo((byte)8);
-            await Assert.That(row.Value.GetValue(5).AsUInt16()).IsEqualTo((ushort)16);
-            await Assert.That(row.Value.GetValue(6).AsUInt32()).IsEqualTo(32u);
-            await Assert.That(row.Value.GetValue(7).AsUInt64()).IsEqualTo(64ul);
-            await Assert.That(row.Value.GetValue(8).AsSingle()).IsEqualTo(1.5f);
-            await Assert.That(row.Value.GetValue(9).AsDouble()).IsEqualTo(2.25d);
-            await Assert.That(row.Value.GetValue(10).AsString()).IsEqualTo("hello");
+            await Assert.That(row.GetValue(0).AsBoolean()).IsTrue();
+            await Assert.That(row.GetValue(1).AsSByte()).IsEqualTo((sbyte)-8);
+            await Assert.That(row.GetValue(2).AsInt16()).IsEqualTo((short)-16);
+            await Assert.That(row.GetValue(3).AsInt32()).IsEqualTo(-32);
+            await Assert.That(row.GetValue(4).AsByte()).IsEqualTo((byte)8);
+            await Assert.That(row.GetValue(5).AsUInt16()).IsEqualTo((ushort)16);
+            await Assert.That(row.GetValue(6).AsUInt32()).IsEqualTo(32u);
+            await Assert.That(row.GetValue(7).AsUInt64()).IsEqualTo(64ul);
+            await Assert.That(row.GetValue(8).AsSingle()).IsEqualTo(1.5f);
+            await Assert.That(row.GetValue(9).AsDouble()).IsEqualTo(2.25d);
+            await Assert.That(row.GetValue(10).AsString()).IsEqualTo("hello");
         }
         finally { TestDatabase.Cleanup(path); }
     }
@@ -55,10 +57,12 @@ public class ScalarValueTests
             await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1, s: 'x'})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:T) RETURN n.id, n.s");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            await Assert.That(row!.Value.GetValue(0).Type).IsEqualTo(LadybugType.Int64);
-            await Assert.That(row.Value.GetValue(1).Type).IsEqualTo(LadybugType.String);
+            await Assert.That(row.GetValue(0).Type).IsEqualTo(LadybugType.Int64);
+            await Assert.That(row.GetValue(1).Type).IsEqualTo(LadybugType.String);
         }
         finally { TestDatabase.Cleanup(path); }
     }
@@ -76,9 +80,11 @@ public class ScalarValueTests
             await using (var _ = await conn.QueryAsync("CREATE (n:W {id: 1, s: 'x'})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:W) RETURN n.s");
-            var row = await r.ReadRowAsync();
+            await using var e = r.GetAsyncEnumerator();
+            await e.MoveNextAsync();
+            var row = e.Current;
 
-            Assert.Throws<InvalidOperationException>(() => row!.Value.GetValue(0).AsInt64());
+            Assert.Throws<InvalidOperationException>(() => row.GetValue(0).AsInt64());
         }
         finally { TestDatabase.Cleanup(path); }
     }
