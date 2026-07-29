@@ -10,6 +10,8 @@ real engine while this guide was written.
 - [Prepared statements](#prepared-statements)
 - [Reading results](#reading-results)
   - [Type coverage](#type-coverage)
+  - [INT128 and UUID](#int128-and-uuid)
+  - [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths)
 - [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
@@ -117,10 +119,11 @@ on every call, which matters for any statement run in a loop. It also sidesteps 
 string interpolation, which is both slower (no plan reuse) and a Cypher-injection risk if any bound
 value comes from outside your program.
 
-`LadybugPreparedStatement` has 21 binding methods in total. Seventeen are typed `Bind(name, value)`
+`LadybugPreparedStatement` has 23 binding methods in total. Nineteen are typed `Bind(name, value)`
 overloads covering the engine's scalar and temporal parameter types — every integer width (signed
-and unsigned), `bool`, `float`, `double`, `string`, `DateOnly`, `TimeSpan` (INTERVAL), `DateTime`
-(TIMESTAMP), `DateTimeOffset` (TIMESTAMP_TZ), `BigDecimal` (DECIMAL, see
+and unsigned), `Int128` (INT128, see [INT128 and UUID](#int128-and-uuid) below), `bool`, `float`,
+`double`, `string`, `Guid` (UUID), `DateOnly`, `TimeSpan` (INTERVAL), `DateTime` (TIMESTAMP),
+`DateTimeOffset` (TIMESTAMP_TZ), `BigDecimal` (DECIMAL, see
 [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below) — plus `BindTimestampSeconds`/
 `BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the other three timestamp precisions,
 and `BindNull(name)` for a typed NULL. Call `ExecuteAsync()`
@@ -172,37 +175,86 @@ row.GetColumnName(0)            // the column's name (an alias, if the Cypher us
 row["label"]                    // by name
 ```
 
-Every scalar, temporal, container, and graph type the engine commonly returns marshals to a typed
-`LadybugValue` — `AsInt64()`, `AsString()`, `AsBoolean()`, `AsDateTime()`, `AsList()`, `AsNode()`,
-`AsInternalId()`, and so on. Call the accessor matching `row.GetValue(i).Type`; calling the wrong
-one throws `InvalidOperationException`. See [Type coverage](#type-coverage) below for the precise
-list, including the handful of types this client does not yet marshal.
+Every value type the engine can return marshals to a typed `LadybugValue` — `AsInt64()`,
+`AsString()`, `AsBoolean()`, `AsDateTime()`, `AsList()`, `AsNode()`, `AsInternalId()`, and so on.
+Call the accessor matching `row.GetValue(i).Type`; calling the wrong one throws
+`InvalidOperationException`. See [Type coverage](#type-coverage) below for the precise list.
 
 ### Type coverage
 
-Covered, each reading as its own `LadybugType`/accessor pair:
+No LadybugDB value type is unreadable. Covered, each reading as its own `LadybugType`/accessor pair:
 
 - **Scalars:** `BOOL`, every signed/unsigned integer width (`INT8`…`INT64`, `UINT8`…`UINT64`),
-  `FLOAT`, `DOUBLE`, `STRING`, `BLOB`, `DECIMAL` (see below).
+  `INT128` (`AsInt128()`, see [INT128 and UUID](#int128-and-uuid) below), `FLOAT`, `DOUBLE`,
+  `STRING`, `BLOB`, `UUID` (`AsGuid()`), `DECIMAL` (see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal)
+  below).
 - **Temporal:** `DATE`, `TIMESTAMP` (and its `_SEC`/`_MS`/`_NS` variants, all normalized to one
   `DateTime` representation), `TIMESTAMP_TZ`, `INTERVAL` (see the lossy-conversion note above).
 - **Containers:** `LIST`/`ARRAY` (`AsList()`), `STRUCT` (`AsStruct()`), `MAP` (`AsMap()`).
-- **Graph:** `NODE` (`AsNode()`), `REL` (`AsRel()`), and `INTERNAL_ID` (`AsInternalId()`) — the
-  last of these is what a bare `RETURN id(n)` produces, distinct from the `Id` property already on
-  `AsNode()`/`AsRel()`'s own result.
+- **Graph:** `NODE` (`AsNode()`), `REL` (`AsRel()`), `RECURSIVE_REL` (`AsPath()`, a variable-length
+  path match — see [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths)
+  below), and `INTERNAL_ID` (`AsInternalId()`) — the last of these is what a bare `RETURN id(n)`
+  produces, distinct from the `Id` property already on `AsNode()`/`AsRel()`'s own result.
 
-**Not yet covered** — a value of one of these types reads back as `LadybugType.Unsupported` with
-no usable payload, rather than throwing at read time:
+**`UNION` and `POINTER` have no dedicated typed accessor**, but are still readable rather than a
+dead end: both report `LadybugType.Unsupported`, and — unlike every other type on this
+list — `AsString()` on that type returns the engine's own generic string rendering of the value
+(via `lbug_value_to_string`) instead of throwing. In practice you are only likely to see this on
+`UNION`: `POINTER` has no schema syntax that reaches it through ordinary Cypher at all —
+`CREATE NODE TABLE t(v POINTER, ...)` is rejected outright ("POINTER is neither an internal type
+nor a user defined type"), confirmed empirically against the real engine, not assumed.
 
-- `UUID`
-- `RECURSIVE_REL`
-- `INT128`
-- `UNION`
-- `POINTER`
+### INT128 and UUID
 
-None of these five are reachable through ordinary Cypher in the schemas this guide's own samples
-use; if your schema needs one, `LadybugType.Unsupported` is your signal to check back on a later
-release rather than a silent gap.
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE NODE TABLE Wide(id INT64, big INT128, tag UUID, PRIMARY KEY(id))")) { }
+
+await using (var stmt = await conn.PrepareAsync("CREATE (n:Wide {id: 1, big: $big, tag: $tag})"))
+{
+    stmt.Bind("big", Int128.MaxValue);
+    stmt.Bind("tag", Guid.NewGuid());
+    await using (var _ = await stmt.ExecuteAsync()) { }
+}
+
+await using (var r = await conn.QueryAsync("MATCH (n:Wide) RETURN n.big, n.tag"))
+{
+    await foreach (var row in r)
+        Console.WriteLine($"big={row.GetValue(0).AsInt128()} tag={row.GetValue(1).AsGuid()}");
+}
+```
+
+`AsInt128()` returns a `System.Int128`, and `AsGuid()` a `Guid`; both bind, too
+(`Bind(string, Int128)`/`Bind(string, Guid)`). `Guid` binds and reads via the engine's own string
+form (there's no separate byte-array path, which would hit `Guid`'s mixed-endian layout and
+silently produce the wrong value). `Int128` itself is never marshalled across the native boundary —
+only a blittable `{low, high}` struct pair is, split and rejoined purely in managed code — because
+`System.Int128` has open marshalling defects on some of this client's supported platforms (wrong
+layout on big-endian, incorrect by-value struct passing on X64 SysV/ARM64, per .NET's own
+[ABI support docs](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/abi-support)).
+This is transparent to normal use; it only matters if you're wondering why `ValueReader.ReadInt128`
+and the `Int128` bind look the way they do in the source.
+
+### RECURSIVE_REL: variable-length paths
+
+A variable-length relationship match (e.g. `(a)-[:R*1..3]->(b)`) returns a `RECURSIVE_REL` value,
+read via `LadybugType.Path`/`AsPath()`:
+
+```csharp
+await using (var r = await conn.QueryAsync(
+    "MATCH p = (a:Person {id: 1})-[:Knows*1..3]->(b:Person {id: 3}) RETURN p"))
+{
+    await foreach (var row in r)
+    {
+        var path = row.GetValue(0).AsPath();
+        Console.WriteLine($"{path.Nodes.Count} nodes, {path.Relationships.Count} relationships");
+    }
+}
+```
+
+`LadybugPath.Nodes`/`.Relationships` are ordered start to end, and each element is a plain
+`LadybugNode`/`LadybugRel` — marshalled exactly like a `NODE`/`REL` value returned on its own, so
+node/relationship properties are read the same way either way.
 
 ### DECIMAL: `AsDecimal()` vs `AsBigDecimal()`
 

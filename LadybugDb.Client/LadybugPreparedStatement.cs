@@ -393,6 +393,87 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         return negative ? "-" + text : text;
     }
 
+    /// <summary>Binds a <c>UUID</c> parameter.</summary>
+    /// <remarks>
+    /// <paramref name="value"/> is bound via its string rendering (<c>lbug_value_create_uuid</c>
+    /// takes <c>const char*</c>) - the write-side counterpart of <see cref="LadybugValue.AsGuid"/>,
+    /// which reads a UUID back the same way. Follows the same short-lived-value discipline as
+    /// <see cref="BindNull"/>: <c>lbug_value_create_uuid</c> returns an engine-owned <c>lbug_value*</c>
+    /// directly (per its "caller is responsible for destroying the returned value"), so it is
+    /// destroyed via <c>lbug_value_destroy</c> directly in a <c>finally</c> rather than wrapped in
+    /// an <see cref="Interop.LbugValueHandle"/>.
+    /// </remarks>
+    public unsafe void Bind(string name, Guid value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
+        try
+        {
+            var utf8Value = Marshal.StringToCoTaskMemUTF8(value.ToString());
+            try
+            {
+                var nativeValue = LbugNative.lbug_value_create_uuid((sbyte*)utf8Value);
+                try
+                {
+                    lbug_state state;
+                    using (var lease = _handle.Acquire())
+                    {
+                        state = LbugNative.lbug_prepared_statement_bind_value(
+                            (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, nativeValue);
+                    }
+                    ThrowIfBindFailed(state, name);
+                }
+                finally
+                {
+                    LbugNative.lbug_value_destroy(nativeValue);
+                }
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(utf8Value);
+            }
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8Name);
+        }
+    }
+
+    /// <summary>Binds an <c>INT128</c> parameter.</summary>
+    /// <remarks>
+    /// Inverts <see cref="ValueReader"/>'s read side (<see cref="LadybugValue.AsInt128"/>): the
+    /// <see cref="Int128"/> value itself never crosses the native boundary - only the blittable
+    /// <c>lbug_int128_t{low,high}</c> pair does, split out of <paramref name="value"/> purely in
+    /// managed code via truncating numeric conversions (the exact inverse of
+    /// <c>new Int128((ulong)high, low)</c> on the read side). See <see cref="LadybugValue.AsInt128"/>
+    /// for why <see cref="Int128"/> itself must never be marshalled across the boundary. Follows the
+    /// same short-lived-value discipline as <see cref="BindNull"/> for the same reason as
+    /// <see cref="Bind(string, Guid)"/>.
+    /// </remarks>
+    public unsafe void Bind(string name, Int128 value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var native = new lbug_int128_t { low = (ulong)value, high = (long)(value >> 64) };
+
+        var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
+        var nativeValue = LbugNative.lbug_value_create_int128(native);
+        try
+        {
+            lbug_state state;
+            using (var lease = _handle.Acquire())
+            {
+                state = LbugNative.lbug_prepared_statement_bind_value(
+                    (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, nativeValue);
+            }
+            ThrowIfBindFailed(state, name);
+        }
+        finally
+        {
+            LbugNative.lbug_value_destroy(nativeValue);
+            Marshal.FreeCoTaskMem(utf8Name);
+        }
+    }
+
     /// <summary>
     /// Binds a <c>NULL</c> value of the parameter's own type, via <c>lbug_value_create_null</c> and
     /// <c>lbug_prepared_statement_bind_value</c> - the C API has no dedicated <c>bind_null</c> entry

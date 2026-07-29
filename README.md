@@ -83,14 +83,17 @@ Supported today:
   count, compression, read-only mode, and max size.
 - Opening one or more connections to a database (`LadybugConnection`).
 - Running a Cypher statement as a plain string and getting back a `LadybugQueryResult`.
-- Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every scalar,
-  temporal, container (LIST/ARRAY/STRUCT/MAP), and graph (NODE/REL/INTERNAL_ID) type the engine
-  can return marshalled to a typed `LadybugValue`, including `DECIMAL` (`AsDecimal()` for values
+- Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every LadybugDB
+  value type marshalled to a typed `LadybugValue`: every scalar (including `UUID`/`AsGuid()` and
+  `INT128`/`AsInt128()`), temporal, container (LIST/ARRAY/STRUCT/MAP) type, and graph type —
+  NODE/REL/INTERNAL_ID plus RECURSIVE_REL (`AsPath()`, for variable-length path matches like
+  `(a)-[:R*1..3]->(b)`) — the engine can return, including `DECIMAL` (`AsDecimal()` for values
   within .NET's native `decimal` range, `AsBigDecimal()` as the always-lossless path for the
   engine's full 38-digit precision — see
-  [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)) — five less-common engine
-  types remain unreachable (`UUID`, `RECURSIVE_REL`, `INT128`, `UNION`, `POINTER`; see
-  [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown) — columns addressable by
+  [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)). `UNION` and `POINTER` have no
+  dedicated typed accessor, but read as `LadybugType.Unsupported` with `AsString()` returning the
+  engine's own string rendering rather than throwing — see
+  [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown — columns addressable by
   position or name, and chained multi-statement results walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
@@ -110,12 +113,13 @@ Supported today:
   conflicts climbing into the tens of thousands per run with it off). See
   [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the numbers and
   the retry pattern still needed when it's off (the default).
-- Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`) — 21
-  binding methods in total: seventeen typed `Bind` overloads covering the engine's scalar/temporal
+- Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`) — 23
+  binding methods in total: nineteen typed `Bind` overloads covering the engine's scalar/temporal
   types (including a `BigDecimal` overload, via `ExtendedNumerics.BigDecimal`, for lossless DECIMAL
-  binding at any precision the engine supports), `BindTimestampSeconds`/`BindTimestampMilliseconds`/
-  `BindTimestampNanoseconds` for the three non-default timestamp precisions, and `BindNull` for a
-  typed NULL — so a statement executed repeatedly with different values only gets planned once.
+  binding at any precision the engine supports, and `Guid`/`Int128` overloads for UUID/INT128),
+  `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the three
+  non-default timestamp precisions, and `BindNull` for a typed NULL — so a statement executed
+  repeatedly with different values only gets planned once.
 
 No known functional gaps remain in the API surface listed above. See
 [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for smaller, reviewed

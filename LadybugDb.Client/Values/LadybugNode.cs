@@ -135,3 +135,60 @@ public sealed class LadybugRel : IEquatable<LadybugRel>
     /// <summary>See the <c>==</c> operator above.</summary>
     public static bool operator !=(LadybugRel? left, LadybugRel? right) => !(left == right);
 }
+
+/// <summary>
+/// A RECURSIVE_REL value read from a query result - the result of a variable-length path match
+/// (e.g. <c>MATCH p = (a)-[:R*1..3]-&gt;(b) RETURN p</c>) - already fully marshalled into managed
+/// memory.
+/// </summary>
+public sealed class LadybugPath : IEquatable<LadybugPath>
+{
+    internal LadybugPath(IReadOnlyList<LadybugNode> nodes, IReadOnlyList<LadybugRel> relationships)
+    {
+        Nodes = nodes;
+        Relationships = relationships;
+    }
+
+    /// <summary>The nodes visited along this path, in path order.</summary>
+    public IReadOnlyList<LadybugNode> Nodes { get; }
+
+    /// <summary>The relationships traversed along this path, in path order.</summary>
+    public IReadOnlyList<LadybugRel> Relationships { get; }
+
+    /// <summary>
+    /// Structural equality: the same nodes and the same relationships, in the same order.
+    /// </summary>
+    public bool Equals(LadybugPath? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Nodes.SequenceEqual(other.Nodes) && Relationships.SequenceEqual(other.Relationships);
+    }
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => Equals(obj as LadybugPath);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var node in Nodes) hash.Add(node);
+        foreach (var rel in Relationships) hash.Add(rel);
+        return hash.ToHashCode();
+    }
+
+    /// <inheritdoc/>
+    public override string ToString() =>
+        "<" + string.Join(", ", Nodes.Select(n => n.ToString()).Concat(Relationships.Select(r => r.ToString()))) + ">";
+
+    /// <summary>
+    /// Structural equality, matching <see cref="Equals(LadybugPath?)"/> - see
+    /// <see cref="LadybugNode"/>'s identical operator for why this exists rather than falling back
+    /// to the default reference equality a <see langword="class"/> would otherwise get.
+    /// </summary>
+    public static bool operator ==(LadybugPath? left, LadybugPath? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    /// <summary>See the <c>==</c> operator above.</summary>
+    public static bool operator !=(LadybugPath? left, LadybugPath? right) => !(left == right);
+}

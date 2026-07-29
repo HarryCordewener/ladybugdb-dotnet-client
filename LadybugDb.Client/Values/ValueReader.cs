@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Native;
 
@@ -73,7 +74,10 @@ internal static class ValueReader
             lbug_data_type_id.LBUG_MAP => ReadMap(value, depth),
             lbug_data_type_id.LBUG_NODE => ReadNode(value, depth),
             lbug_data_type_id.LBUG_REL => ReadRel(value, depth),
-            _ => new LadybugValue(LadybugType.Unsupported, null),
+            lbug_data_type_id.LBUG_RECURSIVE_REL => ReadRecursiveRel(value, depth),
+            lbug_data_type_id.LBUG_UUID => ReadUuid(value),
+            lbug_data_type_id.LBUG_INT128 => ReadInt128(value),
+            _ => ReadUnsupported(value),
         };
     }
 
@@ -149,6 +153,24 @@ internal static class ValueReader
         return new LadybugValue(LadybugType.UInt8, result);
     }
 
+    /// <summary>
+    /// Reads an INT128 value. <c>lbug_int128_t{low,high}</c> is a blittable struct passed and read
+    /// by pointer here, never <see cref="Int128"/> itself - <see cref="Int128"/> has open ABI
+    /// defects marshalling across a P/Invoke boundary (wrong layout on big-endian, incorrect
+    /// by-value parameter passing, and disabled support for "Int128 wrapped in a struct" on X64
+    /// SysV/ARM64 - both RIDs this client ships - per .NET's own ABI support docs). The
+    /// <see cref="Int128"/> value itself is constructed purely in managed code, from the two
+    /// 64-bit halves the native call already handed back.
+    /// </summary>
+    private static unsafe LadybugValue ReadInt128(lbug_value* value)
+    {
+        lbug_int128_t native;
+        var state = LbugNative.lbug_value_get_int128(value, &native);
+        ThrowIfFailed(state, "int128");
+        var result = new Int128((ulong)native.high, native.low);
+        return new LadybugValue(LadybugType.Int128, result);
+    }
+
     private static unsafe LadybugValue ReadDouble(lbug_value* value)
     {
         double result;
@@ -171,6 +193,30 @@ internal static class ValueReader
         var state = LbugNative.lbug_value_get_string(value, &raw);
         ThrowIfFailed(state, "string");
         return new LadybugValue(LadybugType.String, NativeString.TakeOwnership(raw));
+    }
+
+    /// <summary>
+    /// Reads a UUID value. <c>lbug_value_get_uuid</c> hands this back as a caller-owned
+    /// <c>char*</c> - the same string-ownership contract as <see cref="ReadString"/> - so it goes
+    /// through the same <see cref="NativeString.TakeOwnership"/> path before being parsed as a
+    /// <see cref="Guid"/> under <see cref="CultureInfo.InvariantCulture"/>. There is no byte array
+    /// anywhere in this path: a 16-byte marshalling would hit <see cref="Guid"/>'s mixed-endian
+    /// layout and silently produce the wrong value, which the string round trip avoids entirely.
+    /// </summary>
+    private static unsafe LadybugValue ReadUuid(lbug_value* value)
+    {
+        sbyte* raw;
+        var state = LbugNative.lbug_value_get_uuid(value, &raw);
+        ThrowIfFailed(state, "uuid");
+        var text = NativeString.TakeOwnership(raw);
+        try
+        {
+            return new LadybugValue(LadybugType.Uuid, Guid.Parse(text, CultureInfo.InvariantCulture));
+        }
+        catch (FormatException ex)
+        {
+            throw ConversionFailed("uuid", ex);
+        }
     }
 
     /// <summary>
@@ -595,6 +641,48 @@ internal static class ValueReader
             new LadybugRel(id, sourceId, destinationId, label, new ReadOnlyDictionary<string, LadybugValue>(properties)));
     }
 
+    /// <summary>
+    /// Reads a RECURSIVE_REL value - the result of a variable-length path match. Per
+    /// <c>third-party/lbug.h</c>, <c>lbug_value_get_recursive_rel_node_list</c> and
+    /// <c>lbug_value_get_recursive_rel_rel_list</c> each fill a caller-supplied <c>out_value</c> -
+    /// the identical shape as <c>lbug_value_get_list_element</c> - so each result is wrapped in its
+    /// own owned <see cref="LbugValueHandle"/> and destroyed via <c>using</c>, exactly like every
+    /// other container getter in this reader. Both payloads are themselves a LIST (of NODE, and of
+    /// REL respectively), so this dispatches back into the top-level <see cref="Read(lbug_value*, int)"/>
+    /// rather than re-implementing list marshalling - it detects LIST via
+    /// <c>lbug_data_type_get_id</c> and calls <see cref="ReadList"/> itself, reusing the already
+    /// tested element-by-element list/node/rel machinery. Path contents are user data with
+    /// unbounded nesting exactly like node/rel properties, so this consumes the same <paramref name="depth"/>
+    /// recursion budget: the node/rel lists are read at <c>depth + 1</c>, and each node/rel's own
+    /// properties are read a further level in from there by the normal <see cref="ReadNode"/>/<see cref="ReadRel"/> path.
+    /// </summary>
+    private static unsafe LadybugValue ReadRecursiveRel(lbug_value* value, int depth)
+    {
+        List<LadybugNode> nodes;
+        using (var nodeListHandle = LbugValueHandle.GetRecursiveRelNodeList(value, out var nodeListState))
+        {
+            if (nodeListState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a path's node list."));
+
+            using var lease = nodeListHandle.Acquire();
+            var nodeList = Read((lbug_value*)lease.Pointer, depth + 1);
+            nodes = nodeList.AsList().Select(n => n.AsNode()).ToList();
+        }
+
+        List<LadybugRel> rels;
+        using (var relListHandle = LbugValueHandle.GetRecursiveRelRelList(value, out var relListState))
+        {
+            if (relListState != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail("Failed to read a path's relationship list."));
+
+            using var lease = relListHandle.Acquire();
+            var relList = Read((lbug_value*)lease.Pointer, depth + 1);
+            rels = relList.AsList().Select(r => r.AsRel()).ToList();
+        }
+
+        return new LadybugValue(LadybugType.Path, new LadybugPath(nodes.AsReadOnly(), rels.AsReadOnly()));
+    }
+
     private static unsafe LadybugInternalId ReadInternalId(lbug_value* value)
     {
         lbug_internal_id_t native;
@@ -613,6 +701,26 @@ internal static class ValueReader
     /// </summary>
     private static unsafe LadybugValue ReadInternalIdValue(lbug_value* value) =>
         new(LadybugType.InternalId, ReadInternalId(value));
+
+    /// <summary>
+    /// Reads a value of a type this client does not model with its own typed accessor (currently
+    /// UNION and POINTER) via the engine's generic <c>lbug_value_to_string</c>, so it is still
+    /// readable through <see cref="LadybugValue.AsString"/> instead of throwing on every accessor.
+    /// </summary>
+    /// <remarks>
+    /// <c>lbug_value_to_string</c> returns a caller-owned <c>char*</c>: its own doc comment in
+    /// <c>third-party/lbug.h</c> does not repeat the "caller is responsible for freeing" language
+    /// most other <c>char*</c>-returning functions there carry, but <c>lbug_destroy_string</c>'s own
+    /// doc comment is unconditional - "Destroys any string created by the Lbug C API, including
+    /// both the error message and the values returned by the API functions" - and there is no
+    /// separate "borrowed string" free function anywhere in the header, so this routes through
+    /// <see cref="NativeString.TakeOwnershipOrNull"/> like every other native string in this client.
+    /// </remarks>
+    private static unsafe LadybugValue ReadUnsupported(lbug_value* value)
+    {
+        var raw = LbugNative.lbug_value_to_string(value);
+        return new LadybugValue(LadybugType.Unsupported, NativeString.TakeOwnershipOrNull(raw));
+    }
 
     private static DateTime FromMicros(long micros) =>
         // checked() so an out-of-range microsecond count throws instead of silently wrapping

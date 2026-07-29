@@ -146,4 +146,64 @@ public class LeakTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    /// <summary>
+    /// RECURSIVE_REL (path) reads allocate a caller-owned <c>lbug_value</c> per node and per rel via
+    /// <c>lbug_value_get_recursive_rel_node_list</c>/<c>lbug_value_get_recursive_rel_rel_list</c>,
+    /// on top of the container/node/rel allocations <see cref="RepeatedContainerReads_DoNotGrowProcessMemory"/>
+    /// already covers - a missed destroy on either of those two new entry points multiplies per
+    /// path read. Calibrated against this exact harness by temporarily skipping the <c>using</c>
+    /// disposal on both new <c>LbugValueHandle</c>s in <c>ValueReader.ReadRecursiveRel</c>: the
+    /// injected leak pushed growth to ~189MB against this same &lt;32MB bound (many times over,
+    /// confirming the harness catches a leak here, not just tolerates one) before being reverted.
+    /// </summary>
+    [Test]
+    public async Task RepeatedPathReads_DoNotGrowProcessMemory()
+    {
+        Skip.When(IsRunningOnHostedCi(),
+            "Environment.WorkingSet is a whole-process metric hosted CI runners' memory/GC " +
+            "profile makes unusable against this bound (see the class remarks); meaningful " +
+            "locally, quarantined on CI for the same reason as the other two LeakTests.");
+
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'A'})")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'B'})")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 3, name: 'C'})")) { }
+            await using (var _ = await conn.QueryAsync(
+                "MATCH (a:Person {id:1}), (b:Person {id:2}) CREATE (a)-[:Knows {since: 1}]->(b)")) { }
+            await using (var _ = await conn.QueryAsync(
+                "MATCH (a:Person {id:2}), (b:Person {id:3}) CREATE (a)-[:Knows {since: 2}]->(b)")) { }
+
+            const string pathQuery =
+                "MATCH p = (a:Person {id: 1})-[:Knows*1..3]->(c:Person {id: 3}) RETURN p";
+
+            for (var i = 0; i < 300; i++)
+            {
+                await using var warm = await conn.QueryAsync(pathQuery);
+                await foreach (var row in warm) { _ = row.GetValue(0).AsPath(); }
+            }
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            var baseline = Environment.WorkingSet;
+
+            for (var i = 0; i < 3_000; i++)
+            {
+                await using var r = await conn.QueryAsync(pathQuery);
+                await foreach (var row in r) { _ = row.GetValue(0).AsPath(); }
+            }
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+
+            var growthMb = (Environment.WorkingSet - baseline) / 1024.0 / 1024.0;
+            Console.WriteLine($"[LeakTests] baseline={baseline / 1024.0 / 1024.0:F2}MB growth={growthMb:F2}MB");
+            await Assert.That(growthMb).IsLessThan(32);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

@@ -184,4 +184,75 @@ public class LadybugValueEqualityTests
         await Assert.That(a.ToString()).Contains("Obj");
         await Assert.That(a.ToString()).Contains("Master Room");
     }
+
+    private static LadybugNode Node(ulong offset, string label) =>
+        new(new LadybugInternalId(0, offset), label, new ReadOnlyDictionary<string, LadybugValue>(
+            new Dictionary<string, LadybugValue>()));
+
+    private static LadybugRel Rel(ulong offset, LadybugNode from, LadybugNode to) =>
+        new(new LadybugInternalId(1, offset), from.Id, to.Id, "Knows",
+            new ReadOnlyDictionary<string, LadybugValue>(new Dictionary<string, LadybugValue>()));
+
+    /// <summary>
+    /// Unit-level coverage for <see cref="LadybugPath"/>'s equality/hashing/<c>ToString</c>,
+    /// isolated from the native engine the same way <see cref="LadybugNode_StructuralEquality_IgnoresPropertyOrder"/>
+    /// is for <see cref="LadybugNode"/> - constructed directly via the internal constructors this
+    /// project's <c>InternalsVisibleTo</c> exposes, not through a live query.
+    /// </summary>
+    [Test]
+    public async Task LadybugPath_StructuralEquality_ComparesNodesAndRelsNotReferences()
+    {
+        var a1 = Node(0, "Person");
+        var a2 = Node(1, "Person");
+        var pathA = new LadybugPath(new[] { a1, a2 }, new[] { Rel(0, a1, a2) });
+
+        var b1 = Node(0, "Person");
+        var b2 = Node(1, "Person");
+        var pathB = new LadybugPath(new[] { b1, b2 }, new[] { Rel(0, b1, b2) });
+
+        await Assert.That(ReferenceEquals(pathA, pathB)).IsFalse();
+        await Assert.That(pathA.Equals(pathB)).IsTrue();
+        await Assert.That(pathA == pathB).IsTrue();
+        await Assert.That(pathA.GetHashCode()).IsEqualTo(pathB.GetHashCode());
+
+        var value1 = new LadybugValue(LadybugType.Path, pathA);
+        var value2 = new LadybugValue(LadybugType.Path, pathB);
+        await Assert.That(value1.Equals(value2)).IsTrue();
+        await Assert.That(value1.AsPath()).IsEqualTo(pathA);
+    }
+
+    [Test]
+    public async Task LadybugPath_DifferentRelCount_AreNotEqual()
+    {
+        var n1 = Node(0, "Person");
+        var n2 = Node(1, "Person");
+        var n3 = Node(2, "Person");
+        var shortPath = new LadybugPath(new[] { n1, n2 }, new[] { Rel(0, n1, n2) });
+        var longPath = new LadybugPath(new[] { n1, n2, n3 }, new[] { Rel(0, n1, n2), Rel(1, n2, n3) });
+
+        await Assert.That(shortPath.Equals(longPath)).IsFalse();
+        await Assert.That(shortPath != longPath).IsTrue();
+    }
+
+    /// <summary>
+    /// Regresses the <see cref="LadybugType.Unsupported"/> fallback fix directly: before this
+    /// change, <see cref="LadybugValue.AsString"/> threw on every <see cref="LadybugType.Unsupported"/>
+    /// value unconditionally, even though its own XML doc recommended <c>AsString()</c> as the way
+    /// to read one. An <see cref="LadybugType.Unsupported"/> value now genuinely carries a string
+    /// payload (the engine's own <c>lbug_value_to_string</c> rendering) for UNION/POINTER.
+    /// </summary>
+    [Test]
+    public async Task Unsupported_WithStringPayload_AsStringReturnsIt()
+    {
+        var value = new LadybugValue(LadybugType.Unsupported, "42");
+        await Assert.That(value.AsString()).IsEqualTo("42");
+    }
+
+    [Test]
+    public async Task Unsupported_WithNullPayload_AsStringStillThrows()
+    {
+        var value = new LadybugValue(LadybugType.Unsupported, null);
+        Assert.Throws<InvalidOperationException>(() => value.AsString());
+        await Task.CompletedTask;
+    }
 }

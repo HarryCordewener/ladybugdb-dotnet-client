@@ -378,6 +378,63 @@ internal sealed class LbugValueHandle : LbugStructHandle
         }
     }
 
+    /// <summary>
+    /// Runs <c>lbug_value_get_recursive_rel_node_list</c> and takes ownership of the resulting LIST
+    /// value. Same raw-pointer and success-only-adopt reasoning as <see cref="GetListElement"/>:
+    /// per <c>third-party/lbug.h</c>, this fills a caller-supplied <c>out_value</c> - the identical
+    /// shape as <c>lbug_value_get_list_element</c>, not a borrowed pointer into
+    /// <paramref name="recursiveRel"/>.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRecursiveRelNodeList(lbug_value* recursiveRel, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_value_get_recursive_rel_node_list(recursiveRel, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>lbug_value_get_recursive_rel_rel_list</c> and takes ownership of the resulting LIST
+    /// value. Same owned <c>out_value</c> reasoning as <see cref="GetRecursiveRelNodeList"/>.
+    /// </summary>
+    internal static unsafe LbugValueHandle GetRecursiveRelRelList(lbug_value* recursiveRel, out lbug_state state)
+    {
+        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
+        var adopted = false;
+        try
+        {
+            var outValue = (lbug_value*)storage;
+            state = LbugNative.lbug_value_get_recursive_rel_rel_list(recursiveRel, outValue);
+
+            var result = new LbugValueHandle();
+            if (state == lbug_state.LbugSuccess)
+            {
+                adopted = true;
+                result.Adopt(storage);
+            }
+            return result;
+        }
+        finally
+        {
+            if (!adopted) FreeUnowned(storage);
+        }
+    }
+
     protected override unsafe bool ReleaseHandle()
     {
         try

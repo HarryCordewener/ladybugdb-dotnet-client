@@ -65,6 +65,14 @@ public readonly struct LadybugValue : IEquatable<LadybugValue>
     /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.UInt8"/>.</exception>
     public byte AsByte() => As<byte>(LadybugType.UInt8);
 
+    /// <summary>
+    /// Reads this value as a <see cref="Int128"/>. The 128-bit value never crossed the native
+    /// boundary as <see cref="Int128"/> itself - it was constructed purely in managed code from the
+    /// engine's <c>lbug_int128_t</c> pair; see the read-side implementation for why.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Int128"/>.</exception>
+    public Int128 AsInt128() => As<Int128>(LadybugType.Int128);
+
     /// <summary>Reads this value as a <see cref="float"/>.</summary>
     /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Single"/>.</exception>
     public float AsSingle() => As<float>(LadybugType.Single);
@@ -183,6 +191,13 @@ public readonly struct LadybugValue : IEquatable<LadybugValue>
         throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Blob}.");
     }
 
+    /// <summary>
+    /// Reads this value as a <see cref="Guid"/>. Parsed from the engine's own string rendering of
+    /// the UUID, not a 16-byte array - see <see cref="LadybugType.Uuid"/> for why.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Uuid"/>.</exception>
+    public Guid AsGuid() => As<Guid>(LadybugType.Uuid);
+
     /// <summary>Reads this value as a list of elements. Applies to <see cref="LadybugType.List"/>, which covers LIST and ARRAY.</summary>
     /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.List"/>.</exception>
     public IReadOnlyList<LadybugValue> AsList()
@@ -228,6 +243,17 @@ public readonly struct LadybugValue : IEquatable<LadybugValue>
     }
 
     /// <summary>
+    /// Reads this value as a path - the result of a variable-length relationship match. Applies to
+    /// <see cref="LadybugType.Path"/>, which covers RECURSIVE_REL.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This value's <see cref="Type"/> is not <see cref="LadybugType.Path"/>.</exception>
+    public LadybugPath AsPath()
+    {
+        if (_payload is LadybugPath path) return path;
+        throw new InvalidOperationException($"Value is {Type}, not {LadybugType.Path}.");
+    }
+
+    /// <summary>
     /// Reads this value as a LadybugDB internal id - the result of a bare <c>RETURN id(n)</c> (or
     /// <c>id(r)</c>), as opposed to the id embedded in a <see cref="AsNode"/>/<see cref="AsRel"/>
     /// result's own <c>Id</c> property.
@@ -245,8 +271,8 @@ public readonly struct LadybugValue : IEquatable<LadybugValue>
     /// <summary>
     /// Structural equality: same <see cref="Type"/> and an equal payload, recursing into
     /// containers (<see cref="LadybugType.List"/>/<see cref="LadybugType.Struct"/>/
-    /// <see cref="LadybugType.Map"/>/<see cref="LadybugType.Node"/>/<see cref="LadybugType.Rel"/>)
-    /// element-by-element rather than by reference. Explicitly implemented rather than left to the
+    /// <see cref="LadybugType.Map"/>/<see cref="LadybugType.Node"/>/<see cref="LadybugType.Rel"/>/
+    /// <see cref="LadybugType.Path"/>) element-by-element rather than by reference. Explicitly implemented rather than left to the
     /// inherited <see cref="ValueType.Equals(object?)"/>, which boxes this struct's payload and
     /// compares the box - correct for scalar payloads, silently wrong for reference-typed
     /// container payloads (<c>byte[]</c>/list/struct/map), where it degenerates to reference
@@ -272,6 +298,7 @@ public readonly struct LadybugValue : IEquatable<LadybugValue>
                 MapEquals(a, b),
             (LadybugNode a, LadybugNode b) => a.Equals(b),
             (LadybugRel a, LadybugRel b) => a.Equals(b),
+            (LadybugPath a, LadybugPath b) => a.Equals(b),
             _ => object.Equals(_payload, other._payload),
         };
     }
