@@ -8,7 +8,6 @@ client in your own project, see the [README](../README.md) and [USAGE.md](USAGE.
 - [Running tests](#running-tests)
 - [Regenerating interop](#regenerating-interop)
 - [How native binaries are pinned and verified](#how-native-binaries-are-pinned-and-verified)
-- [Known CI gap: Windows](#known-ci-gap-windows)
 
 ## Prerequisites
 
@@ -16,10 +15,15 @@ client in your own project, see the [README](../README.md) and [USAGE.md](USAGE.
   `global.json` pins this. It also sets `test.runner` to `Microsoft.Testing.Platform`, which is
   what makes `dotnet test` work at all here; without it, `dotnet test` falls back to VSTest and
   won't discover TUnit's tests correctly.
-- **`python3`** on `PATH`, used by `scripts/fetch-liblbug.sh` to extract `.zip` release assets.
-  Not `unzip`: it's absent from GitHub's `windows-latest` runner image and from Git Bash, and
-  Git Bash's own `tar` can't read zip containers either — `python3`'s stdlib `zipfile` module
-  needs no OS-specific branching and is preinstalled everywhere this project builds.
+- **`python3`** on `PATH`, used by `scripts/fetch-liblbug.sh` to extract release assets on every
+  platform. `.zip` assets (Windows) go through `python3`'s `zipfile` module because `unzip` is
+  absent from GitHub's `windows-latest` runner image and from Git Bash, and Git Bash's own `tar`
+  can't read zip containers either. `.tar.gz` assets (Linux/macOS) also go through `python3`'s
+  `tarfile` module rather than the `tar` binary: upstream ships the canonical library name
+  (`liblbug.so`, `liblbug.dylib`) as a symlink chain inside the archive, which Git Bash's `tar`
+  cannot recreate on `windows-latest` — `tarfile` resolves the chain from the archive's own member
+  metadata instead, so no symlink is ever created on disk. Either way, `python3`'s stdlib modules
+  need no OS-specific branching and are preinstalled everywhere this project builds.
 - **`clang`** on `PATH`, needed only if you're regenerating the interop layer (see below). Not
   required for a normal build.
 
@@ -113,14 +117,3 @@ with fresh hashes (it only overwrites the lockfile after every asset has downloa
 successfully, so a network blip or a renamed asset can't leave a half-written lockfile behind).
 Review the hash diff like you would any other dependency bump, then regenerate interop if the C
 API surface changed.
-
-## Known CI gap: Windows
-
-The `build (windows-latest)` CI leg currently fails at the "Fetch native binaries" step. The
-linux-x64 release asset ships `liblbug.so` as a symlink chain
-(`liblbug.so` → `liblbug.so.0` → `liblbug.so.0.18.3`), and `tar` under Git Bash on the
-`windows-latest` runner cannot create that symlink chain even though the script never needs to use
-the linux-x64 binary on Windows — it downloads and extracts every RID's assets unconditionally,
-not just the host's own. This is a real, currently-open gap, not a documentation-only concern; see
-[MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for the related, previously-fixed `unzip`
-issue on the same leg. The Linux and integration-test legs are unaffected and green.

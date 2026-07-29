@@ -50,11 +50,6 @@ are not rediscovered from scratch.
 
 ## Infrastructure
 
-- **The Windows CI leg has never executed.** The known blocker was removed — `unzip` is
-  absent from both `windows-latest` and Git Bash, so `.zip` assets now extract via
-  `python3`'s stdlib `zipfile`. Whether `python3` resolves on `PATH` from Git Bash is
-  documented by GitHub but unverified here. Settles on the first push.
-
 - **`FindPackage` in `PackagingTests` uses `FirstOrDefault` with no tie-break** if two
   versions of the same package coexist in the tree. Enumeration order is filesystem
   dependent. Mitigated in practice because CI always packs clean first.

@@ -94,7 +94,7 @@ Requires **.NET 10**. `LadybugDb.Client.Native` ships prebuilt `liblbug` for:
 | RID | OS | Verified in CI |
 |---|---|---|
 | `linux-x64` | Linux x64 | Yes |
-| `win-x64` | Windows x64 | Build matrix runs it; currently red — see [docs/BUILDING.md](docs/BUILDING.md#known-ci-gap-windows) |
+| `win-x64` | Windows x64 | Yes |
 | `linux-arm64` | Linux ARM64 | No — packaged from upstream releases, not exercised in CI |
 | `osx-x64` | macOS x64 | No — packaged from upstream releases, not exercised in CI |
 | `osx-arm64` | macOS ARM64 | No — packaged from upstream releases, not exercised in CI |
@@ -105,6 +105,7 @@ Requires **.NET 10**. `LadybugDb.Client.Native` ships prebuilt `liblbug` for:
 - [docs/USAGE.md](docs/USAGE.md) — the full guide: configuration, connections, running Cypher,
   reading results, error handling, disposal, concurrency, and schema guidance.
 - [docs/BUILDING.md](docs/BUILDING.md) — building and testing this client from source.
+- [docs/RELEASING.md](docs/RELEASING.md) — how a tagged version ships to nuget.org.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to propose changes.
 - [SECURITY.md](SECURITY.md) — how to report a vulnerability.
 - [docs/superpowers/specs/2026-07-27-ladybugdb-dotnet-client-design.md](docs/superpowers/specs/2026-07-27-ladybugdb-dotnet-client-design.md)
