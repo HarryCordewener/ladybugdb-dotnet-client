@@ -3,7 +3,14 @@ namespace LadybugDb.Client;
 /// <summary>The LadybugDB type of a <see cref="LadybugValue"/>.</summary>
 public enum LadybugType
 {
-    /// <summary>A type this client does not model. Use <see cref="LadybugValue.AsString"/> where possible.</summary>
+    /// <summary>
+    /// A type this client does not yet marshal (currently <c>UUID</c>, <c>DECIMAL</c>,
+    /// <c>RECURSIVE_REL</c>, <c>INT128</c>, <c>UNION</c>, and <c>POINTER</c> - see
+    /// docs/USAGE.md's "Type coverage" section). The payload is always <see langword="null"/>, so
+    /// every <c>As*</c> accessor on a <see cref="LadybugValue"/> of this type - including
+    /// <see cref="LadybugValue.AsString"/> - throws <see cref="InvalidOperationException"/>; there
+    /// is no way to read the value out of this client today, only to detect that it occurred.
+    /// </summary>
     Unsupported = 0,
     /// <summary>SQL NULL.</summary>
     Null,

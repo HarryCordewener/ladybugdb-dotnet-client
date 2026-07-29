@@ -80,6 +80,17 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
     /// </summary>
     private int _databaseHoldCount;
 
+    /// <summary>
+    /// Test-only diagnostic: the current value of <see cref="_databaseHoldCount"/>. Structurally
+    /// always 0 or 1 given <see cref="LadybugConnection"/>'s own serializing gate - not something
+    /// production code reads - but exposed so a regression test can directly confirm the hold is
+    /// released (count back to 0) after a failed <c>BEGIN TRANSACTION</c> attempt, rather than
+    /// inferring it indirectly. See <see cref="TryAcquireDatabaseHoldForTransaction"/>'s remarks
+    /// for the specific failure mode (an unhandled <see cref="ObjectDisposedException"/> from
+    /// <see cref="SafeHandle.DangerousAddRef(ref bool)"/>) this exists to catch.
+    /// </summary>
+    internal int DatabaseHoldCountForTests => Volatile.Read(ref _databaseHoldCount);
+
     internal static unsafe LbugConnectionHandle Open(LbugDatabaseHandle database)
     {
         var storage = AllocateUnowned((nuint)sizeof(lbug_connection));
@@ -146,8 +157,27 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
             return false;
         }
 
+        // DangerousAddRef throws ObjectDisposedException on a fully-closed handle rather than
+        // returning acquired == false for that case - confirmed against the real SafeHandle
+        // implementation, not assumed from its (silent-on-this-point) doc comment. Without this
+        // catch, that throw unwinds straight past the "if (acquired) ... else decrement" logic
+        // below, leaving _databaseHoldCount at 1 with no real hold behind it: the increment above
+        // already ran, but the corresponding decrement on the failure path never gets a chance to.
+        // A later caller then sees a positive count and short-circuits at the top of this method
+        // (line ~141) believing a hold is already in place - against a database that is actually
+        // gone - and ReleaseHandle eventually sees that same stale positive count and issues an
+        // unmatched DangerousRelease() against a handle nothing here still owns a reference to.
         var acquired = false;
-        _ownerDatabase.DangerousAddRef(ref acquired);
+        try
+        {
+            _ownerDatabase.DangerousAddRef(ref acquired);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Owner fully closed - acquired stays false, handled identically to the ordinary
+            // "AddRef declined" case below.
+        }
+
         if (acquired) return true;
 
         Interlocked.Decrement(ref _databaseHoldCount);

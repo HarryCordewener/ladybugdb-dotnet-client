@@ -14,8 +14,13 @@ namespace LadybugDb.Client;
 /// <b>Thread-safety.</b> Every public member of this type is safe to call concurrently, from
 /// multiple threads, on the same instance - including two overlapping calls to
 /// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync"/> and <see cref="PrepareAsync"/>
-/// were already safe this way (each leases the underlying native handles only for the duration
-/// of its own call). <see cref="BeginTransactionAsync"/> is additionally serialized against
+/// were already safe this way - concurrent native re-entry on one connection is the underlying
+/// <c>lbug_connection</c>'s own guarantee ("Each connection is thread-safe", per
+/// <c>third-party/lbug.h</c>'s <c>lbug_connection</c> doc comment), not something this client
+/// adds; the per-call handle leases each of them also takes protect against a concurrent
+/// <em>disposal</em> racing the call (throwing <see cref="ObjectDisposedException"/> instead of
+/// touching freed memory), a separate concern from concurrent re-entry.
+/// <see cref="BeginTransactionAsync"/> is additionally serialized against
 /// itself and against transaction completion/disposal by <see cref="_transactionGate"/>, so
 /// racing it against another <see cref="BeginTransactionAsync"/> call on the same connection
 /// deterministically produces exactly one successful transaction and an

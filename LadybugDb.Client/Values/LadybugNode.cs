@@ -50,6 +50,19 @@ public sealed class LadybugNode : IEquatable<LadybugNode>
     /// <inheritdoc/>
     public override string ToString() =>
         $"(:{Label} {ValueEqualityHelpers.DescribeDictionary(Properties)})";
+
+    /// <summary>
+    /// Structural equality, matching <see cref="Equals(LadybugNode?)"/> - without this operator,
+    /// <c>==</c> on two <see cref="LadybugNode"/> references would silently fall back to
+    /// reference equality (the default for a <see langword="class"/>), exactly the asymmetry the
+    /// fix-round-4 <see cref="LadybugValue"/> equality finding was about, just relocated to a
+    /// different type.
+    /// </summary>
+    public static bool operator ==(LadybugNode? left, LadybugNode? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    /// <summary>See the <c>==</c> operator above.</summary>
+    public static bool operator !=(LadybugNode? left, LadybugNode? right) => !(left == right);
 }
 
 /// <summary>A REL value read from a query result, already fully marshalled into managed memory.</summary>
@@ -110,4 +123,15 @@ public sealed class LadybugRel : IEquatable<LadybugRel>
     /// <inheritdoc/>
     public override string ToString() =>
         $"[:{Label} {ValueEqualityHelpers.DescribeDictionary(Properties)}]";
+
+    /// <summary>
+    /// Structural equality, matching <see cref="Equals(LadybugRel?)"/> - see
+    /// <see cref="LadybugNode"/>'s identical operator for why this exists rather than falling back
+    /// to the default reference equality a <see langword="class"/> would otherwise get.
+    /// </summary>
+    public static bool operator ==(LadybugRel? left, LadybugRel? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    /// <summary>See the <c>==</c> operator above.</summary>
+    public static bool operator !=(LadybugRel? left, LadybugRel? right) => !(left == right);
 }

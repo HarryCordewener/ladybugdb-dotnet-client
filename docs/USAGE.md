@@ -223,8 +223,9 @@ results with `NextResultAsync()`:
 var current = await conn.QueryAsync("MATCH (o:Object) RETURN o.name; MATCH (o:Object) RETURN count(*);");
 while (current is not null)
 {
-    await foreach (var row in current) { /* ... */ }
-    current = await current.NextResultAsync();
+    await using var result = current;
+    await foreach (var row in result) { /* ... */ }
+    current = await result.NextResultAsync();
 }
 ```
 

@@ -81,6 +81,51 @@ public class DisposalSafetyTests
         finally { TestDatabase.Cleanup(path); }
     }
 
+    /// <summary>
+    /// Regresses a fix-round-5 finding: <c>SafeHandle.DangerousAddRef</c> throws
+    /// <see cref="ObjectDisposedException"/> on a fully-closed handle rather than returning
+    /// <c>acquired == false</c> - confirmed against the real engine, not assumed from
+    /// <c>SafeHandle</c>'s own (silent-on-this-point) doc. An earlier version of
+    /// <see cref="Interop.LbugConnectionHandle.TryAcquireDatabaseHoldForTransaction"/> did not
+    /// catch that throw, so it unwound straight past the decrement on the failure path and left
+    /// the hold's <see cref="Interlocked"/> reference count stuck at 1 with no real hold behind
+    /// it - a regression from the pre-<c>Interlocked</c> boolean version, which assigned its own
+    /// flag only AFTER <c>DangerousAddRef</c> returned, so a throw correctly left it
+    /// <see langword="false"/>. A stuck positive count defeats this method's own
+    /// <see cref="ObjectDisposedException"/> guard for every later caller (it short-circuits
+    /// "already held" against a database that is actually gone) and makes
+    /// <see cref="Interop.LbugConnectionHandle.ReleaseHandle"/> issue an unmatched
+    /// <c>SafeHandle.DangerousRelease</c> later.
+    /// </summary>
+    [Test]
+    public async Task BeginTransactionAsync_AfterDatabaseDisposed_LeavesDatabaseHoldCountAtZero()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            var db = new LadybugDatabase(path);
+            var conn = await db.ConnectAsync();
+
+            db.Dispose();
+
+            await Assert.ThrowsAsync<ObjectDisposedException>(
+                async () => await conn.BeginTransactionAsync());
+
+            // The direct assertion the finding's own repro was missing: the failed attempt above
+            // must not leave a phantom hold behind.
+            await Assert.That(conn.Handle.DatabaseHoldCountForTests).IsEqualTo(0);
+
+            // A stuck positive count would make this second, independent attempt short-circuit
+            // "already held" (returning true) against a database that is actually gone, instead
+            // of correctly reporting false.
+            await Assert.That(conn.Handle.TryAcquireDatabaseHoldForTransaction()).IsFalse();
+            await Assert.That(conn.Handle.DatabaseHoldCountForTests).IsEqualTo(0);
+
+            await conn.DisposeAsync();
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
     [Test]
     public async Task ReverseOrderDisposal_ResultThenConnectionThenDatabase_StillSucceeds()
     {
