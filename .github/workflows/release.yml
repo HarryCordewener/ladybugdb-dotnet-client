@@ -17,12 +17,10 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # A GitHub Environment lets the nuget.org Trusted Publishing policy be
-    # scoped to this specific workflow run context, and lets the repo owner
-    # attach a required-reviewers gate in the environment's own settings
-    # (Settings -> Environments -> release) without this workflow needing to
-    # know anything about that gate - see docs/RELEASING.md.
-    environment: release
+    # No GitHub Environment is used. The nuget.org Trusted Publishing policy
+    # must therefore leave its Environment field EMPTY - a policy scoped to an
+    # environment will not match a token minted outside one, and the exchange
+    # fails. If you later add `environment:` here, update the policy to match.
     permissions:
       # Required for NuGet/login to obtain a GitHub OIDC token to exchange
       # for a short-lived nuget.org API key. Without this the OIDC request

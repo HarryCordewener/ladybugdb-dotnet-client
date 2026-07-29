@@ -31,7 +31,7 @@ to two packages on nuget.org.
 
 ## What the workflow actually does
 
-In order, on `ubuntu-latest`, inside the `release` GitHub Environment:
+In order, on `ubuntu-latest`:
 
 1. Determine the version from the tag (or the `workflow_dispatch` input) and validate it looks like
    SemVer.
@@ -81,9 +81,10 @@ account and this repo's GitHub settings.
    - **Repository Owner:** `HarryCordewener`
    - **Repository:** `ladybugdb-dotnet-client`
    - **Workflow File:** `release.yml` (the file name only, not the `.github/workflows/` path)
-   - **Environment:** `release` (matches the `environment: release` this workflow runs under —
-     required so the policy can be scoped to it, and so you can optionally add a required-reviewer
-     gate on that environment later without changing the policy)
+   - **Environment:** **leave empty.** This workflow does not use a GitHub Environment. A policy
+     scoped to an environment will not match a token minted outside one, and the exchange fails
+     with no useful error — so this field must stay blank unless you later add an `environment:`
+     key to `release.yml`, in which case both must be changed together.
 
    If nuget.org requires the target package IDs to already exist or be reserved before a Trusted
    Publishing policy can be scoped to them, reserve `LadybugDb.Client` and `LadybugDb.Client.Native`
@@ -98,12 +99,12 @@ account and this repo's GitHub settings.
    - Name: `NUGET_USER`
    - Value: your nuget.org profile name (as shown in the nuget.org account URL/profile page)
 
-3. **Create the `release` GitHub Environment.** In this repo's Settings → **Environments**, create
-   an environment named `release` (must match exactly — it's what the Trusted Publishing policy
-   above is scoped to and what the workflow's `environment:` key references). Optionally add
-   **required reviewers** here if you want a manual approval gate between "tag pushed" and
-   "packages actually publish" — that's the whole reason this workflow uses an Environment instead
-   of running unscoped.
+That is the whole setup — two steps, no third.
+
+> **If you later want a manual approval gate** between "tag pushed" and "packages published",
+> create a GitHub Environment (Settings → **Environments**) with required reviewers, add
+> `environment: <name>` to the `publish` job in `release.yml`, **and** set the same name in the
+> nuget.org policy's Environment field. All three must agree; changing one alone breaks publishing.
 
 Until all three of these are done, the workflow will run but fail at either the `NuGet/login@v1`
 step (empty/wrong `user`, or no matching Trusted Publishing policy) or the `dotnet nuget push` step
