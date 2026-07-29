@@ -55,8 +55,30 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
     /// </summary>
     private LbugDatabaseHandle? _ownerDatabase;
 
-    /// <summary><see langword="true"/> between a successful <see cref="TryAcquireDatabaseHoldForTransaction"/> and the matching <see cref="ReleaseDatabaseHoldForTransaction"/>, so <see cref="ReleaseHandle"/> knows whether it is still holding a database reference it must release.</summary>
-    private bool _databaseRefHeldForOpenTransaction;
+    /// <summary>
+    /// Reference count for the long-lived database hold - 0 when not held, incremented by
+    /// <see cref="TryAcquireDatabaseHoldForTransaction"/> and decremented by
+    /// <see cref="ReleaseDatabaseHoldForTransaction"/>/<see cref="ReleaseHandle"/>, all via
+    /// <see cref="Interlocked"/> rather than a plain <c>bool</c>. This is deliberate, not
+    /// cosmetic: <see cref="LadybugConnection.BeginTransactionAsync"/> now serializes concurrent
+    /// callers with its own gate so only one acquire/release pair for a given connection is ever
+    /// in flight at a time by construction, but a plain <c>bool</c> here was what let an earlier,
+    /// unsynchronized version of that gate turn into a process-killing leak: two racing callers
+    /// could both pass a check-then-set nested-begin guard and both call
+    /// <see cref="TryAcquireDatabaseHoldForTransaction"/>, and the loser's subsequent failure
+    /// path calling <see cref="ReleaseDatabaseHoldForTransaction"/> would set the boolean back to
+    /// <see langword="false"/> even though the winner's transaction was still open on that same
+    /// hold - so the winner's own eventual release became a no-op and
+    /// <see cref="LbugDatabaseHandle.ReleaseHandle"/> (and therefore <c>lbug_database_destroy</c>,
+    /// which unmaps this database's ~8 TiB virtual-address reservation) never ran. Measured: ~40%
+    /// of racing iterations leaked a whole <c>lbug_database</c>, driving VmSize from a flat 8 TiB
+    /// to 112 TiB by iteration 30 and killing the process with a failed <c>mmap</c> soon after. A
+    /// real reference count makes a loser's release structurally unable to cancel a winner's hold
+    /// - it can only ever decrement, and the underlying <see cref="SafeHandle.DangerousRelease"/>
+    /// only fires when the count actually reaches zero - so this is correct even if some future
+    /// caller reaches this type without going through <see cref="LadybugConnection"/>'s gate.
+    /// </summary>
+    private int _databaseHoldCount;
 
     internal static unsafe LbugConnectionHandle Open(LbugDatabaseHandle database)
     {
@@ -110,12 +132,26 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
     /// </returns>
     internal bool TryAcquireDatabaseHoldForTransaction()
     {
-        if (_databaseRefHeldForOpenTransaction) return true;
-        if (_ownerDatabase is null) return false;
+        // Only the caller that takes the count from 0 to 1 touches the underlying SafeHandle at
+        // all - every later concurrent/nested acquire just adds to the count. In normal operation
+        // LadybugConnection's own gate means this is never actually contended (exactly one
+        // acquire is ever in flight per connection), but the increment-first shape means that
+        // even if it somehow were, no caller can observe "not held" while another caller's hold
+        // is genuinely still outstanding.
+        if (Interlocked.Increment(ref _databaseHoldCount) > 1) return true;
+
+        if (_ownerDatabase is null)
+        {
+            Interlocked.Decrement(ref _databaseHoldCount);
+            return false;
+        }
+
         var acquired = false;
         _ownerDatabase.DangerousAddRef(ref acquired);
-        _databaseRefHeldForOpenTransaction = acquired;
-        return acquired;
+        if (acquired) return true;
+
+        Interlocked.Decrement(ref _databaseHoldCount);
+        return false;
     }
 
     /// <summary>
@@ -127,8 +163,20 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
     /// </summary>
     internal void ReleaseDatabaseHoldForTransaction()
     {
-        if (!_databaseRefHeldForOpenTransaction) return;
-        _databaseRefHeldForOpenTransaction = false;
+        var afterDecrement = Interlocked.Decrement(ref _databaseHoldCount);
+        if (afterDecrement > 0) return;
+
+        if (afterDecrement < 0)
+        {
+            // A release with no matching acquire outstanding. Restore the floor at zero rather
+            // than let the count run away negative - this must never happen given how the two
+            // callers of this method (LadybugConnection's own begin-failure path and
+            // OnTransactionCompleted) are used today, but if it ever did, the correct response is
+            // to no-op, not to call DangerousRelease a second time for a hold nobody still has.
+            Interlocked.CompareExchange(ref _databaseHoldCount, 0, afterDecrement);
+            return;
+        }
+
         _ownerDatabase?.DangerousRelease();
     }
 
@@ -155,9 +203,8 @@ internal sealed class LbugConnectionHandle : LbugStructHandle
         // from an explicit Dispose or, if this connection was abandoned without one, from this
         // handle's own finalizer racing arbitrarily against the database handle's finalizer. See
         // this class's remarks. Never allowed to throw out of here either.
-        if (_databaseRefHeldForOpenTransaction)
+        if (Interlocked.Exchange(ref _databaseHoldCount, 0) > 0)
         {
-            _databaseRefHeldForOpenTransaction = false;
             try
             {
                 _ownerDatabase?.DangerousRelease();

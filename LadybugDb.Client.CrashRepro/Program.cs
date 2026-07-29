@@ -15,10 +15,15 @@ using LadybugDb.Client;
 // Usage: LadybugDb.Client.CrashRepro <scenario> <db-path> [iterations]
 // Scenarios: db-first-open, db-first-committed, conn-first-open, conn-first-committed (explicit
 // dispose orderings); gc-abandon-open (abandons everything without disposing anything and
-// forces the real GC finalizer path - see AbandonWithoutDisposal_TransactionLeftOpen); and
+// forces the real GC finalizer path - see AbandonWithoutDisposal_TransactionLeftOpen);
 // begin-vs-dispose (BeginTransactionAsync racing a concurrent db.Dispose() - live concurrency,
 // no GC, no abandonment; [iterations] controls how many fresh-database attempts to loop through
-// in this one process, default 500 - see BeginTransactionRacingDatabaseDispose).
+// in this one process, default 500 - see BeginTransactionRacingDatabaseDispose); and
+// begin-vs-begin (two concurrent BeginTransactionAsync calls racing each other on the SAME
+// connection - regresses the fix-round-4 database-leak finding; [iterations] as above, default
+// 40 - see BeginTransactionRacingBeginTransaction). Prints a VMSIZE:<iteration>:<bytes> line
+// (parsed from /proc/self/status) every 5 iterations so the spawning test can assert the
+// per-database ~8 TiB virtual-address reservation is not accumulating across iterations.
 // Exit 0 and "DONE" on stdout: the scenario completed and the process is healthy.
 // Exit 1 and "MANAGED_EXCEPTION:...": a normal (non-fatal) exception was thrown and caught here.
 // Any other exit code (e.g. 134 = SIGABRT, 139 = SIGSEGV on Linux): the process was killed.
@@ -60,6 +65,12 @@ try
             var iterations = args.Length > 2 ? int.Parse(args[2]) : 500;
             await BeginTransactionRacingDatabaseDispose(path, iterations);
             Console.WriteLine($"ITERATIONS:{iterations}");
+            Console.WriteLine("DONE");
+            return 0;
+        case "begin-vs-begin":
+            var beginVsBeginIterations = args.Length > 2 ? int.Parse(args[2]) : 40;
+            await BeginTransactionRacingBeginTransaction(path, beginVsBeginIterations);
+            Console.WriteLine($"ITERATIONS:{beginVsBeginIterations}");
             Console.WriteLine("DONE");
             return 0;
         default:
@@ -179,6 +190,135 @@ static void ForceFullGarbageCollection()
         GC.Collect();
         GC.WaitForPendingFinalizers();
     }
+}
+
+// Two concurrent conn.BeginTransactionAsync() calls racing each other on the SAME connection -
+// regresses the fix-round-4 finding: an earlier, unsynchronized version of the nested-begin
+// guard (LadybugConnection._activeTransaction, a plain field) plus a boolean (not
+// reference-counted) database hold in LbugConnectionHandle let both racing callers pass the
+// check-then-act guard and both take/lose the hold, so the loser's failure-path release could
+// cancel the winner's still-open hold - LbugDatabaseHandle.ReleaseHandle (and therefore
+// lbug_database_destroy, which unmaps this database's ~8 TiB virtual-address reservation) then
+// never ran for that iteration's database. Measured pre-fix: ~40% of racing iterations leaked a
+// whole lbug_database, VmSize climbing from a flat 8 TiB to 112 TiB by iteration 30 and the
+// process dying with a failed mmap around iteration 33-37.
+//
+// The Barrier only synchronizes the two tasks' START; it does not force them to genuinely
+// overlap all the way through BeginTransactionAsync - the scheduler is free to run one task to
+// full completion (begin, increment, and the `await using`'s own dispose/rollback) before the
+// other's continuation even resumes past the barrier. When that happens both calls legitimately
+// succeed, one after the other, which is correct behaviour, not a race hit - so this scenario
+// does NOT assert "exactly one success" as a hard failure (an earlier version of this harness
+// did, and was itself flaky: it failed the invariant on legitimately-sequential runs even against
+// the FIXED client). What it does assert, every iteration: at least one call must succeed (two
+// legitimate client-side rejections in a row would itself be a bug), and whenever exactly one
+// succeeds, the loser must have failed with InvalidOperationException specifically - client-side,
+// before BEGIN TRANSACTION ever reaches the engine - not some other exception type. The actual
+// regression signal for the leak/crash this scenario exists to catch is VmSize staying flat
+// across iterations and the process exiting 0, checked below and by the caller respectively.
+static async Task BeginTransactionRacingBeginTransaction(string basePath, int iterations)
+{
+    for (var i = 0; i < iterations; i++)
+    {
+        var path = $"{basePath}-{i}";
+        try
+        {
+            var db = new LadybugDatabase(path);
+            var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+
+            using var barrier = new Barrier(2);
+            var successCount = 0;
+            Exception? exceptionA = null;
+            Exception? exceptionB = null;
+
+            var taskA = Task.Run(async () =>
+            {
+                barrier.SignalAndWait();
+                try
+                {
+                    await using var tx = await conn.BeginTransactionAsync();
+                    Interlocked.Increment(ref successCount);
+                }
+                catch (Exception ex)
+                {
+                    exceptionA = ex;
+                }
+            });
+            var taskB = Task.Run(async () =>
+            {
+                barrier.SignalAndWait();
+                try
+                {
+                    await using var tx = await conn.BeginTransactionAsync();
+                    Interlocked.Increment(ref successCount);
+                }
+                catch (Exception ex)
+                {
+                    exceptionB = ex;
+                }
+            });
+
+            await Task.WhenAll(taskA, taskB);
+
+            var finalSuccessCount = Volatile.Read(ref successCount);
+            if (finalSuccessCount == 0)
+                throw new InvalidOperationException(
+                    $"iteration {i}: expected at least 1 of the 2 racing BeginTransactionAsync " +
+                    $"calls to succeed, got 0. exceptionA={exceptionA?.GetType().Name}, " +
+                    $"exceptionB={exceptionB?.GetType().Name}.");
+
+            if (finalSuccessCount == 1)
+            {
+                // Only meaningful to check in this case - see the remarks above on why this
+                // scenario does not require exactly 1 success on every iteration.
+                var loserException = exceptionA ?? exceptionB;
+                if (loserException is not InvalidOperationException)
+                    throw new InvalidOperationException(
+                        $"iteration {i}: expected the losing BeginTransactionAsync call to fail " +
+                        $"with InvalidOperationException, got " +
+                        $"{loserException?.GetType().Name ?? "no exception at all"}.");
+            }
+
+            await conn.DisposeAsync();
+            db.Dispose();
+
+            if (i % 5 == 0 || i == iterations - 1)
+            {
+                var vmSize = ReadVmSizeBytes();
+                if (vmSize is { } bytes) Console.WriteLine($"VMSIZE:{i}:{bytes}");
+            }
+        }
+        finally
+        {
+            foreach (var p in new[] { path, path + ".wal", path + ".shadow", path + ".lock", path + ".tmp" })
+            {
+                try { if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
+            }
+            try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { /* best effort */ }
+        }
+    }
+}
+
+// Parses VmSize (virtual address space reserved, not resident memory - what the ~8 TiB
+// per-database mmap reservation shows up as) out of /proc/self/status. Linux-only; returns null
+// anywhere that file doesn't exist so this harness degrades gracefully rather than throwing.
+static long? ReadVmSizeBytes()
+{
+    const string statusPath = "/proc/self/status";
+    if (!File.Exists(statusPath)) return null;
+
+    foreach (var line in File.ReadLines(statusPath))
+    {
+        if (!line.StartsWith("VmSize:", StringComparison.Ordinal)) continue;
+        var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        // Format: "VmSize:\t123456 kB"
+        if (parts.Length >= 2 && long.TryParse(parts[1], out var kb)) return kb * 1024;
+        return null;
+    }
+
+    return null;
 }
 
 // conn.BeginTransactionAsync() racing a concurrent db.Dispose() on the owning database - pure
