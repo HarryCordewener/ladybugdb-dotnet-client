@@ -140,6 +140,7 @@ internal static class ValueReader
     private static void ThrowIfFailed(lbug_state state, string kind)
     {
         if (state != lbug_state.LbugSuccess)
-            throw new LadybugException($"Failed to read a {kind} value from a column the engine reported as that type.");
+            throw new LadybugException(NativeString.WithErrorDetail(
+                $"Failed to read a {kind} value from a column the engine reported as that type."));
     }
 }

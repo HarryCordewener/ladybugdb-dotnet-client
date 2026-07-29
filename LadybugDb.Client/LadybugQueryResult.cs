@@ -78,11 +78,11 @@ public sealed class LadybugQueryResult : IAsyncDisposable
 
         using var tupleHandle = LbugFlatTupleHandle.GetNext(_handle, out var tupleState);
         if (tupleState != lbug_state.LbugSuccess)
-            throw new LadybugException(WithErrorDetail("Failed to advance to the next row."));
+            throw new LadybugException(NativeString.WithErrorDetail("Failed to advance to the next row."));
 
         using var valueHandle = LbugValueHandle.GetValue(tupleHandle, columnIndex, out var valueState);
         if (valueState != lbug_state.LbugSuccess)
-            throw new LadybugException(WithErrorDetail($"Failed to read column {columnIndex}."));
+            throw new LadybugException(NativeString.WithErrorDetail($"Failed to read column {columnIndex}."));
 
         sbyte* raw;
         lbug_state stringState;
@@ -91,7 +91,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable
             stringState = LbugNative.lbug_value_get_string((lbug_value*)lease.Pointer, &raw);
         }
         if (stringState != lbug_state.LbugSuccess)
-            throw new LadybugException(WithErrorDetail($"Column {columnIndex} is not a string."));
+            throw new LadybugException(NativeString.WithErrorDetail($"Column {columnIndex} is not a string."));
 
         return NativeString.TakeOwnership(raw);
     }
@@ -133,36 +133,19 @@ public sealed class LadybugQueryResult : IAsyncDisposable
 
         using var tupleHandle = LbugFlatTupleHandle.GetNext(_handle, out var tupleState);
         if (tupleState != lbug_state.LbugSuccess)
-            throw new LadybugException(WithErrorDetail("Failed to advance to the next row."));
+            throw new LadybugException(NativeString.WithErrorDetail("Failed to advance to the next row."));
 
         var values = new LadybugValue[columnCount];
         for (ulong i = 0; i < columnCount; i++)
         {
             using var valueHandle = LbugValueHandle.GetValue(tupleHandle, i, out var valueState);
             if (valueState != lbug_state.LbugSuccess)
-                throw new LadybugException(WithErrorDetail($"Failed to read column {i}."));
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read column {i}."));
 
             using var lease = valueHandle.Acquire();
             values[i] = ValueReader.Read((lbug_value*)lease.Pointer);
         }
 
         return new LadybugRow(values);
-    }
-
-    /// <summary>
-    /// Folds the engine's own error detail (if any) into <paramref name="message"/>, the same way
-    /// <see cref="LbugDatabaseHandle.Open"/> and <see cref="LbugConnectionHandle.Open"/> do.
-    /// </summary>
-    /// <remarks>
-    /// Consumes <c>lbug_get_last_error()</c> unconditionally on every failure branch above, even
-    /// when it turns out there is nothing recorded (<see cref="NativeString.TakeOwnershipOrNull"/>
-    /// returns <see langword="null"/>). Leaving it unconsumed is the hazard: a message recorded by
-    /// this call and never read would otherwise still be sitting there for an unrelated later
-    /// call to pick up and misreport.
-    /// </remarks>
-    private static unsafe string WithErrorDetail(string message)
-    {
-        var detail = NativeString.TakeOwnershipOrNull(LbugNative.lbug_get_last_error());
-        return detail is null ? message : $"{message} {detail}";
     }
 }
