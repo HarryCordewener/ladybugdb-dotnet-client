@@ -38,40 +38,56 @@ column by hand, at every call site.
 
 ## Decisions
 
-### 1. Parameters: anonymous object or dictionary, on both entry points
+### 1. Parameters: one `object` overload per entry point
 
-Two overloads per entry point:
+A single parameter-taking overload per entry point, accepting either an anonymous object or a
+dictionary and discriminating at runtime:
 
 ```csharp
 // LadybugConnection
 ValueTask<LadybugQueryResult> QueryAsync(string cypher, object parameters, CancellationToken ct = default);
-ValueTask<LadybugQueryResult> QueryAsync(string cypher, IReadOnlyDictionary<string, object?> parameters, CancellationToken ct = default);
 
 // LadybugPreparedStatement
 ValueTask<LadybugQueryResult> ExecuteAsync(object parameters, CancellationToken ct = default);
-ValueTask<LadybugQueryResult> ExecuteAsync(IReadOnlyDictionary<string, object?> parameters, CancellationToken ct = default);
 ```
 
 **Rationale.** The anonymous-object form is the ergonomic win at the call site; the dictionary form
-covers parameter names computed at runtime, which the anonymous form cannot express. Supplying both
-means a caller building a query dynamically is never pushed back to the chained API.
+covers parameter names computed at runtime, which the anonymous form cannot express. One `object`
+parameter accepts both, so a caller building a query dynamically is never pushed back to the chained
+API. Dictionaries are still read directly with **no reflection** — the discrimination is a type test,
+not reflection.
 
-The dictionary overload reads keys directly and uses **no reflection**. Only the `object` overload
-reflects, and only over the parameter object's public properties.
-
-C# overload resolution prefers the `IReadOnlyDictionary` overload for a `Dictionary` argument, so the
-two coexist for every concrete argument.
-
-**One ambiguity must be closed explicitly:** a bare `QueryAsync(cypher, null)` matches both overloads
-and fails to compile. The `object` overload therefore takes a non-nullable `object parameters`, and a
-caller wanting no parameters uses the existing single-argument `QueryAsync(cypher)`. Passing `null`
-is a caller error, not a supported "no parameters" spelling — and the compiler says so at the call
-site rather than the client throwing at runtime. This must be covered by a compile-level check or a
-documented test, since it is the kind of thing that silently regresses when an overload is added.
+**Why not two overloads, and why not a discriminated union.** An earlier draft of this design used
+separate `object` and `IReadOnlyDictionary` overloads, which made `QueryAsync(cypher, null)`
+ambiguous, which in turn motivated a two-case `Parameter` union to force explicitness. Both were
+solving a problem the design created. With a single parameter overload there is no ambiguity to
+resolve: measured against the existing `(string, CancellationToken)` overload, every intended call
+resolves as expected — bare, with a token, with an anonymous object, with a dictionary, with an
+object plus a token, and `(cypher, null)` compiles unambiguously and throws `ArgumentNullException`.
+The union added a wrapper at every call site and bought only a compile-time rejection of nonsense
+arguments, which the runtime error below already reports clearly.
 
 The one-shot `QueryAsync(cypher, parameters)` overload prepares, binds, executes, and disposes the
 statement internally. It exists because a parameterized query run **once** should not require the
 caller to manage a statement's lifetime.
+
+**Discrimination order is load-bearing — it was measured, not assumed.** A type test against
+`IReadOnlyDictionary<string, object?>` alone is a silent-corruption bug: `Dictionary<string, long>`
+does not match it and falls through to the reflection path, where the "parameters" become that
+dictionary's own public properties — `Comparer`, `Count`, `Capacity`, `Keys`, `Values`, `Item` — with
+no error raised. The binder therefore tests in this order:
+
+1. `IReadOnlyDictionary<string, object?>` — the common case, enumerated without boxing. Note that
+   nullable reference annotations are erased at runtime, so `Dictionary<string, object>` matches this
+   too.
+2. non-generic `System.Collections.IDictionary` — catches every other generic dictionary regardless
+   of value type (`Dictionary<string, long>`, `SortedDictionary<string, string>`, …), boxing values.
+   A non-string key is an `ArgumentException` naming the key's type.
+3. otherwise, reflect over public properties.
+
+Anonymous types are not `IDictionary`, so step 3 still receives them. A test must cover
+`Dictionary<string, long>` specifically: it is the case that silently produced wrong parameter names,
+and it regresses invisibly if the `IDictionary` step is ever dropped.
 
 ### 2. Value dispatch
 
@@ -156,11 +172,18 @@ different queries projecting the same `T` do not collide. Reflection therefore r
 
 ### 5. AOT and trimming
 
-`Select<T>` and the `object`-parameters overloads use reflection and are annotated
-`[RequiresUnreferencedCode]`. The annotation adds no API surface and no runtime cost, and gives
-AOT/trim consumers a **build-time** warning identifying the limitation rather than a runtime failure.
+`Select<T>` and the parameter-taking overloads are annotated `[RequiresUnreferencedCode]`. The
+annotation adds no API surface and no runtime cost, and gives AOT/trim consumers a **build-time**
+warning identifying the limitation rather than a runtime failure.
 
-The dictionary-parameter overloads use no reflection and carry no annotation.
+**Collapsing to one `object` overload costs something here, and the cost is accepted knowingly.**
+A single overload may reflect, so it must be annotated, so a caller passing a *dictionary* — a path
+that never reflects — still gets a trim warning. If that proves annoying in practice, an unannotated
+`IReadOnlyDictionary<string, object?>` overload can be added later: adding an overload is not a
+breaking change, and the only call it makes ambiguous is `QueryAsync(cypher, null)`, which is a
+compile error on a call that has no meaning. Deferred rather than pre-built, because the annotation
+matters only to a consumer who wants runtime-computed parameter names *and* trimming, and no such
+consumer exists yet.
 
 This preserves the option of a source generator later replacing the reflection internals without an
 API change, and of the library declaring `IsAotCompatible` for the non-annotated surface. No AOT or
@@ -188,6 +211,8 @@ Every new failure is typed and names what failed:
 | Condition | Exception | Must name |
 |---|---|---|
 | Unsupported parameter value type | `ArgumentException` | parameter name, runtime type |
+| `null` parameters object | `ArgumentNullException` | the parameter name |
+| Dictionary with non-string keys | `ArgumentException` | the key's runtime type |
 | No matching constructor | `InvalidOperationException` | columns, rejected candidates |
 | Ambiguous constructors | `InvalidOperationException` | the competing constructors |
 | Column not convertible to target | `LadybugException` | column, `LadybugType`, target type |
@@ -199,6 +224,11 @@ Every new failure is typed and names what failed:
 Integration tests against the real engine:
 
 - Both parameter forms on both entry points; prepared-statement reuse across executions.
+- **`Dictionary<string, long>` binds by its keys, not by `Count`/`Keys`/`Values`.** This is the case
+  that silently bound a dictionary's own property names as parameters, and it regresses invisibly if
+  the non-generic `IDictionary` step in Decision 1 is ever removed. A non-string-keyed dictionary
+  raises `ArgumentException`.
+- `QueryAsync(cypher, null)` throws `ArgumentNullException`, naming the parameter.
 - Positional `record` projection; nullable columns; extra columns ignored; missing column errors.
 - Scalar unwrap, including `count(*)` and a nullable scalar.
 - Wrong-type conversion produces the typed error, not a wrong value.
