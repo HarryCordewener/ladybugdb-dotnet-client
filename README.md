@@ -10,19 +10,36 @@ no daemon, no separate install.
 This is an independent client, not an official LadybugDB project. Upstream ships official
 bindings for Python, NodeJS, Rust, Go, Swift, Java, and C/C++, but none for .NET.
 
-> **Status: foundation milestone, unpublished.** No package is on NuGet yet. What exists is real
-> and tested against the actual engine — open a database, open connections, run Cypher, read
-> string columns back — but the public surface is intentionally small. See
+> **Status: pre-1.0, unpublished.** No package is on NuGet yet. What exists is real and tested
+> against the actual engine — open a database, open one or more connections, run Cypher (plain or
+> prepared/parameterized), read every scalar/temporal/container/graph type back except the five
+> listed under [Current status and limitations](#current-status-and-limitations), and run
+> transactions — but the public surface is still pre-1.0 and can change. See
 > [Current status and limitations](#current-status-and-limitations) before you invest in this.
 
 ## Install
 
-Two packages, both required:
+**Not published yet.** No package is on NuGet (see the status note above), so `dotnet add package`
+won't work today. Until a tagged release ships, build from source instead — see
+[docs/BUILDING.md](docs/BUILDING.md) for the full walkthrough, or the short version:
+
+```console
+git clone https://github.com/HarryCordewener/ladybugdb-dotnet-client.git
+cd ladybugdb-dotnet-client
+bash scripts/fetch-liblbug.sh
+dotnet pack -c Release
+```
+
+That produces the two packages below under each project's `bin/Release`, both required, which you
+can reference locally (e.g. a local NuGet feed, or `dotnet add package ... --source <path>`) or via
+a project reference to `LadybugDb.Client/LadybugDb.Client.csproj`:
 
 | Package | Contents |
 |---|---|
 | `LadybugDb.Client` | The managed client. Zero native binaries. |
 | `LadybugDb.Client.Native` | `liblbug` binaries for six RIDs: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`, `win-arm64`. |
+
+Once a release ships (see [docs/RELEASING.md](docs/RELEASING.md)), this becomes the normal:
 
 ```console
 dotnet add package LadybugDb.Client
@@ -47,9 +64,9 @@ await using (var _ = await conn.QueryAsync(
     "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
 
 await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
-while (result.HasNext)
+await foreach (var row in result)
 {
-    var name = await result.ReadStringAsync(0);
+    var name = row.GetValue(0).AsString();
     Console.WriteLine(name); // Limbo
 }
 ```
@@ -66,26 +83,60 @@ Supported today:
   count, compression, read-only mode, and max size.
 - Opening one or more connections to a database (`LadybugConnection`).
 - Running a Cypher statement as a plain string and getting back a `LadybugQueryResult`.
-- Reading a result's columns one string at a time (`ReadStringAsync`), row by row.
+- Reading a result with `await foreach` (`IAsyncEnumerable<LadybugRow>`), with every LadybugDB
+  value type marshalled to a typed `LadybugValue`: every scalar (including `UUID`/`AsGuid()` and
+  `INT128`/`AsInt128()`), temporal, container (LIST/ARRAY/STRUCT/MAP) type, and graph type —
+  NODE/REL/INTERNAL_ID plus RECURSIVE_REL (`AsPath()`, for variable-length path matches like
+  `(a)-[:R*1..3]->(b)`) — the engine can return, including `DECIMAL` (`AsDecimal()` for values
+  within .NET's native `decimal` range, `AsBigDecimal()` as the always-lossless path for the
+  engine's full 38-digit precision — see
+  [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)). A `UNION` value reads as its
+  resolved member's own real type — every existing typed accessor simply works on it, no dedicated
+  `LadybugType.Union`/`AsUnion()` needed. `POINTER` has no dedicated typed accessor and is
+  unreachable through any public Cypher path anyway; it reads as `LadybugType.Unsupported` with
+  `AsString()` returning the engine's own string rendering rather than throwing — see
+  [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown, and
+  [docs/USAGE.md](docs/USAGE.md#union-and-pointer-is-asstring-enough) for the empirical
+  investigation — columns addressable by position or name, and chained multi-statement results
+  walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
-- Safe disposal ordering: disposing a database out from under a still-open connection or result
-  throws `ObjectDisposedException`, not a crash.
+- Safe disposal ordering: disposing a database out from under a still-open connection, result, or
+  managed transaction (one opened via `BeginTransactionAsync`) throws `ObjectDisposedException` (or
+  completes cleanly), never crashes the process — and a result obtained *before* the database was
+  disposed (including a DML one, e.g. `CREATE`/`SET`/`DELETE`) is always safe to dispose or let the
+  GC finalize *afterward* too, since every native child handle now holds a reference on its parent
+  for its own entire lifetime, not merely for the call that created it. See
+  [docs/USAGE.md](docs/USAGE.md#disposal-and-lifetime) for the "closed for new work immediately,
+  destroyed once the last dependent releases" model this is built on. This guarantee does not
+  extend to the raw-Cypher escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")`) — see
+  [docs/USAGE.md](docs/USAGE.md#transactions) for why disposing with an uncommitted raw transaction
+  can abort the process instead of throwing.
+- Transactions (`LadybugConnection.BeginTransactionAsync` / `LadybugTransaction`), a thin,
+  hard-to-misuse wrapper over `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` - the C API has no native
+  transaction primitive, so that is genuinely all this is under the hood. Disposing a transaction
+  without committing or rolling it back first rolls it back automatically.
+- `LadybugConfig.EnableMultiWrites`, mapping to the engine's `enable_multi_writes` setting.
+  Measured, not assumed: turning it on genuinely lifts LadybugDB's default one-write-transaction-
+  -at-a-time restriction (zero conflicts across four runs at up to 8 concurrent writers, versus
+  conflicts climbing into the tens of thousands per run with it off). See
+  [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the numbers and
+  the retry pattern still needed when it's off (the default).
+- Parameterized queries (`LadybugConnection.PrepareAsync` / `LadybugPreparedStatement`) — 23
+  binding methods in total: nineteen typed `Bind` overloads covering the engine's scalar/temporal
+  types (including a `BigDecimal` overload, via `ExtendedNumerics.BigDecimal`, for lossless DECIMAL
+  binding at any precision the engine supports, and `Guid`/`Int128` overloads for UUID/INT128),
+  `BindTimestampSeconds`/`BindTimestampMilliseconds`/`BindTimestampNanoseconds` for the three
+  non-default timestamp precisions, and `BindNull` for a typed NULL — so a statement executed
+  repeatedly with different values only gets planned once. `Bind`/`BindNull` calls on the SAME
+  `LadybugPreparedStatement` are serialized internally, so calling them concurrently from multiple
+  threads is memory-safe (the engine's own bound-value storage is not otherwise safe for that) —
+  see [docs/USAGE.md](docs/USAGE.md#prepared-statements) for what concurrent `Bind` +
+  `ExecuteAsync` does and does not guarantee.
 
-Not yet supported (see [docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for the
-full, reviewed list):
-
-- Parameterized queries. Every statement is a plain string you build yourself.
-- Reading columns as anything other than a string — no typed value marshalling yet.
-- Iterating a result with `await foreach` (`IAsyncEnumerable<T>`) — use `HasNext` and
-  `ReadStringAsync` in a loop instead.
-- Explicit transaction control beyond issuing `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK` as plain
-  Cypher statements.
-- Internal write serialization. LadybugDB allows exactly one write transaction at a time and
-  rejects a second rather than queuing it; this client surfaces that rejection as
-  `LadybugWriteConflictException` rather than hiding it behind an internal queue. See
-  [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the retry
-  pattern this implies.
+No known functional gaps remain in the API surface listed above. See
+[docs/MILESTONE-2-CARRYOVER.md](docs/MILESTONE-2-CARRYOVER.md) for smaller, reviewed
+implementation-detail items (test coverage, interop breadth) that don't affect the public API.
 
 ## Supported platforms
 

@@ -12,10 +12,11 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <!--
-      Foundation milestone only: typed parameter binds, transactions, and IAsyncEnumerable are
-      all still deferred to Milestone 2. Publishing 1.0.0 here would assert a stable API this
-      milestone doesn't have. NuGet versions can be unlisted but never replaced, so this stays
-      pre-release until the API settles.
+      Milestone 2's functional surface (typed parameter binds, transactions, IAsyncEnumerable
+      result reading, prepared statements) is complete, but the public API is still pre-1.0 and
+      has not been through a stability review. Publishing 1.0.0 here would assert an API contract
+      this project hasn't committed to yet. NuGet versions can be unlisted but never replaced, so
+      this stays pre-release until the API settles.
     -->
     <VersionPrefix>0.1.0</VersionPrefix>
     <VersionSuffix>alpha</VersionSuffix>

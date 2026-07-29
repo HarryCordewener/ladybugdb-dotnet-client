@@ -19,13 +19,10 @@ namespace LadybugDb.Client.IntegrationTests;
 /// </summary>
 public class DisposalSafetyTests
 {
-    private static string TempDbPath() =>
-        Path.Combine(Path.GetTempPath(), $"lbug-dispose-{Guid.NewGuid():N}");
-
     [Test]
     public async Task QueryAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -43,9 +40,9 @@ public class DisposalSafetyTests
     }
 
     [Test]
-    public async Task ReadStringAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
+    public async Task Enumeration_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -56,11 +53,12 @@ public class DisposalSafetyTests
                 "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
 
             var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
+            await using var enumerator = result.GetAsyncEnumerator();
 
             db.Dispose();
 
             await Assert.ThrowsAsync<ObjectDisposedException>(
-                async () => await result.ReadStringAsync(0));
+                async () => await enumerator.MoveNextAsync());
 
             // The result and connection must still be safely disposable afterward.
             await result.DisposeAsync();
@@ -72,7 +70,7 @@ public class DisposalSafetyTests
     [Test]
     public async Task ConnectAsync_AfterDatabaseDisposed_ThrowsObjectDisposedException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -83,10 +81,40 @@ public class DisposalSafetyTests
         finally { TestDatabase.Cleanup(path); }
     }
 
+    /// <summary>
+    /// A connection opened AFTER the database was already disposed must never succeed - that
+    /// would mean <see cref="Interop.LbugConnectionHandle.Open"/>'s own
+    /// <see cref="Interop.LbugStructHandle.AcquireParentHolds"/> call somehow took a hold on a
+    /// database it should have observed as already closed. See <c>HandleTests</c> (in
+    /// <c>LadybugDb.Client.Tests</c>) for the lower-level regression that pins down the specific
+    /// finding this exists to catch end to end: <c>SafeHandle.DangerousAddRef</c> throwing
+    /// <see cref="ObjectDisposedException"/> on a fully-closed handle rather than returning
+    /// <c>acquired == false</c>, and <see cref="Interop.LbugStructHandle.AcquireParentHolds"/>
+    /// catching that per-attempt so a failure partway through a multi-parent acquisition rolls
+    /// back every hold it already took rather than leaking one.
+    /// </summary>
+    [Test]
+    public async Task ConnectAsync_AfterDatabaseDisposed_NeverLeavesADanglingHold()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            var db = new LadybugDatabase(path);
+            db.Dispose();
+
+            await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.ConnectAsync());
+            // A second, independent attempt must fail exactly the same way - a leaked hold from
+            // the first attempt would make the database appear as if something still depended on
+            // it, but would not change whether IT ITSELF still reports closed to a fresh caller.
+            await Assert.ThrowsAsync<ObjectDisposedException>(async () => await db.ConnectAsync());
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
     [Test]
     public async Task ReverseOrderDisposal_ResultThenConnectionThenDatabase_StillSucceeds()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var db = new LadybugDatabase(path);
@@ -97,7 +125,9 @@ public class DisposalSafetyTests
                 "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
 
             var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-            var name = await result.ReadStringAsync(0);
+            string? name = null;
+            await foreach (var row in result)
+                name = row.GetValue(0).AsString();
             await Assert.That(name).IsEqualTo("Limbo");
 
             // Correct order: descendant objects disposed before their ancestor. Must not throw.
@@ -111,7 +141,7 @@ public class DisposalSafetyTests
     [Test]
     public async Task OrphanedConnection_FinalizesWithoutCrashingTheProcess()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);

@@ -36,6 +36,70 @@ internal abstract class LbugStructHandle : SafeHandle
     public override bool IsInvalid => handle == IntPtr.Zero;
 
     /// <summary>
+    /// <see langword="true"/> from the moment <c>Dispose()</c> (or finalization) first runs on
+    /// this handle - unlike <see cref="SafeHandle.IsClosed"/>, which does NOT become
+    /// <see langword="true"/> while any <see cref="SafeHandle.DangerousAddRef(ref bool)"/>-based
+    /// reference against this handle is still outstanding, whether that reference is a short-lived
+    /// <see cref="Acquire"/> lease or one of this handle's own long-lived
+    /// <see cref="AcquireParentHolds"/> holds ON some OTHER handle. See <see cref="Dispose(bool)"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Verified directly, not assumed, and the reason this field exists at all.</b> The natural
+    /// assumption - that a <see cref="SafeHandle"/> reports itself closed the instant
+    /// <c>Dispose()</c> runs, regardless of how many references are still outstanding elsewhere -
+    /// is wrong. A small standalone probe (a bare <see cref="SafeHandle"/> subclass, one
+    /// <see cref="SafeHandle.DangerousAddRef(ref bool)"/> taken and left outstanding, then
+    /// <c>Dispose()</c> called) showed <see cref="SafeHandle.IsClosed"/> still reading
+    /// <see langword="false"/> immediately afterward, and - more consequentially - a SECOND, brand
+    /// new <see cref="SafeHandle.DangerousAddRef(ref bool)"/> attempt at that point SUCCEEDING
+    /// rather than throwing <see cref="ObjectDisposedException"/>. <see cref="SafeHandle"/> packs
+    /// "closed" and the reference count into one shared state word, and only actually flips
+    /// "closed" once the count reaches zero - i.e. once <c>ReleaseHandle</c> is about to run, the
+    /// same event <see cref="SafeHandle.IsClosed"/> was always documented to reflect, just not the
+    /// event this library's disposal-safety contract actually needs a signal for.
+    /// </para>
+    /// <para>
+    /// <b>Why that matters here specifically.</b> Once a handle can hold a long-lived reference on
+    /// a parent for its own entire lifetime (<see cref="AcquireParentHolds"/> - the fix this field
+    /// is part of), a parent almost always HAS an outstanding reference on it whenever it is
+    /// disposed while any child is still alive - a live <see cref="LadybugDb.Client.LadybugConnection"/>
+    /// on a <see cref="LadybugDb.Client.LadybugDatabase"/>, for example. Relying on
+    /// <see cref="SafeHandle.IsClosed"/> for "reject new work immediately" would then mean
+    /// <see cref="LadybugDb.Client.LadybugDatabase.Dispose"/> stops rejecting new work through any
+    /// connection opened before it, for as long as that connection remains alive - silently
+    /// resurrecting exactly the "looks alive after Dispose" failure mode this whole fix exists to
+    /// close, just moved from a memory-safety bug to a contract-violation one. This field is set
+    /// synchronously, unconditionally, the moment <c>Dispose()</c> (or finalization) first runs -
+    /// independent of the underlying reference count - and is what <see cref="Lease"/> actually
+    /// checks, so "closed for new work" and "actually destroyed" are two separate, independently
+    /// correct signals instead of one conflated one.
+    /// </para>
+    /// </remarks>
+    private volatile bool _closedForNewWork;
+
+    /// <summary>See <see cref="_closedForNewWork"/>.</summary>
+    internal bool IsClosedForNewWork => _closedForNewWork;
+
+    /// <summary>
+    /// Sets <see cref="_closedForNewWork"/> before delegating to <see cref="SafeHandle"/>'s own
+    /// <c>Dispose(bool)</c>, which performs the actual reference-count decrement and (once/if the
+    /// count reaches zero) invokes <c>ReleaseHandle</c> - see <see cref="_closedForNewWork"/>'s
+    /// remarks for why these need to be two separate steps rather than relying on
+    /// <see cref="SafeHandle.IsClosed"/> alone. Runs identically whether reached via an explicit
+    /// <c>Dispose()</c> or finalization - both route through this override - which is correct here:
+    /// nothing can still be calling <see cref="Acquire"/> against a handle that is being finalized
+    /// (finalization only happens once nothing holds a reachable reference to this managed object),
+    /// so which path triggered this makes no difference to what <see cref="_closedForNewWork"/>
+    /// needs to reflect.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        _closedForNewWork = true;
+        base.Dispose(disposing);
+    }
+
+    /// <summary>
     /// Allocates zeroed native storage of <paramref name="size"/> bytes. The result is not yet
     /// owned by any <see cref="LbugStructHandle"/>: pass it to the matching native <c>*_init</c>,
     /// then either <see cref="Adopt"/> it on success or <see cref="FreeUnowned"/> it on failure.
@@ -97,20 +161,128 @@ internal abstract class LbugStructHandle : SafeHandle
     /// </remarks>
     internal Lease Acquire() => new(this);
 
+    /// <summary>
+    /// Parents this handle holds a long-lived <see cref="SafeHandle.DangerousAddRef(ref bool)"/>
+    /// hold on, taken by <see cref="AcquireParentHolds"/> and undone by
+    /// <see cref="ReleaseParentHolds"/>. <see langword="null"/> until (and unless)
+    /// <see cref="AcquireParentHolds"/> succeeds; never partially populated - see that method.
+    /// </summary>
+    private SafeHandle[]? _heldParents;
+
+    /// <summary>
+    /// Attempts to take a long-lived hold on every handle in <paramref name="parents"/>, all-or-
+    /// nothing. On success (<see langword="true"/>), every parent is held from this point until
+    /// <see cref="ReleaseParentHolds"/> undoes it - the same <see cref="SafeHandle.DangerousAddRef(ref bool)"/>/
+    /// <see cref="SafeHandle.DangerousRelease"/> mechanism <see cref="Acquire"/> already uses for a
+    /// single native call, just not scoped to one call. On failure (<see langword="false"/>), every
+    /// hold this same invocation managed to take before hitting the one that failed is released
+    /// again before returning - nothing is left partially held.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The general form of a pattern this project used to treat as bespoke to one type.</b> A
+    /// child native handle - a connection, a query result, a prepared statement - depends on its
+    /// parent's native storage staying allocated for its own ENTIRE lifetime, not merely for the
+    /// duration of the call that created it: an ancestor's own eventual native destroy call can
+    /// reach into memory the child's destroy needs (a materialized query result's factorized table
+    /// lives in the database's own buffer manager, for example), so the ancestor must not actually
+    /// be torn down while any such child is still alive. <see cref="Acquire"/>'s per-call lease
+    /// protects the call that PRODUCES a child handle; it does nothing for that handle's remaining
+    /// lifetime once the call returns. This method is what closes that gap, generally, for every
+    /// handle that needs it - not a special case for one relationship. This is purely about
+    /// deferring the ACTUAL native destroy (<c>ReleaseHandle</c>, which only runs once every
+    /// reference - including a hold taken here - has been released); it has no bearing on whether
+    /// the parent still accepts NEW work, which <see cref="_closedForNewWork"/> tracks separately
+    /// and immediately, precisely because a hold taken here would otherwise make that signal lag.
+    /// </para>
+    /// <para>
+    /// <b>Call this only once per handle, before that handle's own storage is adopted</b> (see
+    /// <see cref="Adopt"/>) - and, for a handle whose underlying native call needs those same
+    /// parents to run at all, only while a short-lived <see cref="Acquire"/> lease is independently
+    /// held on each of them too. Every call site in this library follows that shape (see
+    /// <see cref="LbugConnectionHandle.Open"/>, <see cref="LbugQueryResultHandle.Execute"/>, etc.),
+    /// which has a useful consequence: since the caller's own lease already guarantees each
+    /// parent's reference count is at least 1 at the moment this method runs, and
+    /// <see cref="SafeHandle.DangerousAddRef(ref bool)"/> only ever throws
+    /// <see cref="ObjectDisposedException"/> once a handle's count has ACTUALLY reached zero (not
+    /// merely once <c>Dispose()</c> has been called on it while other references remain - see
+    /// <see cref="_closedForNewWork"/>'s remarks for how that was verified), the attempt below is
+    /// structurally guaranteed to succeed at every current call site. The per-attempt
+    /// <see langword="try"/>/<see langword="catch"/> below exists anyway, for the general contract
+    /// this method documents (a caller need not hold its own lease first) and as defense against a
+    /// future call site that does not follow this shape - not because it is expected to trigger
+    /// today.
+    /// </para>
+    /// <para>
+    /// This is also what makes a failed acquisition leak-free: catching
+    /// <see cref="ObjectDisposedException"/> around each individual
+    /// <see cref="SafeHandle.DangerousAddRef(ref bool)"/> attempt (rather than one try/catch around
+    /// the whole loop) means a failure on parent N still lets every already-acquired parent
+    /// (0..N-1) get rolled back below - nothing here uses a separate counter that could drift out
+    /// of sync with what was actually acquired, unlike the earlier, bespoke single-parent version
+    /// of this idea, which used exactly such a counter and leaked it past this same throw.
+    /// </para>
+    /// </remarks>
+    internal bool AcquireParentHolds(params SafeHandle[] parents)
+    {
+        var acquiredUpTo = 0;
+        for (; acquiredUpTo < parents.Length; acquiredUpTo++)
+        {
+            var acquired = false;
+            try
+            {
+                parents[acquiredUpTo].DangerousAddRef(ref acquired);
+            }
+            catch (ObjectDisposedException)
+            {
+                // acquired stays false - handled identically to the ordinary "AddRef declined"
+                // case below. See this method's remarks for why this must be caught per-attempt.
+            }
+            if (!acquired) break;
+        }
+
+        if (acquiredUpTo < parents.Length)
+        {
+            for (var i = 0; i < acquiredUpTo; i++) parents[i].DangerousRelease();
+            return false;
+        }
+
+        _heldParents = parents;
+        return true;
+    }
+
+    /// <summary>
+    /// Releases every hold <see cref="AcquireParentHolds"/> took, if any (a no-op if it was never
+    /// called, or never succeeded). Call from this handle's own <c>ReleaseHandle</c> override,
+    /// always AFTER the matching native destroy has run - never before, or a parent could be freed
+    /// while the native destroy call that still needs it is executing.
+    /// </summary>
+    internal void ReleaseParentHolds()
+    {
+        var parents = _heldParents;
+        if (parents is null) return;
+        _heldParents = null;
+        foreach (var parent in parents) parent.DangerousRelease();
+    }
+
     internal readonly unsafe ref struct Lease
     {
         private readonly LbugStructHandle _handle;
 
         internal Lease(LbugStructHandle handle)
         {
-            // Fast, friendly path for the common case (fully released already). Not load-bearing
-            // on its own - DangerousAddRef is re-checked below, since IsClosed can still read
-            // false for a handle whose Dispose() is in flight but pinned open by another
-            // outstanding lease (verified empirically); that in-flight case is not a safety bug
-            // (the struct cannot be freed while any lease, old or new, is outstanding) but this
-            // explicit check is what makes the common "already disposed" case fail fast and clear.
-            ObjectDisposedException.ThrowIf(handle.IsClosed, handle);
+            // Authoritative, not merely a fast path: SafeHandle.IsClosed itself does NOT become
+            // true immediately once Dispose() runs while some OTHER reference on this handle
+            // (e.g. a child's AcquireParentHolds hold) is still outstanding - verified directly,
+            // not assumed; see IsClosedForNewWork's remarks. This is the check that gives "closed
+            // for new work" its immediate, hold-independent meaning.
+            ObjectDisposedException.ThrowIf(handle.IsClosedForNewWork, handle);
 
+            // Still checked explicitly rather than trusted to have been implied by the line
+            // above: DangerousAddRef can independently fail (throw) once this handle's own
+            // reference count has ACTUALLY reached zero, which is a real, if narrower, race
+            // against the check above (Dispose() completing, refcount hitting zero, and
+            // ReleaseHandle running, all between that check and this call).
             var acquired = false;
             handle.DangerousAddRef(ref acquired);
             if (!acquired)

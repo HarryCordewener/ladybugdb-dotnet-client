@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Never packed: a subprocess harness for TransactionDisposalOrderingTests, not shipped API. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LadybugDb.Client\LadybugDb.Client.csproj" />
+    <ProjectReference Include="..\LadybugDb.Client.Native\LadybugDb.Client.Native.csproj" />
+  </ItemGroup>
+</Project>

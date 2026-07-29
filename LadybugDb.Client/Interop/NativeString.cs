@@ -32,4 +32,24 @@ internal static class NativeString
             LbugNative.lbug_destroy_string(native);
         }
     }
+
+    /// <summary>
+    /// Folds the engine's own error detail (if any) into <paramref name="message"/>. Shared by
+    /// every failure path in the client that wants to enrich a message with
+    /// <c>lbug_get_last_error()</c> - originally duplicated between <c>LbugDatabaseHandle.Open</c>,
+    /// <c>LbugConnectionHandle.Open</c>, and <c>LadybugQueryResult</c>; centralized here so a new
+    /// failure path (for example <c>ValueReader</c>) picks it up by calling this rather than by
+    /// copy-pasting the pattern and risking a path that forgets to consume it.
+    /// </summary>
+    /// <remarks>
+    /// Consumes <c>lbug_get_last_error()</c> unconditionally, even when it turns out there is
+    /// nothing recorded (<see cref="TakeOwnershipOrNull"/> returns <see langword="null"/>).
+    /// Leaving it unconsumed is the hazard: a message recorded by this call and never read would
+    /// otherwise still be sitting there for an unrelated later call to pick up and misreport.
+    /// </remarks>
+    internal static unsafe string WithErrorDetail(string message)
+    {
+        var detail = TakeOwnershipOrNull(LbugNative.lbug_get_last_error());
+        return detail is null ? message : $"{message} {detail}";
+    }
 }

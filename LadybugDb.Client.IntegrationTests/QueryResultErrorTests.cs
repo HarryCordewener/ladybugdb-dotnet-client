@@ -8,18 +8,20 @@ using TUnit.Core;
 namespace LadybugDb.Client.IntegrationTests;
 
 /// <summary>
-/// Covers <see cref="LadybugQueryResult.ReadStringAsync"/>'s three failure branches - previously
-/// only its success path had a committed test. All three now route through the same error
-/// enrichment <see cref="LbugDatabaseHandle.Open"/> and <see cref="LbugConnectionHandle.Open"/>
-/// already used: fold <c>lbug_get_last_error()</c> into the thrown message via
-/// <see cref="NativeString.TakeOwnershipOrNull"/> rather than leaving it unconsumed for some
-/// unrelated later call to misattribute.
+/// The two failure branches that used to live here - an out-of-range column index and a
+/// type-mismatched column, both raised by the old <c>ReadStringAsync</c> reading one column at a
+/// time straight off the native tuple - went away with that method itself (Task 4):
+/// <see cref="LadybugQueryResult.GetAsyncEnumerator"/> materializes every column of a row eagerly
+/// into a <see cref="LadybugRow"/>, so "index out of range" is now a plain array-bounds check on
+/// already-marshalled managed data (<see cref="LadybugRow.GetValue"/>), not a native call that can
+/// fail with an engine-side error message, and "wrong type" is <see cref="LadybugValue"/>'s own
+/// <see cref="InvalidOperationException"/> contract (already covered by
+/// <see cref="ScalarValueTests.WrongAccessor_ThrowsInvalidOperationNotGarbage"/>), not a
+/// <see cref="LadybugException"/>. What remains here pins the one native precondition that still
+/// matters after the rewrite: advancing past the last row fails safely.
 /// </summary>
 public class QueryResultErrorTests
 {
-    private static string TempDbPath() =>
-        Path.Combine(Path.GetTempPath(), $"lbug-qerr-{Guid.NewGuid():N}");
-
     private static async Task<(LadybugDatabase db, LadybugConnection conn)> SeedOneRow(string path)
     {
         var db = new LadybugDatabase(path);
@@ -31,61 +33,22 @@ public class QueryResultErrorTests
         return (db, conn);
     }
 
-    [Test]
-    public async Task ReadStringAsync_ColumnIndexOutOfRange_ThrowsWithColumnDetail()
-    {
-        var path = TempDbPath();
-        try
-        {
-            var (db, conn) = await SeedOneRow(path);
-            using var _db = db;
-            await using var _conn = conn;
-
-            // The query projects exactly one column (index 0); 5 is out of range.
-            await using var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-
-            var ex = await Assert.ThrowsAsync<LadybugException>(async () => await result.ReadStringAsync(5));
-            await Assert.That(ex!.Message).Contains("Failed to read column 5.");
-        }
-        finally { TestDatabase.Cleanup(path); }
-    }
-
-    [Test]
-    public async Task ReadStringAsync_ColumnIsNotAString_ThrowsWithColumnDetail()
-    {
-        var path = TempDbPath();
-        try
-        {
-            var (db, conn) = await SeedOneRow(path);
-            using var _db = db;
-            await using var _conn = conn;
-
-            // o.dbref is INT64, not STRING.
-            await using var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.dbref");
-
-            var ex = await Assert.ThrowsAsync<LadybugException>(async () => await result.ReadStringAsync(0));
-            await Assert.That(ex!.Message).Contains("Column 0 is not a string.");
-        }
-        finally { TestDatabase.Cleanup(path); }
-    }
-
     /// <summary>
-    /// Pins the native precondition behind <c>ReadString</c>'s "Failed to advance to the next
-    /// row." branch: <c>lbug_query_result_get_next</c> on an already-exhausted result returns a
-    /// failure <see cref="lbug_state"/>, not a crash.
+    /// Pins the native precondition behind <see cref="LadybugQueryResult.GetAsyncEnumerator"/>'s
+    /// "Failed to advance to the next row." branch: <c>lbug_query_result_get_next</c> on an
+    /// already-exhausted result returns a failure <see cref="lbug_state"/>, not a crash.
     /// </summary>
     /// <remarks>
     /// This deliberately calls <see cref="LbugFlatTupleHandle.GetNext"/> directly at the interop
-    /// layer rather than through <see cref="LadybugQueryResult.ReadStringAsync"/>. The public
-    /// method checks <c>HasNext</c> immediately before calling it, so under single-threaded,
-    /// sequential use (the only use this library's API contract supports) that branch is
-    /// structurally unreachable - by design, not by accident. It IS reachable through a genuine
-    /// data race (concurrent callers both observing <c>HasNext == true</c> before either advances,
-    /// confirmed empirically against the real engine: only one caller's
-    /// <c>lbug_query_result_get_next</c> succeeds, the other's returns
+    /// layer rather than through the public enumerator. The enumerator checks <c>has_next</c>
+    /// immediately before calling it, so under single-threaded, sequential use (the only use this
+    /// library's API contract supports) that branch is structurally unreachable - by design, not
+    /// by accident. It IS reachable through a genuine data race (concurrent callers both observing
+    /// <c>has_next == true</c> before either advances, confirmed empirically against the real
+    /// engine: only one caller's <c>lbug_query_result_get_next</c> succeeds, the other's returns
     /// <c>LbugError</c>/"Runtime exception: No more tuples in QueryResult, Please check hasNext()
-    /// before calling getNext()." through the exact <c>ReadString</c> code path), but that trigger
-    /// is inherently non-deterministic (observed anywhere from 0 to several failures across
+    /// before calling getNext()." through the exact enumerator code path), but that trigger is
+    /// inherently non-deterministic (observed anywhere from 0 to several failures across
     /// otherwise-identical runs) and unsuitable for a committed regression test. This test instead
     /// pins the one thing that must stay true for that branch to behave correctly if it is ever
     /// hit: the native call fails safely and reports a state <see cref="LadybugQueryResult"/> can
@@ -94,7 +57,7 @@ public class QueryResultErrorTests
     [Test]
     public async Task DirectGetNext_OnExhaustedResult_ReturnsFailureStateNotCrash()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             var (db, conn) = await SeedOneRow(path);
@@ -102,7 +65,9 @@ public class QueryResultErrorTests
             await using var _conn = conn;
 
             await using var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
-            var first = await result.ReadStringAsync(0);
+            string? first = null;
+            await foreach (var row in result)
+                first = row.GetValue(0).AsString();
             await Assert.That(first).IsEqualTo("Limbo");
             await Assert.That(result.HasNext).IsFalse();
 

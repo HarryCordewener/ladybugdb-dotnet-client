@@ -7,13 +7,10 @@ namespace LadybugDb.Client.IntegrationTests;
 
 public class DatabaseLifecycleTests
 {
-    private static string TempDbPath() =>
-        Path.Combine(Path.GetTempPath(), $"lbug-test-{Guid.NewGuid():N}");
-
     [Test]
     public async Task OpenDatabase_CreateTable_AndInsertRow()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);
@@ -37,7 +34,7 @@ public class DatabaseLifecycleTests
     [Test]
     public async Task InvalidCypher_ThrowsLadybugExceptionCarryingTheStatement()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);
@@ -73,7 +70,7 @@ public class DatabaseLifecycleTests
     [Test]
     public async Task ConcurrentWrite_ThrowsLadybugWriteConflictException()
     {
-        var path = TempDbPath();
+        var path = TestDatabase.NewPath();
         try
         {
             using var db = new LadybugDatabase(path);

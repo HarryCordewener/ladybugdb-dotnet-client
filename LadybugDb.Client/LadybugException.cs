@@ -21,9 +21,12 @@ public class LadybugException : Exception
 }
 
 /// <summary>
-/// Thrown when the engine refuses a write because another write transaction is active.
-/// LadybugDB permits exactly one write transaction at a time and rejects rather than queueing,
-/// so this is expected under contention and is safe to retry.
+/// Thrown when the engine refuses a write because another write transaction is active. With
+/// <see cref="LadybugConfig.EnableMultiWrites"/> off (the default), LadybugDB permits exactly one
+/// write transaction at a time and rejects rather than queueing, so this is expected under
+/// contention and is safe to retry. With <see cref="LadybugConfig.EnableMultiWrites"/> on,
+/// concurrent write transactions from separate connections do not raise this - see that
+/// property's remarks for the measurement that settled it.
 /// </summary>
 public sealed class LadybugWriteConflictException : LadybugException
 {
