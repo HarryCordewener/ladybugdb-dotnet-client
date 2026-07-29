@@ -17,14 +17,19 @@ trap 'rm -rf "$WORK"' EXIT
 # runtimes/<rid>/native/. Observed archive layout for v0.18.3 (see
 # task-2-report.md for the full discovery record):
 #   - linux/osx archives ship liblbug.so / liblbug.dylib as a SYMLINK
-#     chain (liblbug.so -> liblbug.so.0 -> liblbug.so.0.18.3, same
-#     pattern for .dylib) rather than a plain regular file.
+#     chain (e.g. liblbug.so -> liblbug.so.0 -> liblbug.so.0.18.3 on
+#     linux; liblbug.dylib -> liblbug.0.dylib -> liblbug.0.18.3.dylib on
+#     osx - note the two platforms don't even agree on where the version
+#     number goes) rather than a plain regular file.
 #   - windows archives ship lbug_shared.dll (and lbug_shared.lib, which
 #     we intentionally do not copy: it's a link-time import lib, not
 #     needed for P/Invoke at runtime).
-# We reference the canonical name directly and dereference with `cp -L`
-# so the destination always gets real file content under the name the
-# native resolver expects, regardless of the symlink indirection.
+# For .tar.gz assets we never materialize the symlinks on disk at all -
+# `tar` under Git Bash on windows-latest can't create them and aborts
+# the whole archive with a nonzero exit. Instead we walk the chain
+# purely via tarfile's in-memory member metadata and write the resolved
+# regular file's bytes straight to the canonical destination name. See
+# the extraction step below for the actual walk.
 ASSETS="
 linux-x64|liblbug-linux-x86_64.tar.gz|liblbug.so
 linux-arm64|liblbug-linux-aarch64.tar.gz|liblbug.so
@@ -89,24 +94,67 @@ while IFS='|' read -r RID ASSET LIBFILE; do
 
   DEST="$NATIVE_DIR/runtimes/$RID/native"
   mkdir -p "$DEST"
-  EX="$WORK/x-$RID"; mkdir -p "$EX"
-  # `unzip` is absent from GitHub's windows-latest image (not bundled by Git
-  # for Windows either - it's a separate MSYS2 package), and `tar` can't be
-  # swapped in as a substitute: under `shell: bash`, Git Bash puts its own
-  # GNU tar first on PATH, and GNU tar cannot read zip containers at all -
-  # on Linux either, not just Windows. python3's zipfile module needs no OS
-  # branching and is preinstalled on every GitHub-hosted runner (including
-  # inside Git Bash on Windows, since it's on the system PATH there too).
+
   case "$ASSET" in
-    *.tar.gz) tar -xzf "$WORK/$ASSET" -C "$EX" ;;
-    *.zip)    python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$WORK/$ASSET" "$EX" ;;
+    *.tar.gz)
+      # Resolve the (possibly multi-hop) symlink chain named $LIBFILE using
+      # only tarfile's member metadata - no symlink is ever created on disk,
+      # so this behaves identically on Linux, macOS, and Windows/Git Bash.
+      python3 - "$WORK/$ASSET" "$LIBFILE" "$DEST/$LIBFILE" <<'PY'
+import posixpath
+import sys
+import tarfile
+
+archive, want, dest = sys.argv[1], sys.argv[2], sys.argv[3]
+with tarfile.open(archive) as tf:
+    members = {m.name: m for m in tf.getmembers()}
+    name = want
+    seen = set()
+    while True:
+        member = members.get(name)
+        if member is None:
+            sys.exit(f"FATAL: member '{name}' not found in {archive}")
+        if member.isreg():
+            src = tf.extractfile(member)
+            if src is None:
+                sys.exit(f"FATAL: could not read '{name}' from {archive}")
+            with open(dest, "wb") as out:
+                out.write(src.read())
+            break
+        if member.issym() or member.islnk():
+            if name in seen:
+                sys.exit(f"FATAL: symlink loop resolving '{want}' in {archive}")
+            seen.add(name)
+            name = posixpath.normpath(posixpath.join(posixpath.dirname(name), member.linkname))
+            continue
+        sys.exit(f"FATAL: '{name}' in {archive} is neither a regular file nor a symlink")
+PY
+      ;;
+    *.zip)
+      # `unzip` is absent from GitHub's windows-latest image (not bundled by
+      # Git for Windows either - it's a separate MSYS2 package), and `tar`
+      # can't be swapped in as a substitute: under `shell: bash`, Git Bash
+      # puts its own GNU tar first on PATH, and GNU tar cannot read zip
+      # containers at all - on Linux either, not just Windows. python3's
+      # zipfile module needs no OS branching and is preinstalled on every
+      # GitHub-hosted runner (including inside Git Bash on Windows, since
+      # it's on the system PATH there too). Zip assets have no symlinks, so
+      # a plain extract-then-copy is sufficient here.
+      EX="$WORK/x-$RID"; mkdir -p "$EX"
+      python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$WORK/$ASSET" "$EX"
+      if [ ! -e "$EX/$LIBFILE" ]; then
+        echo "FATAL: expected library '$LIBFILE' not found in $ASSET" >&2
+        exit 1
+      fi
+      cp -L "$EX/$LIBFILE" "$DEST/$LIBFILE"
+      ;;
   esac
 
-  if [ ! -e "$EX/$LIBFILE" ]; then
-    echo "FATAL: expected library '$LIBFILE' not found in $ASSET" >&2
+  if [ ! -s "$DEST/$LIBFILE" ]; then
+    echo "FATAL: '$LIBFILE' missing or empty after extracting $ASSET" >&2
     exit 1
   fi
-  cp -L "$EX/$LIBFILE" "$DEST/$LIBFILE"
+  chmod 0755 "$DEST/$LIBFILE"
   ls -1 "$DEST"
 done <<< "$ASSETS"
 
