@@ -90,6 +90,15 @@ public sealed class LadybugConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Begins a transaction on this connection by issuing <c>BEGIN TRANSACTION</c>. See
+    /// <see cref="LadybugTransaction"/> for the full lifecycle contract - commit or roll back
+    /// exactly once, or let disposal roll back automatically.
+    /// </summary>
+    /// <param name="cancellationToken">Forwarded to the underlying <c>BEGIN TRANSACTION</c> query.</param>
+    public ValueTask<LadybugTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
+        LadybugTransaction.BeginAsync(this, cancellationToken);
+
     /// <summary>Closes the connection. Safe to call even if the parent database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {

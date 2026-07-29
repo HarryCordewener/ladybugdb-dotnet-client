@@ -17,4 +17,27 @@ public sealed record LadybugConfig
 
     /// <summary>Max database size in bytes. 0 selects the engine default.</summary>
     public ulong MaxDbSize { get; init; }
+
+    /// <summary>Maps to the engine's <c>enable_multi_writes</c> setting.</summary>
+    /// <remarks>
+    /// <para>
+    /// Measured directly against the real engine for Milestone 2 Task 6 (see
+    /// <c>task-6-report.md</c> for the full run output): with this <see langword="false"/> (the
+    /// default), LadybugDB permits exactly one write transaction at a time and raises rather
+    /// than queueing - concurrent writers from separate connections observably collide, and
+    /// <see cref="LadybugWriteConflictException"/> exists precisely because they do. Across
+    /// three consecutive 1/2/4/8-concurrent-writer runs at this setting, conflicts climbed with
+    /// writer count (0 / ~2,700 / ~8,000 / ~18,000 over a 3-second window) while throughput
+    /// stayed flat (roughly 2,400-2,800 mutations/sec regardless of writer count).
+    /// </para>
+    /// <para>
+    /// With this <see langword="true"/>, the same workload produced <b>zero</b>
+    /// <see cref="LadybugWriteConflictException"/>s at any writer count across all three runs,
+    /// and throughput scaled up with concurrency instead of staying flat (roughly 2,600/sec at
+    /// one writer, rising to 3,500-3,800/sec at four to eight). The flag genuinely lifts the
+    /// one-write-transaction-at-a-time restriction; it is not a no-op. Because of that, this
+    /// client does not serialize writers itself - see <see cref="LadybugDatabase"/>'s remarks.
+    /// </para>
+    /// </remarks>
+    public bool EnableMultiWrites { get; init; }
 }

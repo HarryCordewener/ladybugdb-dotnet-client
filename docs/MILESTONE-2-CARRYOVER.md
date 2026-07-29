@@ -6,13 +6,6 @@ are not rediscovered from scratch.
 
 ## Behavioural
 
-- **`LadybugDatabase.WriteLock` is constructed but never acquired.** LadybugDB permits
-  one write transaction at a time and *raises* rather than queueing, so concurrent
-  writers collide today and surface `LadybugWriteConflictException`. Milestone 2 decides
-  whether the client serializes writes internally or keeps surfacing the retryable
-  exception. Measure `enable_multi_writes` (a real field on `lbug_system_config`) first —
-  if it lifts the constraint, the lock may be unnecessary.
-
 - **Post-dispose behaviour is memory-safe but not strictly deterministic.** `SafeHandle`
   only closes on the 1→0 refcount transition, so while other threads hold leases an
   in-flight operation can still complete after `Dispose()`. Never unsafe — destroy is

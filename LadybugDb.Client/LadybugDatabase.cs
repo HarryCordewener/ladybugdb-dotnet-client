@@ -7,18 +7,20 @@ namespace LadybugDb.Client;
 /// An embedded LadybugDB database. Opening is a local file operation, so this type is
 /// constructed and disposed synchronously; connections and results are async-disposable.
 /// </summary>
+/// <remarks>
+/// This client does not serialize write transactions on the caller's behalf, and holds no
+/// lock of its own around them. Whether concurrent writers can proceed is entirely
+/// <see cref="LadybugConfig.EnableMultiWrites"/>'s call - see its remarks for the measurement
+/// that settled this. With the flag off (the default), concurrent write transactions from
+/// separate connections raise <see cref="LadybugWriteConflictException"/> straight from the
+/// engine; with it on, they do not. Either way, that is the engine's behaviour to arbitrate,
+/// not this client's - an earlier design reserved a <c>SemaphoreSlim</c> here specifically to
+/// take on that job client-side, but measurement showed the flag already does it, so the lock
+/// was removed rather than adding a second, redundant serialization point.
+/// </remarks>
 public sealed class LadybugDatabase : IDisposable
 {
     private readonly LbugDatabaseHandle _handle;
-
-    /// <summary>
-    /// Reserved for Milestone 2, which will use this to serialize write transactions: LadybugDB
-    /// permits exactly one write transaction at a time and raises rather than queueing, so the
-    /// client is meant to hold this rather than let callers collide. Not wired up yet - nothing
-    /// currently acquires it, so concurrent writers demonstrably do collide today (see
-    /// <see cref="LadybugWriteConflictException"/>, which exists precisely because they can).
-    /// </summary>
-    internal SemaphoreSlim WriteLock { get; } = new(1, 1);
 
     /// <summary>Opens (creating if necessary) the LadybugDB database at <paramref name="path"/>.</summary>
     /// <param name="path">Filesystem path to the database directory.</param>
@@ -55,6 +57,7 @@ public sealed class LadybugDatabase : IDisposable
         if (config.MaxDbSize != 0) native.max_db_size = config.MaxDbSize;
         native.enable_compression = ToNativeBool(config.EnableCompression);
         native.read_only = ToNativeBool(config.ReadOnly);
+        native.enable_multi_writes = ToNativeBool(config.EnableMultiWrites);
         return native;
     }
 
@@ -76,6 +79,5 @@ public sealed class LadybugDatabase : IDisposable
     public void Dispose()
     {
         _handle.Dispose();
-        WriteLock.Dispose();
     }
 }
