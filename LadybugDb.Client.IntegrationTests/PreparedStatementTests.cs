@@ -188,4 +188,62 @@ public class PreparedStatementTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    [Test]
+    [Arguments(null)]
+    [Arguments("")]
+    [Arguments("   ")]
+    public async Task Bind_NullOrWhitespaceParameterName_ThrowsArgumentException(string? name)
+    {
+        // Marshal.StringToCoTaskMemUTF8(null) silently produces a null pointer rather than
+        // throwing, so without an explicit guard `Bind(null, ...)` would fail obscurely deep in
+        // native code instead of at the call site - inconsistent with how `cypher` is validated
+        // elsewhere in this client (e.g. LadybugConnection.QueryAsync/PrepareAsync).
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE V(id INT64, val INT64, PRIMARY KEY(id))")) { }
+
+            await using var stmt = await conn.PrepareAsync("CREATE (n:V {id: 1, val: $val})");
+            Assert.Throws<ArgumentException>(() => stmt.Bind(name!, 1L));
+            Assert.Throws<ArgumentException>(() => stmt.Bind(name!, "x"));
+            Assert.Throws<ArgumentException>(() => stmt.BindNull(name!));
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    [Test]
+    public async Task DisposingStatementBeforeConsumingResult_ResultRemainsUsable()
+    {
+        // Pins the ownership question directly: ExecuteAsync's LadybugQueryResult only leases the
+        // database and its own handle chain (see LbugQueryResultHandle.ExecutePrepared) - it never
+        // leases the prepared statement that produced it - so a result must stay fully usable after
+        // the statement that created it has already been disposed, not merely "usually work."
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE D(id INT64, val INT64, PRIMARY KEY(id))")) { }
+
+            var stmt = await conn.PrepareAsync("CREATE (n:D {id: 1, val: $val})");
+            stmt.Bind("val", 42L);
+            var result = await stmt.ExecuteAsync();
+            await stmt.DisposeAsync();
+
+            await using (result)
+            {
+                await foreach (var _ in result) { }
+            }
+
+            await using var r = await conn.QueryAsync("MATCH (n:D) RETURN n.val");
+            await foreach (var row in r)
+                await Assert.That(row.GetValue(0).AsInt64()).IsEqualTo(42L);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

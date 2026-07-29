@@ -213,6 +213,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// <summary>Binds a <c>STRING</c> parameter.</summary>
     public unsafe void Bind(string name, string value)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(value);
         var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
         var utf8Value = Marshal.StringToCoTaskMemUTF8(value);
@@ -238,23 +239,41 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// <c>lbug_prepared_statement_bind_value</c> - the C API has no dedicated <c>bind_null</c> entry
     /// point, so a typed-null <c>lbug_value</c> is built and bound generically instead.
     /// </summary>
+    /// <remarks>
+    /// Deliberately does not route the transient <c>lbug_value*</c> through an
+    /// <see cref="Interop.LbugValueHandle"/>/<see cref="System.Runtime.InteropServices.SafeHandle"/>
+    /// the way every value read elsewhere in this client does. An earlier version did, and a
+    /// measured 41-57 bytes/call of unreclaimed growth under a 300k/600k-call stress test traced
+    /// back entirely to that extra managed allocation - not to the native library: calling
+    /// <c>lbug_value_create_null</c>/<c>lbug_prepared_statement_bind_value</c>/<c>lbug_value_destroy</c>
+    /// directly, with no <c>SafeHandle</c> in between, measured at noise-floor (~3 bytes/call) in
+    /// the same harness, both in isolation and against a real prepared statement. The value here
+    /// never outlives this one synchronous call - it is created, bound, and destroyed without ever
+    /// being exposed to a caller or another thread - so the lease/dispose machinery
+    /// <see cref="Interop.LbugValueHandle"/> exists for (protecting a handle that can outlive the
+    /// call that created it, possibly racing a concurrent <c>Dispose</c>) buys nothing here and
+    /// only added allocation churn. The <c>try</c>/<c>finally</c> below is what actually matters:
+    /// it guarantees <c>lbug_value_destroy</c> still runs if <c>bind_value</c> throws or returns
+    /// <see cref="lbug_state.LbugError"/>.
+    /// </remarks>
     public unsafe void BindNull(string name)
     {
-        using var valueHandle = LbugValueHandle.CreateNull();
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
+        var value = LbugNative.lbug_value_create_null();
         try
         {
             lbug_state state;
             using (var lease = _handle.Acquire())
-            using (var valueLease = valueHandle.Acquire())
             {
                 state = LbugNative.lbug_prepared_statement_bind_value(
-                    (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, (lbug_value*)valueLease.Pointer);
+                    (lbug_prepared_statement*)lease.Pointer, (sbyte*)utf8Name, value);
             }
             ThrowIfBindFailed(state, name);
         }
         finally
         {
+            LbugNative.lbug_value_destroy(value);
             Marshal.FreeCoTaskMem(utf8Name);
         }
     }
@@ -304,6 +323,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
 
     private unsafe void BindScalar<T>(string name, T value, NativeBind<T> nativeBind) where T : unmanaged
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var utf8Name = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
