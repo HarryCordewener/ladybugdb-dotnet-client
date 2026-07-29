@@ -77,6 +77,7 @@ internal static class ValueReader
             lbug_data_type_id.LBUG_RECURSIVE_REL => ReadRecursiveRel(value, depth),
             lbug_data_type_id.LBUG_UUID => ReadUuid(value),
             lbug_data_type_id.LBUG_INT128 => ReadInt128(value),
+            lbug_data_type_id.LBUG_UNION => ReadUnion(value, depth),
             _ => ReadUnsupported(value),
         };
     }
@@ -704,8 +705,10 @@ internal static class ValueReader
 
     /// <summary>
     /// Reads a value of a type this client does not model with its own typed accessor (currently
-    /// UNION and POINTER) via the engine's generic <c>lbug_value_to_string</c>, so it is still
-    /// readable through <see cref="LadybugValue.AsString"/> instead of throwing on every accessor.
+    /// only <c>POINTER</c>, which is engine-internal and unreachable through any public Cypher path
+    /// - see docs/USAGE.md's "UNION and POINTER" section) via the engine's generic
+    /// <c>lbug_value_to_string</c>, so it is still readable through <see cref="LadybugValue.AsString"/>
+    /// instead of throwing on every accessor.
     /// </summary>
     /// <remarks>
     /// <c>lbug_value_to_string</c> returns a caller-owned <c>char*</c>: its own doc comment in
@@ -720,6 +723,57 @@ internal static class ValueReader
     {
         var raw = LbugNative.lbug_value_to_string(value);
         return new LadybugValue(LadybugType.Unsupported, NativeString.TakeOwnershipOrNull(raw));
+    }
+
+    /// <summary>
+    /// Reads a UNION value by returning its currently active member, marshalled with that member's
+    /// own real type - not wrapped as <see cref="LadybugType.Unsupported"/> the way it used to be.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A UNION value always holds exactly one concretely-typed value, never an ambiguous choice
+    /// between members: the C header documents <c>lbug_value_get_struct_field_value</c> as
+    /// operating on "physical type STRUCT (STRUCT, NODE, REL, RECURSIVE_REL, UNION)", and
+    /// empirically (see docs/USAGE.md's "UNION and POINTER" section) field index 0 - the physical
+    /// "tag" slot every UNION value carries - always holds that one resolved value, already
+    /// correctly typed by the engine, regardless of how the value reached storage:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>A bare Cypher literal assigned to a UNION column (no explicit constructor) is coerced
+    /// at WRITE time: the engine tries the declared member types in order and stores the value as
+    /// the first one that accepts it - e.g. for <c>UNION(num INT64, txt STRING)</c>, the literal
+    /// <c>'42'</c> is stored as the INT64 member, not the STRING one, because INT64 is declared
+    /// first and the literal parses as one. <c>'hello'</c> falls through to the STRING member since
+    /// it does not parse as INT64.</item>
+    /// <item>The explicit <c>union_value(member := value)</c> constructor bypasses that coercion and
+    /// stores the named member's own declared type directly - <c>union_value(txt := '42')</c>
+    /// genuinely stores a STRING <c>"42"</c>, not an INT64 <c>42</c>, even though both would look
+    /// identical through <see cref="LadybugValue.AsString"/> alone.</item>
+    /// </list>
+    /// <para>
+    /// Either way, by the time a UNION value is read back, there is exactly one concrete value with
+    /// one concrete type sitting in field 0 - never two live candidates sharing a rendering. The
+    /// other struct fields (the union's named members themselves, at index 1 and up) are never
+    /// independently readable through this API - confirmed empirically: reading any of them always
+    /// fails, regardless of which member is actually active - so this reads only field 0, not every
+    /// field the way <see cref="ReadStruct"/> does for an ordinary STRUCT value.
+    /// </para>
+    /// <para>
+    /// This is why no new <see cref="LadybugType"/> member or dedicated accessor exists for UNION:
+    /// the resolved value's own type already IS one of the existing <see cref="LadybugType"/>
+    /// members, and reusing this reader's normal dispatch (<see cref="Read(lbug_value*, int)"/>)
+    /// lets every existing typed accessor (<see cref="LadybugValue.AsInt64"/>,
+    /// <see cref="LadybugValue.AsString"/>, etc.) simply work on it.
+    /// </para>
+    /// </remarks>
+    private static unsafe LadybugValue ReadUnion(lbug_value* value, int depth)
+    {
+        using var fieldHandle = LbugValueHandle.GetStructFieldValue(value, 0, out var fieldState);
+        if (fieldState != lbug_state.LbugSuccess)
+            throw new LadybugException(NativeString.WithErrorDetail("Failed to read a UNION value's active member."));
+
+        using var lease = fieldHandle.Acquire();
+        return Read((lbug_value*)lease.Pointer, depth + 1);
     }
 
     private static DateTime FromMicros(long micros) =>

@@ -329,7 +329,7 @@ outside the normal path.
 | `AsDouble()` | `Double` | `double` |
 | `AsDecimal()` | `Decimal` | `decimal` (throws beyond ~28-29 significant digits) |
 | `AsBigDecimal()` | `Decimal` | `ExtendedNumerics.BigDecimal` (always lossless, all 38 digits) |
-| `AsString()` | `String`, plus **any** type whose payload happens to be a string (currently only `Unsupported` - see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
+| `AsString()` | `String`, plus **any** type whose payload happens to be a string (currently only `Unsupported`, i.e. `POINTER` - see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
 | `AsBlob()` | `Blob` | `byte[]` (a fresh copy every call) |
 | `AsGuid()` | `Uuid` | `Guid` |
 | `AsDateOnly()` | `Date` | `DateOnly` |
@@ -421,10 +421,15 @@ No LadybugDB value type is unreadable. Every `LadybugType` member, the engine ty
 | `Rel` | `REL` | `AsRel()` |
 | `Path` | `RECURSIVE_REL` (a variable-length path match) | `AsPath()` — see [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths) below |
 | `InternalId` | `INTERNAL_ID` | `AsInternalId()` — what a bare `RETURN id(n)`/`id(r)` produces, distinct from the `Id` property already on `AsNode()`/`AsRel()`'s own result |
-| `Unsupported` | `UNION`, `POINTER` (no dedicated typed accessor) | `AsString()` only — see [UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough) below |
+| `Unsupported` | `POINTER` (no dedicated typed accessor; unreachable in practice — see below) | `AsString()` only |
 
 Every accessor other than the one matching a given value's `Type` throws `InvalidOperationException`
 — see [LadybugValue: accessor reference](#ladybugvalue-accessor-reference) above for the full list.
+
+`UNION` is **not** in this table as its own row, deliberately: a UNION value always resolves to
+exactly one concretely-typed value by the time it's read, so it is reported directly as that
+resolved value's own real `LadybugType` (one of the rows above) rather than as `Unsupported` — see
+[UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough) below for why.
 
 ### INT128 and UUID
 
@@ -528,10 +533,10 @@ Console.WriteLine($"{k.Label} since={k.Properties["since"].AsInt64()} src={k.Sou
 
 ### UNION and POINTER: is `AsString()` enough?
 
-`UNION` and `POINTER` are the two engine types with no dedicated `LadybugType`/accessor pair — both
-read as `LadybugType.Unsupported`, and `AsString()` on that type returns the engine's own generic
-string rendering (via `lbug_value_to_string`) instead of throwing. This section is the empirical
-investigation behind that design choice, not just a restatement of it.
+`POINTER` has no dedicated `LadybugType`/accessor pair and reads as `LadybugType.Unsupported`,
+whose `AsString()` returns the engine's own generic string rendering (via `lbug_value_to_string`)
+instead of throwing. `UNION` **used to** work the same way, but does not anymore — see below. This
+section is the empirical investigation behind both outcomes, not just a restatement of them.
 
 **POINTER: confirmed unreachable through every path tried.** POINTER is `LBUG_POINTER` in the C
 API's own type enum — an internal physical type, not a Cypher-level one. Every attempt to obtain a
@@ -545,88 +550,86 @@ API's own type enum — an internal physical type, not a Cypher-level one. Every
 | `CALL SHOW_TABLES()` / `CALL current_setting(...)` | Succeed, but return ordinary `STRING`/scalar catalog metadata — never a `POINTER`-typed value. |
 
 There is no DDL, expression, function, or catalog query that produces a `POINTER` value through
-this client's public surface. It is engine-internal only. **Nothing further is needed here beyond
-the one-line note already in the `LadybugType.Unsupported` doc comment and the table above** — a
+this client's public surface. It is engine-internal only. **Nothing further is needed here** — a
 typed accessor for a value type no caller can ever obtain would be dead code.
 
-**UNION: reachable, and `AsString()` is demonstrably *not* sufficient — confirmed by construction,
-not assumed.** `UNION` is reachable through ordinary DDL and the `union_value(member := value)`
-constructor function:
+**UNION: reachable, and the value is always concretely typed by the time it's read — so `AsString()`
+never needed to be the only path, and now isn't.** An earlier version of this investigation
+concluded `AsString()` was ambiguous, based on a test that stored an INT64 `42` and a STRING `"42"`
+via `union_value(a := 42)` / `union_value(b := '42')` and got identical `AsString()` output for
+both. That observation was correct, but the conclusion drawn from it — that the underlying *value*
+was ambiguous — was wrong. **The stored value was never ambiguous; only reading it through
+`AsString()` alone discarded the type information that was there all along.** Three constructions,
+on `UNION(num INT64, txt STRING)`, make the actual mechanism clear:
+
+| Cypher | How it's written | Resolved type read back |
+|---|---|---|
+| `val: 42` | Bare literal, no `union_value()` | `Int64` / `42` |
+| `val: '42'` | Bare literal, no `union_value()` | **`Int64` / `42`** — coerced at write time |
+| `val: union_value(txt := '42')` | Explicit constructor, names `txt` directly | `String` / `"42"` — not coerced |
+| `val: 'hello'` | Bare literal | `String` / `"hello"` |
+
+A **bare Cypher literal** assigned to a UNION column (no `union_value()`) is coerced **at write
+time**: the engine tries the declared member types in order and stores the value as the first one
+that accepts it. For `UNION(num INT64, txt STRING)`, the digit-string literal `'42'` parses as
+INT64, so it's stored as `num` — not `txt` — even though it was written as a string literal.
+`'hello'` doesn't parse as INT64, so it falls through and is stored as `txt`. The **explicit
+`union_value(member := value)` constructor** bypasses that coercion entirely and stores the named
+member's own declared type directly: `union_value(txt := '42')` genuinely stores a STRING `"42"`,
+not an INT64 `42`. By the time either path reaches storage, the UNION value holds exactly **one**
+concretely-typed value — never two live candidates sharing a rendering. `AsString()` renders both
+`Int64 42` and `String "42"` as `"42"` because that's what stringifying either one produces, not
+because the engine has lost track of which is which.
+
+Confirmed directly against the real engine (a throwaway spike against `ValueReader`, using the raw
+`lbug_value*` before it's stringified — not shipped, deleted after this investigation), the C
+header's own claim that `lbug_value_get_struct_field_value` operates on "physical type STRUCT
+(STRUCT, NODE, REL, RECURSIVE_REL, UNION)" holds: field index `0` (a physical `"tag"` slot every
+UNION value carries) always succeeds and hands back that one resolved value, already correctly
+typed — `Int64`/`42` in the bare-literal case, `String`/`"42"` in the explicit-constructor case.
+Fields `1`+ (the union's named members themselves) always fail to read regardless of which is
+active — confirmed with a same-physical-type schema, `UNION(a INT64, c INT64)`, too — so the
+member's own *name* is genuinely not recoverable through this API (not needed for typed reading,
+since the resolved value's type already disambiguates it from any differently-typed sibling), and
+a non-coercible pair (`UNION(flag BOOL, txt STRING)`, where a bare `true`/`'hello'` literal cannot
+cross-coerce into the other member at all) resolves the same way with no fallback ambiguity.
+
+**Implemented: reading a UNION value now returns its resolved member with that member's own real
+`LadybugType`, not `LadybugType.Unsupported`.** No new public type or accessor was added —
+`LadybugType.Union`/`AsUnion()` do not exist — because none was needed: the resolved value already
+*is* one of the existing `LadybugType`s, so every existing typed accessor (`AsInt64()`, `AsString()`,
+`AsBoolean()`, ...) simply works on it.
 
 ```csharp
 await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE UN(id INT64, val UNION(a INT64, b STRING), PRIMARY KEY(id))")) { }
+    "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
 await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 1, val: union_value(a := 42)})")) { }   // variant 'a' (INT64) = 42
+    "CREATE (n:UN {id: 1, val: 42})")) { }                       // bare literal -> num (INT64)
 await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 2, val: union_value(b := '42')})")) { } // variant 'b' (STRING) = "42"
+    "CREATE (n:UN {id: 2, val: '42'})")) { }                     // bare literal -> num (INT64), coerced
 await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 3, val: union_value(b := 'hello')})")) { }
+    "CREATE (n:UN {id: 3, val: union_value(txt := '42')})")) { } // explicit constructor -> txt (STRING)
 
 await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
 await foreach (var row in r)
 {
     var val = row.GetValue(1);
-    Console.WriteLine($"id={row.GetValue(0).AsInt64()} type={val.Type} asString='{val.AsString()}'");
+    Console.WriteLine($"id={row.GetValue(0).AsInt64()} type={val.Type} value={val}");
 }
 ```
 
 Output, against the real engine:
 
 ```
-id=1 type=Unsupported asString='42'
-id=2 type=Unsupported asString='42'
-id=3 type=Unsupported asString='hello'
+id=1 type=Int64 value=42
+id=2 type=Int64 value=42
+id=3 type=String value=42
 ```
 
-**Row 1 (the INT64 variant `a`, value `42`) and row 2 (the STRING variant `b`, value `"42"`) render
-identically through `AsString()`.** A caller reading only the string form cannot tell whether the
-active member was the integer `42` or the three-character string `"42"` — the two are genuinely
-indistinguishable, and there is no way to recover which one it was, or even which .NET type it
-should be parsed back into, from `AsString()` alone. This is not a hypothetical edge case; it is
-the direct, reproducible result of the schema above. **`AsString()` alone is not sufficient for a
-caller who needs to know which variant is present, or its real type — this is a genuine gap, not
-just a convenience gap.**
-
-**A richer accessor is more feasible than it first appears, because the engine already exposes
-UNION's physical structure through an API this client already uses for `STRUCT`.** The C header
-documents `lbug_value_get_struct_field_name`/`lbug_value_get_struct_field_value` as operating on
-"physical type STRUCT (STRUCT, NODE, REL, RECURSIVE_REL, UNION)" — UNION is explicitly included.
-Probed directly (a throwaway spike against `ValueReader`, since this needs the raw `lbug_value*`
-before it is stringified — not shipped, deleted after this investigation): for the `UN(a INT64, b
-STRING)` schema above, `lbug_value_get_struct_num_fields` on a UNION value reports **3 fields**:
-
-| Index | Field name | Value for row 1 (`a:=42`) | Value for row 2 (`b:='42'`) |
-|---|---|---|---|
-| 0 | `tag` | `Int64` / `42` | `String` / `"42"` |
-| 1 | `a` | `LbugError` (read fails) | `LbugError` (read fails) |
-| 2 | `b` | `LbugError` (read fails) | `LbugError` (read fails) |
-
-Field `0` (`"tag"`) always succeeds and hands back the **currently active member's value, already
-correctly typed** (`Int64` vs `String` — not a stringified rendering) — strictly more than
-`AsString()` gives you, and it would resolve exactly the row-1-vs-row-2 ambiguity above, reusing
-the same tested `ReadStruct` machinery this client already ships. **But fields `1` and `2` (the
-named members `a`/`b`) never succeed, regardless of which one is actually active** — confirmed
-again with a same-typed-members schema, `UN2(a INT64, c INT64)`, where `a:=42` and `c:=42` produce
-identical output (`Int64`/`42` at field `0`) with fields `1`/`2` still both failing. **The member's
-*name* is not recoverable from this API at all — only its physical type and value.** For members
-with distinct physical types (the `UN` example above), the type alone happens to disambiguate which
-member is active; for members sharing a physical type (`UN2`), nothing in the C API surface — not
-`AsString()`, not the physical struct-field API, nothing this client's own code could add on top —
-can tell you which named member produced the value. That is an engine/C-API-level limitation, not
-a gap this client's own code could close with more effort.
-
-**Recommendation: not "leave as-is" — specify what would be needed.** `AsString()` should stay
-(it is still the only path for POINTER, and remains useful for logging/display), but a
-`LadybugType.Union`/`AsUnion()` accessor is worth adding: cheap to implement (route `LBUG_UNION`
-through the existing `ReadStruct` field-`0` read instead of `lbug_value_to_string`), and it
-strictly improves on `AsString()` for the common case of a UNION whose members have distinct
-physical types — the exact ambiguity demonstrated above. Its documentation must be explicit about
-the limit that is real and not fixable client-side: it can report the active value's own type and
-content, but **not** which named member produced it when two members share a physical type, because
-the engine's own C API does not expose that. This is a genuine API defect worth fixing, scoped
-precisely to what the engine can actually support — not a larger "full union member name" feature
-the C API cannot deliver.
+Row 3's value is now distinguishable from rows 1/2 by `Type` (`String` vs `Int64`), not just by
+happening to render the same digits — exactly the gap the earlier version of this investigation
+found and mis-attributed to the stored value itself rather than to reading it through `AsString()`
+alone.
 
 ### DECIMAL: `AsDecimal()` vs `AsBigDecimal()`
 
@@ -1073,19 +1076,54 @@ storage scans many rows of few columns well, and fetches few rows of many column
 one row per attribute (or a narrow, fixed set of columns) over one row holding a bag of values.
 
 **Bulk load with `COPY`, not per-row `CREATE`.** 1,000,000 rows in 0.5 s versus 296 s — roughly
-600× — for the same data inserted one `CREATE` at a time. Illustrative, not run as part of this
-guide's verification: it needs a real CSV file at `csvPath` to execute successfully, which this
-snippet doesn't provide:
+600× — for the same data inserted one `CREATE` at a time.
+
+`COPY FROM`'s source path is a string literal, not a bindable parameter — confirmed empirically:
+`conn.PrepareAsync("COPY Object FROM $path")` compiles, but binding and executing it fails with
+`LadybugException`: *"Binder exception: Cannot find parameter path."* There is no prepared-statement
+equivalent for this specific clause, so a path built from outside your program (user input, a
+config value, anything you don't fully control) has to be interpolated into the Cypher string
+itself, and escaped correctly before that happens — this is the one place in this guide where
+parameter binding genuinely isn't an option, unlike everywhere else in this guide, which binds
+instead of interpolating for exactly this reason.
+
+**The escaping rule is not SQL's.** Cypher string literals use backslash escapes, not SQL's doubled
+single quote: `'it''s'` is a *parser error* (`"extraneous input ''s'' expecting {<EOF>, ';', SP}"`),
+confirmed directly against the real engine, while `'it\'s'` correctly parses to `it's`. A literal
+backslash needs escaping too — `'a\\b'` parses to `a\b` — which matters for exactly the paths this
+sample exists for: an unescaped Windows path like `C:\data\x.csv` contains backslashes that are
+themselves escape-sequence introducers to this parser, not inert path separators.
+
+**Order matters: escape backslashes first, then apostrophes — both with a backslash.** Escaping
+apostrophes first would then double-escape the backslashes `\'` itself introduces, corrupting the
+result. Confirmed directly: escaping `C:\data\O'Brien's exports\x.csv` in the correct order and
+running it through `RETURN '<escaped>' AS x` round-trips to the exact original string; escaping in
+the wrong order (apostrophe first) on the same input produces a string that fails to parse at all
+(`"Parser exception: mismatched input 'Brien' expecting {<EOF>, ';', SP}"`).
 
 ```csharp
-// COPY FROM's source path is a string literal, not a bindable parameter - there is no prepared-
-// statement equivalent for it - so csvPath is interpolated into the Cypher string itself. Escape
-// any single quote it contains (Cypher escapes ' by doubling it to '') before interpolating,
-// exactly as you would for any other string literal built from a path you don't fully control -
-// an unescaped quote breaks the query at best, and changes what statement actually runs at worst.
-var escapedCsvPath = csvPath.Replace("'", "''");
+static string EscapeForCypherLiteral(string value) =>
+    value.Replace(@"\", @"\\").Replace("'", @"\'"); // backslashes first, then apostrophes
+
+var escapedCsvPath = EscapeForCypherLiteral(csvPath);
 await using (var _ = await conn.QueryAsync($"COPY Object FROM '{escapedCsvPath}'")) { }
 ```
+
+Run against the real engine (`csvPath = @"C:\data\O'Brien's exports\x.csv"`, round-tripped through
+`RETURN '<escaped>' AS x` rather than an actual `COPY`, since this sample needs a real CSV file to
+execute end to end — the escaping itself is exactly what `COPY FROM` would receive either way):
+
+```
+ORIGINAL:      C:\data\O'Brien's exports\x.csv
+ROUND-TRIPPED: C:\data\O'Brien's exports\x.csv
+MATCH: True
+```
+
+This is the only sample in this guide that interpolates a caller-supplied string into Cypher —
+every other sample either has no external input or binds it as a parameter instead (see
+[Prepared statements](#prepared-statements)), which needs no escaping at all and is the better
+approach whenever the clause you're building supports it. Reach for the escaping above only when it
+doesn't, as with `COPY FROM`'s path.
 
 Row-count scaling itself is healthy once the schema is right: 10× the rows costs only 1.8–2.6×,
 not 10×.
@@ -1093,17 +1131,13 @@ not 10×.
 ## What's deferred
 
 Every value type the engine can return is readable, and every public member is documented above.
-One genuine, scoped gap was identified while writing this guide, not fixed here (see
+No functional gaps remain in the API surface this guide documents. A UNION value used to read as
+`LadybugType.Unsupported` with only `AsString()` available; it now reads as its resolved member's
+own real `LadybugType`, so every existing typed accessor works on it directly — see
 [UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough) for the full
-empirical case): **a typed `LadybugType.Union`/`AsUnion()` accessor is worth adding** — `AsString()`
-alone cannot distinguish a UNION's INT64 member holding `42` from its STRING member holding `"42"`,
-demonstrated directly against the real engine, and a straightforward fix (reusing the already-tested
-`ReadStruct` machinery on the physical field the C API already exposes for UNION) would resolve that
-specific case, though not the narrower case of two members sharing an identical physical type, which
-the C API itself has no way to disambiguate. This has been reported for review, not implemented here
-per this task's constraints. See [docs/MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for
-smaller, reviewed implementation-detail items (test coverage, interop breadth) that don't affect the
-public API.
+empirical case, including why no new public type (`LadybugType.Union`/`AsUnion()`) was needed to
+close that gap. See [docs/MILESTONE-2-CARRYOVER.md](MILESTONE-2-CARRYOVER.md) for smaller, reviewed
+implementation-detail items (test coverage, interop breadth) that don't affect the public API.
 
 Two items worth calling out explicitly, since earlier versions of this guide listed them as
 missing entirely:

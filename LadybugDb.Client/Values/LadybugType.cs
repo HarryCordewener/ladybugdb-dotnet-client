@@ -4,12 +4,16 @@ namespace LadybugDb.Client;
 public enum LadybugType
 {
     /// <summary>
-    /// A type this client does not model with its own typed accessor (currently <c>UNION</c> and
-    /// <c>POINTER</c> - see docs/USAGE.md's "Type coverage" section). Unlike a truly opaque value,
-    /// the payload is the engine's own generic string rendering of the value (via
-    /// <c>lbug_value_to_string</c>), so <see cref="LadybugValue.AsString"/> reads it - there is
-    /// just no dedicated <c>LadybugType</c>/accessor pair for it. Every other typed <c>As*</c>
-    /// accessor still throws <see cref="InvalidOperationException"/> for a value of this type.
+    /// A type this client does not model with its own typed accessor - currently only
+    /// <c>POINTER</c>, which is engine-internal and unreachable through any public Cypher path (see
+    /// docs/USAGE.md's "UNION and POINTER" section). <c>UNION</c> is NOT reported as this type: a
+    /// UNION value always resolves to exactly one concretely-typed value by the time it is read, so
+    /// it is reported directly as that value's own real <see cref="LadybugType"/> instead - see
+    /// <c>ValueReader.ReadUnion</c>. Unlike a truly opaque value, this type's own payload is the
+    /// engine's own generic string rendering of the value (via <c>lbug_value_to_string</c>), so
+    /// <see cref="LadybugValue.AsString"/> reads it - there is just no dedicated
+    /// <c>LadybugType</c>/accessor pair for it. Every other typed <c>As*</c> accessor still throws
+    /// <see cref="InvalidOperationException"/> for a value of this type.
     /// </summary>
     Unsupported = 0,
     /// <summary>SQL NULL.</summary>

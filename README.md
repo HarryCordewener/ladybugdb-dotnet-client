@@ -90,13 +90,15 @@ Supported today:
   `(a)-[:R*1..3]->(b)`) — the engine can return, including `DECIMAL` (`AsDecimal()` for values
   within .NET's native `decimal` range, `AsBigDecimal()` as the always-lossless path for the
   engine's full 38-digit precision — see
-  [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)). `UNION` and `POINTER` have no
-  dedicated typed accessor, but read as `LadybugType.Unsupported` with `AsString()` returning the
-  engine's own string rendering rather than throwing — see
+  [docs/USAGE.md](docs/USAGE.md#decimal-asdecimal-vs-asbigdecimal)). A `UNION` value reads as its
+  resolved member's own real type — every existing typed accessor simply works on it, no dedicated
+  `LadybugType.Union`/`AsUnion()` needed. `POINTER` has no dedicated typed accessor and is
+  unreachable through any public Cypher path anyway; it reads as `LadybugType.Unsupported` with
+  `AsString()` returning the engine's own string rendering rather than throwing — see
   [docs/USAGE.md](docs/USAGE.md#type-coverage) for the full breakdown, and
-  [docs/USAGE.md](docs/USAGE.md#union-and-pointer-is-asstring-enough) for the empirical case that a
-  typed `AsUnion()` accessor would still be worth adding — columns addressable by position or name,
-  and chained multi-statement results walked via `NextResultAsync()`.
+  [docs/USAGE.md](docs/USAGE.md#union-and-pointer-is-asstring-enough) for the empirical
+  investigation — columns addressable by position or name, and chained multi-statement results
+  walked via `NextResultAsync()`.
 - Typed exceptions: `LadybugException` for engine errors (carrying the failing statement), and
   `LadybugWriteConflictException` for the specific, retryable case of a concurrent write conflict.
 - Safe disposal ordering: disposing a database out from under a still-open connection, result, or

@@ -255,14 +255,15 @@ public class TypeCoverageTests
     /// UNION is reachable through ordinary Cypher DDL (<c>CREATE NODE TABLE ... UNION(...)</c>),
     /// unlike POINTER, which the engine rejects outright as neither an internal nor user-defined
     /// type ("POINTER is neither an internal type nor a user defined type" - confirmed empirically,
-    /// there is no schema syntax that reaches it). A UNION value therefore gets a real
-    /// against-the-engine test: it reads as <see cref="LadybugType.Unsupported"/>, but - unlike
-    /// before this change, when every accessor including <see cref="LadybugValue.AsString"/> threw -
-    /// <see cref="LadybugValue.AsString"/> now returns the engine's own string rendering of the
-    /// value rather than throwing.
+    /// there is no schema syntax that reaches it). A UNION value always resolves to exactly one
+    /// concretely-typed value by read time (see <c>ValueReader.ReadUnion</c>'s remarks), so it reads
+    /// as that value's own real <see cref="LadybugType"/> - here <see cref="LadybugType.Int64"/> and
+    /// <see cref="LadybugType.String"/> respectively - not <see cref="LadybugType.Unsupported"/>,
+    /// and every existing typed accessor (<see cref="LadybugValue.AsInt64"/>,
+    /// <see cref="LadybugValue.AsString"/>) simply works on it.
     /// </summary>
     [Test]
-    public async Task ReadUnion_IsUnsupportedButReadableViaAsString()
+    public async Task ReadUnion_ExplicitConstructor_ResolvesToActiveMemberRealType()
     {
         var path = TestDatabase.NewPath();
         try
@@ -273,14 +274,135 @@ public class TypeCoverageTests
                 "CREATE NODE TABLE UN(id INT64, val UNION(a INT64, b STRING), PRIMARY KEY(id))")) { }
             await using (var _ = await conn.QueryAsync(
                 "CREATE (n:UN {id: 1, val: union_value(a := 42)})")) { }
+            await using (var _ = await conn.QueryAsync(
+                "CREATE (n:UN {id: 2, val: union_value(b := 'hello')})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
+            await using var e = r.GetAsyncEnumerator();
+
+            await Assert.That(await e.MoveNextAsync()).IsTrue();
+            var first = e.Current.GetValue(1);
+            await Assert.That(first.Type).IsEqualTo(LadybugType.Int64);
+            await Assert.That(first.AsInt64()).IsEqualTo(42L);
+
+            await Assert.That(await e.MoveNextAsync()).IsTrue();
+            var second = e.Current.GetValue(1);
+            await Assert.That(second.Type).IsEqualTo(LadybugType.String);
+            await Assert.That(second.AsString()).IsEqualTo("hello");
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// The explicit <c>union_value(member := value)</c> constructor stores the NAMED member's own
+    /// declared type directly, bypassing the write-time coercion a bare literal goes through (see
+    /// <see cref="ReadUnion_BareLiteralAssignment_CoercesToFirstMatchingMemberType"/>). Binding the
+    /// digit string <c>"42"</c> to the STRING member of <c>UNION(num INT64, txt STRING)</c> - where
+    /// INT64 is declared first and WOULD have matched a bare literal - genuinely stores a STRING,
+    /// confirmed by reading it back as <see cref="LadybugType.String"/>, not
+    /// <see cref="LadybugType.Int64"/>, even though both would render identically through
+    /// <see cref="LadybugValue.AsString"/> alone (<c>"42"</c> either way) - which is exactly why
+    /// reading the resolved member with its real type, not just <see cref="LadybugValue.AsString"/>,
+    /// is what actually disambiguates this case.
+    /// </summary>
+    [Test]
+    public async Task ReadUnion_ExplicitConstructorOnStringMemberHoldingDigits_StaysString()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync(
+                "CREATE (n:UN {id: 1, val: union_value(txt := '42')})")) { }
 
             await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.val");
             await using var e = r.GetAsyncEnumerator();
             await Assert.That(await e.MoveNextAsync()).IsTrue();
             var value = e.Current.GetValue(0);
 
-            await Assert.That(value.Type).IsEqualTo(LadybugType.Unsupported);
+            await Assert.That(value.Type).IsEqualTo(LadybugType.String);
             await Assert.That(value.AsString()).IsEqualTo("42");
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// A bare Cypher literal assigned to a UNION column (no <c>union_value()</c>) is coerced at
+    /// WRITE time: the engine tries the declared member types in order and stores the value as the
+    /// first one that accepts it. For <c>UNION(num INT64, txt STRING)</c>, the digit-string literal
+    /// <c>'42'</c> is stored as the INT64 member (not the STRING one), and <c>'hello'</c> falls
+    /// through to the STRING member since it does not parse as INT64. Confirmed empirically, not
+    /// assumed - this is the opposite of the explicit-constructor case above, and is exactly why
+    /// a UNION value is never genuinely ambiguous by the time it is read: coercion already resolved
+    /// which member applies before storage.
+    /// </summary>
+    [Test]
+    [Arguments("42", "num_int64")]
+    [Arguments("'42'", "num_int64")]
+    [Arguments("'hello'", "txt_string")]
+    public async Task ReadUnion_BareLiteralAssignment_CoercesToFirstMatchingMemberType(string literal, string expectedCase)
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync($"CREATE (n:UN {{id: 1, val: {literal}}})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.val");
+            await using var e = r.GetAsyncEnumerator();
+            await Assert.That(await e.MoveNextAsync()).IsTrue();
+            var value = e.Current.GetValue(0);
+
+            if (expectedCase == "num_int64")
+            {
+                await Assert.That(value.Type).IsEqualTo(LadybugType.Int64);
+                await Assert.That(value.AsInt64()).IsEqualTo(42L);
+            }
+            else
+            {
+                await Assert.That(value.Type).IsEqualTo(LadybugType.String);
+                await Assert.That(value.AsString()).IsEqualTo("hello");
+            }
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
+    /// The same write-time coercion holds for a UNION whose members cannot cross-coerce into each
+    /// other (BOOL and STRING - a bare boolean literal cannot become a string and vice versa), so
+    /// each literal resolves to its own matching member with no fallback ambiguity at all.
+    /// </summary>
+    [Test]
+    public async Task ReadUnion_NonCoercibleMembers_EachLiteralResolvesToItsOwnMember()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await using (var _ = await conn.QueryAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(flag BOOL, txt STRING), PRIMARY KEY(id))")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:UN {id: 1, val: true})")) { }
+            await using (var _ = await conn.QueryAsync("CREATE (n:UN {id: 2, val: 'hello'})")) { }
+
+            await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
+            await using var e = r.GetAsyncEnumerator();
+
+            await Assert.That(await e.MoveNextAsync()).IsTrue();
+            var boolValue = e.Current.GetValue(1);
+            await Assert.That(boolValue.Type).IsEqualTo(LadybugType.Boolean);
+            await Assert.That(boolValue.AsBoolean()).IsTrue();
+
+            await Assert.That(await e.MoveNextAsync()).IsTrue();
+            var stringValue = e.Current.GetValue(1);
+            await Assert.That(stringValue.Type).IsEqualTo(LadybugType.String);
+            await Assert.That(stringValue.AsString()).IsEqualTo("hello");
         }
         finally { TestDatabase.Cleanup(path); }
     }
