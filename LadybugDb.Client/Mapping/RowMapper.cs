@@ -54,14 +54,36 @@ internal static class RowMapper
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Conversion is exact, not widening: each accessor requires the column's own
-    /// <see cref="LadybugType"/> and throws otherwise, so an <c>INT32</c> column read into a
-    /// <see cref="long"/> is an error naming both types rather than a silent widening. That matches
-    /// the read side of this client everywhere else (<see cref="LadybugValue.AsInt64"/> on an
-    /// <c>INT32</c> value throws today) and it is the direction this project has repeatedly chosen:
-    /// a silent numeric coercion has already produced one defect here. The error message names the
-    /// column's actual type, so the fix - widen the target, or <c>CAST</c> in the Cypher - is visible
+    /// <b>Conversion accepts lossless widening, and only widening.</b> A target reads the
+    /// <see cref="LadybugType"/> that backs it exactly, plus every narrower type that is provably
+    /// contained in it - so an <c>INT32</c> column reads into a <see cref="long"/>, a <c>FLOAT</c>
+    /// into a <see cref="double"/>, and a <c>UINT32</c> into a <see cref="long"/> (whose range
+    /// contains all of <c>UINT32</c>'s). Nothing that can lose a bit, a digit, or a sign is accepted:
+    /// no narrowing (<c>INT64</c> into an <see cref="int"/>), no signed into unsigned (<c>INT8</c>
+    /// into a <see cref="byte"/> - a negative value has nowhere to go), and no integer into a
+    /// floating-point target. Those keep the error naming the column, its <see cref="LadybugType"/>
+    /// and the target type, so the fix - widen the target, or <c>CAST</c> in the Cypher - is visible
     /// without a debugger.
+    /// </para>
+    /// <para>
+    /// <b>Why widening rather than the exact match this originally shipped with.</b> Exactness makes a
+    /// projection's target type track the schema's declared width, which is the opposite of what an
+    /// ergonomics feature is for: a column declared <c>INT32</c> read into the <see cref="long"/> a
+    /// record naturally declares is not a coercion a caller can be surprised by, because there is no
+    /// value it can be wrong for. It is also what the bind side already does - measured, not assumed
+    /// (see <see cref="ParameterBinder"/>'s remarks): the engine coerces a bound <c>INT32</c> into an
+    /// <c>INT64</c> column and range-<em>checks</em> rather than truncating. The narrowing direction is
+    /// where a silent coercion actually loses data, and that is precisely the direction still refused
+    /// here.
+    /// </para>
+    /// <para>
+    /// <b>Integer into floating-point is excluded deliberately, even where it would be lossless.</b>
+    /// <c>INT32</c> into a <see cref="double"/> loses nothing (every 32-bit integer is exactly
+    /// representable in 53 bits of mantissa), but <c>INT64</c> into a <see cref="double"/> loses
+    /// integers above 2^53 and <c>INT32</c> into a <see cref="float"/> loses them above 2^24. A rule
+    /// whose boundary is a mantissa width is one callers cannot hold in their heads, and admitting the
+    /// safe half of it would make the unsafe half look like an oversight. The whole cross-family
+    /// conversion stays out; <c>CAST</c> in the Cypher expresses it explicitly where it is wanted.
     /// </para>
     /// <para>
     /// <see cref="decimal"/> is present but is the one lossy-looking target, and it does not lose
@@ -75,8 +97,8 @@ internal static class RowMapper
     /// <see cref="string"/> inherits <see cref="LadybugValue.AsString"/>'s deliberate breadth: it
     /// reads any value whose payload is already a managed string, which includes <c>DECIMAL</c> (the
     /// engine's exact decimal string) and the engine's own rendering of an otherwise unmodelled type.
-    /// A <see cref="string"/> target is therefore the one target that accepts more than one
-    /// <see cref="LadybugType"/>.
+    /// It is the one target whose accepted set is decided by the payload's representation rather than
+    /// by the widening rule above.
     /// </para>
     /// <para>
     /// <see cref="TimeSpan"/> inherits <see cref="LadybugValue.AsTimeSpan"/>'s documented lossiness
@@ -88,17 +110,87 @@ internal static class RowMapper
         new Dictionary<Type, Func<LadybugValue, object?>>
         {
             [typeof(bool)] = static v => v.AsBoolean(),
+
+            // The narrowest signed and unsigned widths, and float: nothing widens into them losslessly,
+            // so each reads exactly its own type.
             [typeof(sbyte)] = static v => v.AsSByte(),
-            [typeof(short)] = static v => v.AsInt16(),
-            [typeof(int)] = static v => v.AsInt32(),
-            [typeof(long)] = static v => v.AsInt64(),
             [typeof(byte)] = static v => v.AsByte(),
-            [typeof(ushort)] = static v => v.AsUInt16(),
-            [typeof(uint)] = static v => v.AsUInt32(),
-            [typeof(ulong)] = static v => v.AsUInt64(),
-            [typeof(Int128)] = static v => v.AsInt128(),
             [typeof(float)] = static v => v.AsSingle(),
-            [typeof(double)] = static v => v.AsDouble(),
+
+            // Every arm is cast to the target type explicitly, and the switch's own type is therefore
+            // exactly that type. This is load-bearing, not tidiness: the returned object is later
+            // unboxed to the target type (RowPlan<T>.Map for a scalar, ConstructorInvoker for a
+            // parameter), and an unbox only succeeds against the exact boxed type - a `short` arm left
+            // as its natural `sbyte` would box as sbyte and fail the unbox at runtime.
+            [typeof(short)] = static v => v.Type switch
+            {
+                LadybugType.Int16 => v.AsInt16(),
+                LadybugType.Int8 => (short)v.AsSByte(),
+                LadybugType.UInt8 => (short)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.Int16),
+            },
+            [typeof(int)] = static v => v.Type switch
+            {
+                LadybugType.Int32 => v.AsInt32(),
+                LadybugType.Int16 => (int)v.AsInt16(),
+                LadybugType.Int8 => (int)v.AsSByte(),
+                LadybugType.UInt16 => (int)v.AsUInt16(),
+                LadybugType.UInt8 => (int)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.Int32),
+            },
+            [typeof(long)] = static v => v.Type switch
+            {
+                LadybugType.Int64 => v.AsInt64(),
+                LadybugType.Int32 => (long)v.AsInt32(),
+                LadybugType.Int16 => (long)v.AsInt16(),
+                LadybugType.Int8 => (long)v.AsSByte(),
+                LadybugType.UInt32 => (long)v.AsUInt32(),
+                LadybugType.UInt16 => (long)v.AsUInt16(),
+                LadybugType.UInt8 => (long)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.Int64),
+            },
+            [typeof(Int128)] = static v => v.Type switch
+            {
+                LadybugType.Int128 => v.AsInt128(),
+                LadybugType.Int64 => (Int128)v.AsInt64(),
+                LadybugType.Int32 => (Int128)v.AsInt32(),
+                LadybugType.Int16 => (Int128)v.AsInt16(),
+                LadybugType.Int8 => (Int128)v.AsSByte(),
+
+                // UINT64 included: its whole range fits in Int128, unlike in long.
+                LadybugType.UInt64 => (Int128)v.AsUInt64(),
+                LadybugType.UInt32 => (Int128)v.AsUInt32(),
+                LadybugType.UInt16 => (Int128)v.AsUInt16(),
+                LadybugType.UInt8 => (Int128)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.Int128),
+            },
+            [typeof(ushort)] = static v => v.Type switch
+            {
+                LadybugType.UInt16 => v.AsUInt16(),
+                LadybugType.UInt8 => (ushort)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.UInt16),
+            },
+            [typeof(uint)] = static v => v.Type switch
+            {
+                LadybugType.UInt32 => v.AsUInt32(),
+                LadybugType.UInt16 => (uint)v.AsUInt16(),
+                LadybugType.UInt8 => (uint)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.UInt32),
+            },
+            [typeof(ulong)] = static v => v.Type switch
+            {
+                LadybugType.UInt64 => v.AsUInt64(),
+                LadybugType.UInt32 => (ulong)v.AsUInt32(),
+                LadybugType.UInt16 => (ulong)v.AsUInt16(),
+                LadybugType.UInt8 => (ulong)v.AsByte(),
+                _ => throw NotConvertible(v, LadybugType.UInt64),
+            },
+            [typeof(double)] = static v => v.Type switch
+            {
+                LadybugType.Double => v.AsDouble(),
+                LadybugType.Single => (double)v.AsSingle(),
+                _ => throw NotConvertible(v, LadybugType.Double),
+            },
             [typeof(decimal)] = static v => v.AsDecimal(),
             [typeof(BigDecimal)] = static v => v.AsBigDecimal(),
             [typeof(string)] = static v => v.AsString(),
@@ -109,6 +201,16 @@ internal static class RowMapper
             [typeof(DateTimeOffset)] = static v => v.AsDateTimeOffset(),
             [typeof(TimeSpan)] = static v => v.AsTimeSpan(),
         }.ToFrozenDictionary();
+
+    /// <summary>
+    /// The failure a widening converter raises for a column no widening reaches, in the same shape
+    /// <see cref="LadybugValue"/>'s own accessors raise for an exact mismatch - so
+    /// <see cref="ConvertColumn"/> can catch and re-report both identically.
+    /// </summary>
+    /// <param name="value">The column's value, for its <see cref="LadybugValue.Type"/>.</param>
+    /// <param name="exact">The <see cref="LadybugType"/> the target reads exactly.</param>
+    private static InvalidOperationException NotConvertible(LadybugValue value, LadybugType exact) =>
+        new($"Value is {value.Type}, not {exact} nor a narrower type that widens losslessly into it.");
 
     /// <summary>
     /// Resolves the plan for projecting rows of <paramref name="row"/>'s shape into
@@ -340,8 +442,10 @@ internal static class RowMapper
         {
             throw new LadybugException(
                 $"Column '{binding.ColumnName}' is {value.Type}, which cannot be read as " +
-                $"{Describe(binding.TargetType)}. Conversion is exact, not widening: declare the " +
-                $"target as the type the column actually has, or CAST the column in the Cypher.",
+                $"{Describe(binding.TargetType)}. Conversion accepts only lossless widening - never " +
+                $"narrowing, never signed into unsigned, never integer into floating-point: declare " +
+                $"the target as the type the column actually has (or a wider one of the same kind), " +
+                $"or CAST the column in the Cypher.",
                 ex);
         }
     }

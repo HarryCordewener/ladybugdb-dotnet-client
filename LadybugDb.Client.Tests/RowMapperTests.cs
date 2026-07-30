@@ -47,6 +47,9 @@ public class RowMapperTests
 
     private record Nullables(long? Dbref, string? Name);
 
+    /// <summary>Like <see cref="Person"/>, but with a target too narrow for an INT64 column.</summary>
+    private record Narrowed(int Dbref, string Name);
+
     private record Money(BigDecimal Balance);
 
     private record Truncatable(decimal Balance);
@@ -348,21 +351,28 @@ public class RowMapperTests
     // ------------------------------------------------------------------------------- conversion
 
     /// <summary>
-    /// Conversion is exact, not widening: an INT32 column read as <c>long</c> is an error naming
-    /// both, not a silent widening. Silent numeric coercion has produced a defect in this project
-    /// before, and the error message carries the fix.
+    /// Conversion accepts lossless widening but never narrowing: an INT64 column read as <c>int</c> is
+    /// an error naming both, not a truncation. Silent numeric coercion has produced a defect in this
+    /// project before, and the error message carries the fix.
     /// </summary>
+    /// <remarks>
+    /// This test used to assert the mirror image - an INT32 column read as <c>long</c> throwing - back
+    /// when conversion was exact in both directions. That rule was replaced by lossless widening (see
+    /// <c>RowMapperWideningTests</c> and the spec's Decision 4), which makes INT32-into-<c>long</c> a
+    /// supported read; the assertion was re-pointed at the direction that genuinely loses data rather
+    /// than dropped, so the useful-message guarantee it was protecting still has a test.
+    /// </remarks>
     [Test]
     public async Task ColumnOfADifferentWidth_ThrowsNamingColumnLadybugTypeAndTarget()
     {
-        var row = Row(("Dbref", Int32(42)), ("Name", Str("Limbo")));
+        var row = Row(("Dbref", Int64(42)), ("Name", Str("Limbo")));
 
-        var ex = Assert.Throws<LadybugException>(() => RowMapper.Map<Person>(row));
+        var ex = Assert.Throws<LadybugException>(() => RowMapper.Map<Narrowed>(row));
 
         await Assert.That(ex).IsNotNull();
         await Assert.That(ex!.Message).Contains("'Dbref'");
-        await Assert.That(ex.Message).Contains("Int32");
-        await Assert.That(ex.Message).Contains("long");
+        await Assert.That(ex.Message).Contains("Int64");
+        await Assert.That(ex.Message).Contains("int");
     }
 
     [Test]
