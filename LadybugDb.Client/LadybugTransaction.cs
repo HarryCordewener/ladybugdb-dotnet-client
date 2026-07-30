@@ -93,7 +93,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
     internal static async ValueTask<LadybugTransaction> BeginAsync(
         LadybugConnection connection, CancellationToken cancellationToken)
     {
-        await using (var _ = await connection.QueryAsync("BEGIN TRANSACTION", cancellationToken))
+        await using (var _ = await connection.QueryUncheckedAsync("BEGIN TRANSACTION", cancellationToken))
         {
         }
 
@@ -134,7 +134,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
 
         try
         {
-            await using (var _ = await _connection.QueryAsync("COMMIT", cancellationToken))
+            await using (var _ = await _connection.QueryUncheckedAsync("COMMIT", cancellationToken))
             {
             }
         }
@@ -161,7 +161,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
 
         try
         {
-            await using (var _ = await _connection.QueryAsync("ROLLBACK", cancellationToken))
+            await using (var _ = await _connection.QueryUncheckedAsync("ROLLBACK", cancellationToken))
             {
             }
         }
@@ -198,7 +198,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
 
         try
         {
-            await using var _ = await _connection.QueryAsync("ROLLBACK");
+            await using var _ = await _connection.QueryUncheckedAsync("ROLLBACK");
         }
         catch
         {
@@ -281,7 +281,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
 
         try
         {
-            var result = _connection.QueryAsync("ROLLBACK").Result;
+            var result = _connection.QueryUncheckedAsync("ROLLBACK").Result;
             result.DisposeAsync().GetAwaiter().GetResult();
         }
         catch

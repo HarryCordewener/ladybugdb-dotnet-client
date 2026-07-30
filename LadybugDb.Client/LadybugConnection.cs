@@ -50,6 +50,21 @@ public sealed class LadybugConnection : IAsyncDisposable
     private LadybugTransaction? _activeTransaction;
 
     /// <summary>
+    /// Whether a transaction opened by raw <c>BEGIN TRANSACTION</c> through
+    /// <see cref="QueryAsync(string, CancellationToken)"/> - rather than through
+    /// <see cref="BeginTransactionAsync"/>, which produces a <see cref="LadybugTransaction"/> and
+    /// lands in <see cref="_activeTransaction"/> - is currently open.
+    /// </summary>
+    /// <remarks>
+    /// Read and written only under <see cref="_transactionGate"/>, alongside
+    /// <see cref="_activeTransaction"/>, because the two are checked together as one condition: the
+    /// engine allows exactly one transaction per connection regardless of which path opened it, and
+    /// sending a nested <c>BEGIN</c> destroys the one already in flight. See
+    /// <see cref="TrackedTransactionStatementAsync"/>.
+    /// </remarks>
+    private bool _rawTransactionOpen;
+
+    /// <summary>
     /// Serializes <see cref="BeginTransactionAsync"/> against itself and against
     /// <see cref="OnTransactionCompleted"/>/<see cref="EnsureNoOpenTransactionForDispose"/> on
     /// this connection, so exactly one caller can ever be checking-and-opening a transaction at a
@@ -92,6 +107,87 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// window leases exist to close.
     /// </remarks>
     public ValueTask<LadybugQueryResult> QueryAsync(string cypher, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Transaction-control statements go through the bookkeeping path so this connection is not
+        // blind to a transaction the caller opens directly - see TrackedTransactionStatementAsync
+        // for what being blind to one costs. Every other statement, which is nearly all of them,
+        // takes neither the gate nor an allocation for the check.
+        var effect = TransactionStatement.Classify(cypher);
+        return effect == TransactionEffect.None
+            ? ValueTask.FromResult(Execute(cypher))
+            : TrackedTransactionStatementAsync(cypher, effect, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a raw <c>BEGIN TRANSACTION</c>/<c>COMMIT</c>/<c>ROLLBACK</c> while keeping
+    /// <see cref="_rawTransactionOpen"/> in step with it, and refuses a nested <c>BEGIN</c> before it
+    /// can reach the engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Refusing the nested <c>BEGIN</c> is the whole point, and it prevents silent data loss
+    /// rather than merely reporting an error earlier.</b> The engine does not just reject a nested
+    /// <c>BEGIN TRANSACTION</c> - it tears down the transaction already in flight. Reproduced
+    /// directly: the writes inside the first transaction vanish with no error at write time, and the
+    /// following <c>COMMIT</c> reports "No active transaction for COMMIT." with zero rows committed.
+    /// This is the same hazard <see cref="BeginTransactionAsync"/> has always guarded for the
+    /// transactions it opens itself; before this path existed, a transaction opened by handing
+    /// <c>BEGIN TRANSACTION</c> to <see cref="QueryAsync(string, CancellationToken)"/> was invisible
+    /// to that guard, so the guard could be walked straight past from either direction - a second raw
+    /// <c>BEGIN</c>, or a <see cref="BeginTransactionAsync"/> call that believed nothing was open.
+    /// </para>
+    /// <para>
+    /// The gate is the same one <see cref="BeginTransactionAsync"/> uses, so check-then-send is
+    /// atomic against it and against transaction completion. <see cref="LadybugTransaction"/> issues
+    /// its own statements through <see cref="QueryUncheckedAsync"/> instead of this path: it does its
+    /// own bookkeeping and already holds the gate while doing it, so routing it here would both
+    /// double-count and deadlock.
+    /// </para>
+    /// <para>
+    /// Flags move only on success. A <c>BEGIN</c> the engine refused opened nothing, and a
+    /// <c>COMMIT</c> that failed may well have left the transaction open - so the flag stays set, and
+    /// the next <see cref="BeginTransactionAsync"/> refuses rather than risking the teardown above.
+    /// Refusing when nothing is open is recoverable; destroying a live transaction is not.
+    /// </para>
+    /// </remarks>
+    private async ValueTask<LadybugQueryResult> TrackedTransactionStatementAsync(
+        string cypher, TransactionEffect effect, CancellationToken cancellationToken)
+    {
+        await _transactionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (effect == TransactionEffect.Begin && (_activeTransaction is not null || _rawTransactionOpen))
+            {
+                throw new InvalidOperationException(
+                    "This connection already has an active transaction, so this BEGIN TRANSACTION was " +
+                    "not sent to the engine. Sending it would not merely fail - the engine tears down " +
+                    "the transaction already in flight, discarding its writes with no error until a " +
+                    "later COMMIT reports there is nothing to commit. Commit or roll the current " +
+                    "transaction back first. Prefer BeginTransactionAsync, which rolls back " +
+                    "automatically if it is never committed.");
+            }
+
+            var result = Execute(cypher);
+            _rawTransactionOpen = effect == TransactionEffect.Begin;
+            return result;
+        }
+        finally
+        {
+            _transactionGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Executes <paramref name="cypher"/> without classifying it as transaction control. For
+    /// <see cref="LadybugTransaction"/>, which does its own bookkeeping under
+    /// <see cref="_transactionGate"/> and would deadlock against
+    /// <see cref="TrackedTransactionStatementAsync"/>. Not for direct use.
+    /// </summary>
+    internal ValueTask<LadybugQueryResult> QueryUncheckedAsync(
+        string cypher, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
         cancellationToken.ThrowIfCancellationRequested();
@@ -377,6 +473,18 @@ public sealed class LadybugConnection : IAsyncDisposable
                     "dispose it) before beginning another - sending a nested BEGIN TRANSACTION to " +
                     "the engine would invalidate the first transaction rather than merely rejecting " +
                     "the second call.");
+
+            // The same condition, for a transaction opened by raw Cypher instead of by this method.
+            // Checking only _activeTransaction let this call sail straight past a raw transaction and
+            // destroy it at the engine level - the exact loss the message above describes, reached
+            // from the one direction that guard could not see.
+            if (_rawTransactionOpen)
+                throw new InvalidOperationException(
+                    "This connection already has a transaction opened by a raw BEGIN TRANSACTION " +
+                    "statement, so no BEGIN TRANSACTION was sent. Sending one would tear that " +
+                    "transaction down at the engine level and discard its writes, reporting nothing " +
+                    "until a later COMMIT finds nothing to commit. Commit or roll it back - with a " +
+                    "raw COMMIT or ROLLBACK, matching how it was opened - before beginning another.");
 
             var transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
 

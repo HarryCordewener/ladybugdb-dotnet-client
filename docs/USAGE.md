@@ -1044,27 +1044,46 @@ second call. Every statement run on the connection while a transaction is open �
 issued through the `LadybugTransaction` object — participates in it, because the transaction lives
 on the connection itself, matching what `BEGIN TRANSACTION` means to the engine.
 
-**The raw-Cypher escape hatch bypasses all of that safety — and it can crash the process, not just
-skip a rollback.** Nothing stops you from issuing `await conn.QueryAsync("BEGIN TRANSACTION")`
-directly instead of calling `BeginTransactionAsync`, but if you do, this client has no way to know
-a transaction is open. `BeginTransactionAsync`'s bookkeeping (the connection's `_activeTransaction`
-tracking and the database-side registration that drives the automatic rollback-on-dispose in
-[Disposal and lifetime](#disposal-and-lifetime)) only runs *inside* `BeginTransactionAsync` itself;
-a transaction opened by handing `BEGIN TRANSACTION` to `QueryAsync` as a plain string is invisible
-to it, so `LadybugDatabase.Dispose` never rolls it back.
+**The raw-Cypher escape hatch is tracked, but it is not managed for you.** Nothing stops you from
+issuing `await conn.QueryAsync("BEGIN TRANSACTION")` directly instead of calling
+`BeginTransactionAsync`, and there are good reasons to (Cypher your own driver already emits
+verbatim, for instance). The client recognizes the plain transaction-control statements —
+`BEGIN TRANSACTION`, `BEGIN TRANSACTION READ ONLY`, `COMMIT`, `ROLLBACK`, in any case, with any
+internal whitespace and an optional trailing semicolon — and keeps its own bookkeeping in step with
+them.
 
-Reproduced directly, not assumed: opening a transaction via raw `QueryAsync("BEGIN TRANSACTION")`,
-leaving it uncommitted, then disposing the database and letting the connection's own `DisposeAsync`
-run afterward, **aborts the whole process** — `lbug_connection_destroy`'s own auto-rollback (see
-[Disposal and lifetime](#disposal-and-lifetime)) fires against a transaction the now-destroyed
-database can no longer service, and the engine throws a native `lbug::common::TransactionManagerException`
-("Invalid transaction type to rollback") that crosses the P/Invoke boundary as an unhandled
-exception — `terminate()`, `SIGABRT`, the process is gone, not a catchable managed exception. This
-is a real tradeoff you can reach for deliberately (for example, Cypher your database driver already
-emits verbatim), not a footnote: reaching for it means you've opted back into managing that
-transaction's entire lifetime by hand — commit or roll it back yourself, before the connection or
-database can be disposed — exactly as if this client provided no transaction API at all, except
-that getting it wrong here doesn't throw, it takes the process down.
+**Why that tracking matters more than it sounds.** The engine does not merely reject a nested
+`BEGIN TRANSACTION`; it tears down the transaction already in flight, and the writes inside it are
+gone with no error at write time — the following `COMMIT` reports `No active transaction for COMMIT.`
+and nothing was committed. Reproduced directly, not assumed. So a nested `BEGIN` is refused
+client-side, before it can reach the engine, whether it arrives as raw Cypher or as a
+`BeginTransactionAsync` call that would otherwise have believed nothing was open:
+
+```csharp
+await using (var _ = await conn.QueryAsync("BEGIN TRANSACTION")) { }
+await using (var _ = await conn.QueryAsync("CREATE (:T {id: 1})")) { }
+
+// Both of these throw InvalidOperationException without sending anything to the engine,
+// so the transaction above — and its write — survive.
+await conn.QueryAsync("BEGIN TRANSACTION");
+await conn.BeginTransactionAsync();
+
+await using (var _ = await conn.QueryAsync("COMMIT")) { }   // commits, 1 row
+```
+
+**Two limits to know.** Recognition is conservative by design: a statement is tracked only when its
+entire text is a transaction-control statement, so a multi-statement script like
+`"BEGIN TRANSACTION; CREATE ...; COMMIT"` is *not* tracked and a transaction opened that way remains
+invisible to the guard. The trade is one-directional on purpose — failing to notice a transaction
+leaves you exactly where you were, whereas a false match would refuse a query that works, so
+`CREATE (n {s: 'BEGIN TRANSACTION'})` is correctly left alone. And tracking is not management: a raw
+transaction is still **not** rolled back for you when the connection or database is disposed, which is
+the thing `BeginTransactionAsync` adds. Reaching for the raw form means you own that transaction's
+lifetime — commit or roll it back yourself.
+
+Issuing a raw `COMMIT` or `ROLLBACK` while a `LadybugTransaction` from `BeginTransactionAsync` is open
+closes the transaction at the engine level behind that object's back. Its later `CommitAsync` or
+disposal then has nothing to act on. Use one mechanism or the other on a given transaction, not both.
 
 ## Error handling
 
@@ -1125,12 +1144,16 @@ await conn.DisposeAsync();
 db.Dispose();
 ```
 
-**This "never crashes" guarantee is specifically about the managed transaction API.** The raw-Cypher
-escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")` instead of `BeginTransactionAsync`) is not
-covered by anything in this section — see [Transactions](#transactions) above for why disposing a
-database or connection with an uncommitted raw transaction still open aborts the whole process
-instead of throwing a catchable exception. Complete or roll back any such transaction yourself,
-before disposal, if you use that escape hatch.
+**The raw-Cypher escape hatch is covered by this guarantee too, but not by the automatic rollback.**
+Disposing a database and connection while a transaction opened by `conn.QueryAsync("BEGIN TRANSACTION")`
+is still uncommitted does not crash the process — verified across six disposal orderings, including
+never disposing the connection at all, disposing it before the database, and leaving a result open.
+The transaction is abandoned and its writes are discarded, exactly as an uncommitted transaction
+should be, and the process exits cleanly.
+
+What the raw form still does not get is `BeginTransactionAsync`'s explicit rollback-on-dispose, so
+complete or roll back any raw transaction yourself rather than relying on disposal to do it. See
+[Transactions](#transactions) above for the nested-`BEGIN` hazard that *is* actively guarded.
 
 Disposing a database out from under a still-open connection or result doesn't crash — it throws a
 managed `ObjectDisposedException` on the next call against that connection or result, instead:

@@ -153,9 +153,13 @@ are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency) for th
 - **`POINTER` is unreachable.** An engine-internal type with no Cypher-level representation. It reads
   as `LadybugType.Unsupported`.
 - **`AsTimeSpan()` on `INTERVAL` is lossy.** The engine converts months at 30 days each.
-- **Raw-Cypher transactions bypass safety guarantees.** Issuing `BEGIN TRANSACTION` through
-  `QueryAsync` instead of `BeginTransactionAsync` forfeits the disposal protections above and can
-  abort the process. See [docs/USAGE.md](docs/USAGE.md#transactions).
+- **Raw-Cypher transactions are recognized, but only in their plain form.** `BEGIN TRANSACTION`,
+  `BEGIN TRANSACTION READ ONLY`, `COMMIT`, and `ROLLBACK` issued through `QueryAsync` are tracked, so
+  the client refuses a nested `BEGIN` rather than letting the engine destroy the transaction already
+  in flight. Recognition is deliberately conservative: a multi-statement script such as
+  `"BEGIN TRANSACTION; CREATE ...; COMMIT"` is not tracked, and a transaction opened that way stays
+  invisible to the guard. Unlike `BeginTransactionAsync`, a raw transaction is still not rolled back
+  for you on dispose. See [docs/USAGE.md](docs/USAGE.md#transactions).
 - **Temporal conversion functions are excluded.** The 12 `*_to_tm`/`*_from_tm` C API functions have
   no portable `struct tm` ABI across the supported platforms. Epoch-based equivalents are used
   throughout.
