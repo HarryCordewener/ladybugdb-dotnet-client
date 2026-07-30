@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Native;
@@ -13,7 +14,7 @@ namespace LadybugDb.Client;
 /// <remarks>
 /// <b>Thread-safety.</b> Every public member of this type is safe to call concurrently, from
 /// multiple threads, on the same instance - including two overlapping calls to
-/// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync"/> and <see cref="PrepareAsync"/>
+/// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync(string, CancellationToken)"/> and <see cref="PrepareAsync"/>
 /// were already safe this way - concurrent native re-entry on one connection is the underlying
 /// <c>lbug_connection</c>'s own guarantee ("Each connection is thread-safe", per
 /// <c>third-party/lbug.h</c>'s <c>lbug_connection</c> doc comment), not something this client
@@ -96,11 +97,79 @@ public sealed class LadybugConnection : IAsyncDisposable
     }
 
     /// <summary>
+    /// Executes a parameterized Cypher statement once - preparing it, binding
+    /// <paramref name="parameters"/>, executing, and disposing the statement - and returns its
+    /// result.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L, name = "Limbo" }</c> - whose public properties name the parameters. Each
+    /// value dispatches on its runtime type to the matching typed
+    /// <see cref="LadybugPreparedStatement"/> <c>Bind</c> overload.
+    /// </param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>The statement's result.</returns>
+    /// <remarks>
+    /// <para>
+    /// For a statement run <em>once</em>, which is what this overload is for. To run the same
+    /// statement repeatedly with different values, <see cref="PrepareAsync"/> it and call
+    /// <see cref="LadybugPreparedStatement.ExecuteAsync(object, CancellationToken)"/> per execution,
+    /// so the engine plans the query once instead of on every call.
+    /// </para>
+    /// <para>
+    /// <b>The returned result deliberately outlives the statement this method disposes.</b> That is
+    /// safe, and not by accident: a <see cref="LadybugQueryResult"/> leases its parent
+    /// <see cref="LadybugDatabase"/> and its own handle chain (see
+    /// <see cref="LbugQueryResultHandle.ExecutePrepared"/>), and never the prepared statement that
+    /// produced it - covered directly by the integration suite's
+    /// <c>DisposingStatementBeforeConsumingResult_ResultRemainsUsable</c>, and by
+    /// <c>OneShotQueryAsync_ResultOutlivesTheInternalStatement</c> for this path specifically,
+    /// including the DML case whose result outliving its <em>database</em> is a known
+    /// process-crashing shape in this client. What the result does keep alive is the database, so
+    /// the ordinary rule still holds: dispose the result before the database.
+    /// </para>
+    /// <para>
+    /// Values bind at their natural width and the engine coerces them to the target column - see
+    /// <see cref="LadybugPreparedStatement.ExecuteAsync(object, CancellationToken)"/>'s remarks for
+    /// the measured behaviour.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace; or
+    /// <paramref name="parameters"/> is not a usable parameter bag, or names a value whose runtime
+    /// type has no <c>Bind</c> overload.
+    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or " +
+        "PrepareAsync with the typed Bind overloads, when trimming.")]
+    public async ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        ArgumentNullException.ThrowIfNull(parameters);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var statement = LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher);
+        try
+        {
+            return await statement.ExecuteAsync(parameters, cancellationToken);
+        }
+        finally
+        {
+            // Runs on both paths: after the result exists (which does not depend on the statement
+            // staying alive - see this method's remarks) and if binding or execution threw.
+            await statement.DisposeAsync();
+        }
+    }
+
+    /// <summary>
     /// Prepares a parameterized Cypher statement for repeated execution with different bound
     /// values, avoiding re-planning the same query on every call.
     /// </summary>
     /// <remarks>
-    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync"/>:
+    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync(string, CancellationToken)"/>:
     /// <see cref="LadybugPreparedStatement.Prepare"/> leases both this connection's handle and its
     /// parent <see cref="LadybugDatabase"/>'s handle internally.
     /// </remarks>

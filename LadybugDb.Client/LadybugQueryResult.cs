@@ -14,7 +14,7 @@ namespace LadybugDb.Client;
 /// </para>
 /// <para>
 /// A result obtained from <see cref="NextResultAsync"/> additionally leases <c>_root</c>: the
-/// <em>original</em> result returned from a <see cref="LadybugConnection.QueryAsync"/> call, not
+/// <em>original</em> result returned from a <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> call, not
 /// necessarily this result's immediate predecessor in the chain. <see cref="Interop.LbugQueryResultHandle.GetNextQueryResult"/>
 /// documents the empirical finding this depends on - every result but the original comes back
 /// from the native API as a <em>view</em> the original's storage owns (its own
@@ -46,7 +46,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
 
     /// <summary>
     /// The result that actually owns native storage for this whole chain - itself, for a result
-    /// returned directly from <see cref="LadybugConnection.QueryAsync"/>; the same value passed
+    /// returned directly from <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>; the same value passed
     /// down from the predecessor, for a result returned from <see cref="NextResultAsync"/>. See
     /// this type's remarks.
     /// </summary>
@@ -154,7 +154,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
 
     /// <summary>
     /// Advances to the next statement's result, for a script that ran more than one Cypher
-    /// statement in a single <see cref="LadybugConnection.QueryAsync"/> call. Returns
+    /// statement in a single <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> call. Returns
     /// <see langword="null"/> when this was the last statement.
     /// </summary>
     /// <remarks>
