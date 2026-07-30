@@ -36,11 +36,11 @@ public class SelectTests
     {
         var db = new LadybugDatabase(path);
         var conn = await db.ConnectAsync();
-        await using (var _ = await conn.QueryAsync(
-            "CREATE NODE TABLE Object(dbref INT64, name STRING, parent INT64, PRIMARY KEY(dbref))")) { }
-        await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo', parent: 0})")) { }
-        await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'Master Room', parent: 1})")) { }
-        await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 3, name: 'Void'})")) { }
+        await conn.ExecuteAsync(
+            "CREATE NODE TABLE Object(dbref INT64, name STRING, parent INT64, PRIMARY KEY(dbref))");
+        await conn.ExecuteAsync("CREATE (n:Object {dbref: 1, name: 'Limbo', parent: 0})");
+        await conn.ExecuteAsync("CREATE (n:Object {dbref: 2, name: 'Master Room', parent: 1})");
+        await conn.ExecuteAsync("CREATE (n:Object {dbref: 3, name: 'Void'})");
         return (db, conn);
     }
 
@@ -255,10 +255,10 @@ public class SelectTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE W(id INT64, small INT32, big INT64, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:W {id: 1, small: 2147483647, big: 9223372036854775807})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE W(id INT64, small INT32, big INT64, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:W {id: 1, small: 2147483647, big: 9223372036854775807})");
 
             const string cypher = "MATCH (n:W) RETURN n.small AS Small, n.big AS Big";
 
@@ -301,10 +301,10 @@ public class SelectTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Account(id INT64, balance DECIMAL(38,0), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:Account {id: 1, balance: $b})", new { b = BigDecimal.Parse(exact) })) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Account(id INT64, balance DECIMAL(38,0), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:Account {id: 1, balance: $b})", new { b = BigDecimal.Parse(exact) });
 
             const string cypher = "MATCH (n:Account) RETURN n.balance AS Balance";
 
@@ -416,10 +416,10 @@ public class SelectTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Q(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Q(id INT64, PRIMARY KEY(id))");
             for (var i = 0; i < 50; i++)
-                await using (var _ = await conn.QueryAsync($"CREATE (n:Q {{id: {i}}})")) { }
+                await conn.ExecuteAsync($"CREATE (n:Q {{id: {i}}})");
 
             const string cypher = "MATCH (n:Q) RETURN n.id AS Id";
 

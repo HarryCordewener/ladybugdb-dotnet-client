@@ -23,4 +23,15 @@
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="" />
   </ItemGroup>
+  <PropertyGroup>
+    <!--
+      Static analysis is stricter here than the repo default, and deliberately not applied to the
+      test projects. Measured at this level, the shipping library reports zero findings while the
+      test projects report 306 - 224 of them CA1707, which fires on the Method_DoesThing naming
+      convention every test in this repo uses, and the rest test-only concerns like sealing fixture
+      classes. Raising the bar where consumers are affected keeps that signal; raising it everywhere
+      would have buried it.
+    -->
+    <AnalysisMode>Recommended</AnalysisMode>
+  </PropertyGroup>
 </Project>

@@ -53,11 +53,11 @@ public class ParameterWidthCoercionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(Schema)) { }
+            await conn.ExecuteAsync(Schema);
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:W {id: 1, i64: $v})");
             stmt.Bind("v", int.MaxValue); // Bind(int) -> INT32, into an INT64 column.
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync("MATCH (n:W) WHERE n.id = 1 RETURN n.i64");
             var rows = 0;
@@ -99,7 +99,7 @@ public class ParameterWidthCoercionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(Schema)) { }
+            await conn.ExecuteAsync(Schema);
 
             // 7 (7.5 for the floating widths) is representable in every width under test, so the
             // read-back below isolates "was it coerced" from any range question - which
@@ -118,7 +118,7 @@ public class ParameterWidthCoercionTests
                 default: throw new ArgumentOutOfRangeException(nameof(boundAs), boundAs, null);
             }
 
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync($"MATCH (n:W) WHERE n.id = 1 RETURN n.{column}");
             var rows = 0;
@@ -165,7 +165,7 @@ public class ParameterWidthCoercionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(Schema)) { }
+            await conn.ExecuteAsync(Schema);
 
             await using var stmt = await conn.PrepareAsync($"CREATE (n:W {{id: 1, {column}: $v}})");
             switch (kind)
@@ -206,11 +206,11 @@ public class ParameterWidthCoercionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(Schema)) { }
+            await conn.ExecuteAsync(Schema);
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:W {id: 1, flt: $v})");
             stmt.Bind("v", 1e300);
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync("MATCH (n:W) WHERE n.id = 1 RETURN n.flt");
             await foreach (var row in r)
@@ -232,7 +232,7 @@ public class ParameterWidthCoercionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(Schema)) { }
+            await conn.ExecuteAsync(Schema);
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:W {id: 1, i64: $v})");
             stmt.Bind("v", Guid.NewGuid());

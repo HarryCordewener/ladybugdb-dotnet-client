@@ -28,7 +28,7 @@ public class ParameterObjectTests
     {
         var db = new LadybugDatabase(path);
         var conn = await db.ConnectAsync();
-        await using (var _ = await conn.QueryAsync(Schema)) { }
+        await conn.ExecuteAsync(Schema);
         return (db, conn);
     }
 
@@ -47,9 +47,9 @@ public class ParameterObjectTests
             using (db)
             await using (conn)
             {
-                await using (var _ = await conn.QueryAsync(
+                await conn.ExecuteAsync(
                     "CREATE (n:O {id: $id, name: $name, score: $score})",
-                    new { id = 42L, name = "Limbo", score = 1.5 })) { }
+                    new { id = 42L, name = "Limbo", score = 1.5 });
 
                 await AssertSingleRow(conn, 42L, "Limbo", 1.5);
             }
@@ -78,8 +78,8 @@ public class ParameterObjectTests
                     ["score"] = 0.25,
                 };
 
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE (n:O {id: $id, name: $name, score: $score})", parameters)) { }
+                await conn.ExecuteAsync(
+                    "CREATE (n:O {id: $id, name: $name, score: $score})", parameters);
 
                 await AssertSingleRow(conn, 7L, "Void", 0.25);
             }
@@ -101,9 +101,9 @@ public class ParameterObjectTests
                 await using var stmt = await conn.PrepareAsync(
                     "CREATE (n:O {id: $id, name: $name, score: $score})");
 
-                await using (var _ = await stmt.ExecuteAsync(new { id = 1L, name = "anon", score = 1.0 })) { }
-                await using (var _ = await stmt.ExecuteAsync(
-                    new Dictionary<string, object?> { ["id"] = 2L, ["name"] = "dict", ["score"] = 2.0 })) { }
+                await stmt.ExecuteNonQueryAsync(new { id = 1L, name = "anon", score = 1.0 });
+                await stmt.ExecuteNonQueryAsync(
+                    new Dictionary<string, object?> { ["id"] = 2L, ["name"] = "dict", ["score"] = 2.0 });
 
                 await using var r = await conn.QueryAsync("MATCH (n:O) RETURN n.id, n.name ORDER BY n.id");
                 var seen = new List<(long, string)>();
@@ -176,8 +176,8 @@ public class ParameterObjectTests
             {
                 var parameters = new Dictionary<string, long> { ["id"] = 99L, ["other"] = 5L };
 
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE (n:O {id: $id, name: 'from-long-dict', score: 0.0})", parameters)) { }
+                await conn.ExecuteAsync(
+                    "CREATE (n:O {id: $id, name: 'from-long-dict', score: 0.0})", parameters);
 
                 await AssertSingleRow(conn, 99L, "from-long-dict", 0.0);
             }
@@ -208,8 +208,8 @@ public class ParameterObjectTests
                         new Dictionary<string, long> { ["id"] = 11L }),
                 };
 
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE (n:O {id: $id, name: 'x', score: 0.0})", parameters)) { }
+                await conn.ExecuteAsync(
+                    "CREATE (n:O {id: $id, name: 'x', score: 0.0})", parameters);
 
                 await AssertSingleRow(conn, 11L, "x", 0.0);
             }
@@ -256,11 +256,11 @@ public class ParameterObjectTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
                 "CREATE NODE TABLE A(id INT64, b BOOL, i8 INT8, i16 INT16, i32 INT32, i64 INT64, " +
                 "u8 UINT8, u16 UINT16, u32 UINT32, u64 UINT64, f FLOAT, d DOUBLE, s STRING, " +
                 "dt DATE, ts TIMESTAMP, tstz TIMESTAMP_TZ, iv INTERVAL, g UUID, i128 INT128, " +
-                "dec DECIMAL(10, 3), PRIMARY KEY(id))")) { }
+                "dec DECIMAL(10, 3), PRIMARY KEY(id))");
 
             var date = new DateOnly(2026, 7, 29);
             var stamp = new DateTime(2026, 7, 29, 1, 2, 3, DateTimeKind.Utc);
@@ -270,7 +270,7 @@ public class ParameterObjectTests
             var big = Int128.Parse("170141183460469231731687303715884105727");
             var dec = BigDecimal.Parse("12345.678");
 
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
                 "CREATE (n:A {id: 1, b: $b, i8: $i8, i16: $i16, i32: $i32, i64: $i64, u8: $u8, " +
                 "u16: $u16, u32: $u32, u64: $u64, f: $f, d: $d, s: $s, dt: $dt, ts: $ts, " +
                 "tstz: $tstz, iv: $iv, g: $g, i128: $i128, dec: $dec})",
@@ -295,7 +295,7 @@ public class ParameterObjectTests
                     g = guid,
                     i128 = big,
                     dec,
-                })) { }
+                });
 
             await using var r = await conn.QueryAsync(
                 "MATCH (n:A) RETURN n.b, n.i8, n.i16, n.i32, n.i64, n.u8, n.u16, n.u32, n.u64, " +
@@ -342,9 +342,9 @@ public class ParameterObjectTests
             using (db)
             await using (conn)
             {
-                await using (var _ = await conn.QueryAsync(
+                await conn.ExecuteAsync(
                     "CREATE (n:O {id: 1, name: $name, score: 0.0})",
-                    new { name = (string?)null })) { }
+                    new { name = (string?)null });
 
                 await using var r = await conn.QueryAsync("MATCH (n:O) RETURN n.name");
                 var rows = 0;
@@ -480,7 +480,7 @@ public class ParameterObjectTests
                     await stmt.ExecuteAsync(new { id = 2L, name = "clobbered", bad = new object() }));
                 await Assert.That(ex!.Message).Contains("'bad'");
 
-                await using (var _ = await stmt.ExecuteAsync()) { }
+                await stmt.ExecuteNonQueryAsync();
 
                 // 1/"kept", not 2/"clobbered": nothing the rejected object named was applied.
                 await AssertSingleRow(conn, 1L, "kept", 0.0);
@@ -571,25 +571,25 @@ public class ParameterObjectTests
                 // Bare, and with a token: must reach QueryAsync(string, CancellationToken). If a
                 // token boxed into the object overload instead, these would throw ArgumentException
                 // ("CancellationToken ... is a single value") rather than run.
-                await using (var _ = await conn.QueryAsync("MATCH (n:O) RETURN count(n)")) { }
-                await using (var _ = await conn.QueryAsync("MATCH (n:O) RETURN count(n)", ct)) { }
+                await conn.ExecuteAsync("MATCH (n:O) RETURN count(n)");
+                await conn.ExecuteAsync("MATCH (n:O) RETURN count(n)", ct);
 
                 // With parameters, and with parameters plus a token.
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE (n:O {id: $id, name: 'a', score: 0.0})", new { id = 1L })) { }
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE (n:O {id: $id, name: 'b', score: 0.0})", new { id = 2L }, ct)) { }
+                await conn.ExecuteAsync(
+                    "CREATE (n:O {id: $id, name: 'a', score: 0.0})", new { id = 1L });
+                await conn.ExecuteAsync(
+                    "CREATE (n:O {id: $id, name: 'b', score: 0.0})", new { id = 2L }, ct);
 
                 await using var stmt = await conn.PrepareAsync(
                     "CREATE (n:O {id: $id, name: 'c', score: 0.0})");
-                await using (var _ = await stmt.ExecuteAsync(new { id = 3L })) { }
-                await using (var _ = await stmt.ExecuteAsync(new { id = 4L }, ct)) { }
+                await stmt.ExecuteNonQueryAsync(new { id = 3L });
+                await stmt.ExecuteNonQueryAsync(new { id = 4L }, ct);
 
                 // Bare and token-only on the statement, which must still reach ExecuteAsync(CancellationToken).
                 stmt.Bind("id", 5L);
-                await using (var _ = await stmt.ExecuteAsync()) { }
+                await stmt.ExecuteNonQueryAsync();
                 stmt.Bind("id", 6L);
-                await using (var _ = await stmt.ExecuteAsync(ct)) { }
+                await stmt.ExecuteNonQueryAsync(ct);
 
                 await using var r = await conn.QueryAsync("MATCH (n:O) RETURN count(n)");
                 await foreach (var row in r)

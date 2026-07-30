@@ -15,11 +15,11 @@ public class TemporalValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE E(id INT64, d DATE, ts TIMESTAMP, iv INTERVAL, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE E(id INT64, d DATE, ts TIMESTAMP, iv INTERVAL, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
                 "CREATE (n:E {id: 1, d: date('2026-07-29'), " +
-                "ts: timestamp('2026-07-29 13:45:30'), iv: interval('3 days')})")) { }
+                "ts: timestamp('2026-07-29 13:45:30'), iv: interval('3 days')})");
 
             await using var r = await conn.QueryAsync("MATCH (n:E) RETURN n.d, n.ts, n.iv");
             await using var e = r.GetAsyncEnumerator();
@@ -46,16 +46,16 @@ public class TemporalValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE I(id INT64, iv INTERVAL, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE I(id INT64, iv INTERVAL, PRIMARY KEY(id))");
             // 100,000,000 months. The old client-side conversion computed native.months * 30 in
             // checked int32 arithmetic - months this large overflow that multiplication
             // (int.MaxValue / 30 is ~71.6M) and would have silently wrapped to a small, wrong
             // TimeSpan. This value is large enough to trigger that wraparound: verify the fixed
             // implementation instead either returns a value or throws LadybugException cleanly,
             // never a silently wrong TimeSpan.
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:I {id: 1, iv: interval('100000000 months')})")) { }
+            await conn.ExecuteAsync(
+                "CREATE (n:I {id: 1, iv: interval('100000000 months')})");
 
             await using var r = await conn.QueryAsync("MATCH (n:I) RETURN n.iv");
             await using var e = r.GetAsyncEnumerator();
@@ -79,10 +79,10 @@ public class TemporalValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE B(id INT64, data BLOB, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                @"CREATE (n:B {id: 1, data: BLOB('\xDE\xAD\xBE\xEF')})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE B(id INT64, data BLOB, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                @"CREATE (n:B {id: 1, data: BLOB('\xDE\xAD\xBE\xEF')})");
 
             await using var r = await conn.QueryAsync("MATCH (n:B) RETURN n.data");
             await using var e = r.GetAsyncEnumerator();

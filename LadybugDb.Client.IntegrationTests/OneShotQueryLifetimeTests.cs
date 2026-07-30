@@ -73,10 +73,10 @@ public class OneShotQueryLifetimeTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:S {id: 1, name: 'a'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:S {id: 2, name: 'b'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:S {id: 1, name: 'a'})");
+            await conn.ExecuteAsync("CREATE (n:S {id: 2, name: 'b'})");
 
             var result = await conn.QueryAsync(
                 "MATCH (n:S) WHERE n.id >= $min RETURN n.id, n.name ORDER BY n.id", new { min = 1L });
@@ -106,8 +106,8 @@ public class OneShotQueryLifetimeTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))");
 
             var result = await conn.QueryAsync(
                 "CREATE (n:S {id: $id, name: $name}) RETURN n.id, n.name",
@@ -150,8 +150,8 @@ public class OneShotQueryLifetimeTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))");
 
             for (var i = 0; i < 500; i++)
             {
@@ -198,8 +198,8 @@ public class OneShotQueryLifetimeTests
             var db = new LadybugDatabase(path);
             await using (var conn = await db.ConnectAsync())
             {
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))")) { }
+                await conn.ExecuteAsync(
+                    "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))");
 
                 result = await conn.QueryAsync(
                     "CREATE (n:S {id: $id, name: 'x'}) RETURN n.id", new { id = 1L });
@@ -325,8 +325,8 @@ public class OneShotQueryLifetimeTests
             var db = new LadybugDatabase(path);
             await using (var conn = await db.ConnectAsync())
             {
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))")) { }
+                await conn.ExecuteAsync(
+                    "CREATE NODE TABLE S(id INT64, name STRING, PRIMARY KEY(id))");
 
                 // One-shot: the internal prepared statement is disposed before this returns. The
                 // result is deliberately left UNCONSUMED - the hazard is the destructor chain, which

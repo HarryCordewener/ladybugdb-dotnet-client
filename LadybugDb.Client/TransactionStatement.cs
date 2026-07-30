@@ -1,3 +1,4 @@
+using System.Text;
 namespace LadybugDb.Client;
 
 /// <summary>The transaction-control effect a Cypher statement has on its connection.</summary>
@@ -99,7 +100,7 @@ internal static class TransactionStatement
 
         // Only transaction-control statements survive the comparisons above, and those are short,
         // so building a string here costs nothing measurable next to a query round trip.
-        var builder = new System.Text.StringBuilder(trimmed.Length);
+        var builder = new StringBuilder(trimmed.Length);
         var inWhitespace = false;
         foreach (var c in trimmed)
         {

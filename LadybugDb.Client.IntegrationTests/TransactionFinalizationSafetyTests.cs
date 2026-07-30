@@ -34,11 +34,11 @@ public class TransactionFinalizationSafetyTests
         {
             var db = new LadybugDatabase(path);
             var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             var tx = await conn.BeginTransactionAsync();
-            await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+            await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
             // Bypasses LadybugDatabase.Dispose()'s own round-1 forced-rollback bookkeeping
             // entirely, going straight to the underlying SafeHandle - simulating what happens

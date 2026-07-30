@@ -168,8 +168,8 @@ are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency) for th
   the client refuses a nested `BEGIN` rather than letting the engine destroy the transaction already
   in flight. Recognition is deliberately conservative: a multi-statement script such as
   `"BEGIN TRANSACTION; CREATE ...; COMMIT"` is not tracked, and a transaction opened that way stays
-  invisible to the guard. Unlike `BeginTransactionAsync`, a raw transaction is still not rolled back
-  for you on dispose. See [docs/USAGE.md](docs/USAGE.md#transactions).
+  invisible to the guard. Uncommitted work is discarded on dispose either way; what `BeginTransactionAsync`
+  adds is a deterministic close at a point you choose, rather than whenever the connection is destroyed. See [docs/USAGE.md](docs/USAGE.md#transactions).
 - **Temporal conversion functions are excluded.** The 12 `*_to_tm`/`*_from_tm` C API functions have
   no portable `struct tm` ABI across the supported platforms. Epoch-based equivalents are used
   throughout.

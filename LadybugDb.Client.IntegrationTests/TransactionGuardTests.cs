@@ -227,4 +227,59 @@ public class TransactionGuardTests
         }
         finally { TestDatabase.Cleanup(path); }
     }
+
+    /// <summary>
+    /// A raw <c>COMMIT</c> closes the transaction at the engine level whichever way it was opened.
+    /// The <see cref="LadybugTransaction"/> that opened it must follow, rather than going on
+    /// believing it is open and later committing into nothing or rolling back what no longer exists.
+    /// </summary>
+    [Test]
+    public async Task RawCommit_CompletesTheManagedTransactionInsteadOfDesyncingIt()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await WithTable(db);
+
+            var tx = await conn.BeginTransactionAsync();
+            await conn.ExecuteAsync("CREATE (:T {id: 1})");
+
+            await conn.ExecuteAsync("COMMIT");   // behind the wrapper's back
+
+            await Assert.That(tx.IsCompleted).IsTrue();
+            await Assert.That(async () => await tx.CommitAsync()).Throws<InvalidOperationException>();
+
+            // Disposing must not issue a rollback for a transaction that no longer exists.
+            await tx.DisposeAsync();
+            await Assert.That(await CountAsync(conn)).IsEqualTo(1L);
+
+            // And the connection knows it is free, so a new transaction is accepted.
+            await using var next = await conn.BeginTransactionAsync();
+            await next.RollbackAsync();
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>Same, for a raw <c>ROLLBACK</c>: the work is gone and the wrapper knows it.</summary>
+    [Test]
+    public async Task RawRollback_CompletesTheManagedTransactionAndDiscardsItsWork()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await WithTable(db);
+
+            var tx = await conn.BeginTransactionAsync();
+            await conn.ExecuteAsync("CREATE (:T {id: 1})");
+
+            await conn.ExecuteAsync("ROLLBACK");
+
+            await Assert.That(tx.IsCompleted).IsTrue();
+            await tx.DisposeAsync();
+            await Assert.That(await CountAsync(conn)).IsEqualTo(0L);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
 }

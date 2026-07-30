@@ -17,10 +17,10 @@ public class DatabaseLifecycleTests
             await using var conn = await db.ConnectAsync();
 
             // INT64 primary key: a STRING key costs ~4.8x at equal row count.
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 42, name: 'Limbo'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 42, name: 'Limbo'})");
 
             await using var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
             await Assert.That(result.HasNext).IsTrue();
@@ -77,11 +77,11 @@ public class DatabaseLifecycleTests
             await using var conn1 = await db.ConnectAsync();
             await using var conn2 = await db.ConnectAsync();
 
-            await using (var _ = await conn1.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+            await conn1.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
 
-            await using (var _ = await conn1.QueryAsync("BEGIN TRANSACTION")) { }
-            await using (var _ = await conn1.QueryAsync("CREATE (o:Obj {dbref: 1, name: 'A'})")) { }
+            await conn1.ExecuteAsync("BEGIN TRANSACTION");
+            await conn1.ExecuteAsync("CREATE (o:Obj {dbref: 1, name: 'A'})");
 
             const string conflicting = "CREATE (o:Obj {dbref: 2, name: 'B'})";
             var ex = await Assert.ThrowsAsync<LadybugWriteConflictException>(
@@ -90,7 +90,7 @@ public class DatabaseLifecycleTests
             await Assert.That(ex!.Statement).IsEqualTo(conflicting);
             await Assert.That(ex.Message).Contains("write transaction");
 
-            await using (var _ = await conn1.QueryAsync("COMMIT")) { }
+            await conn1.ExecuteAsync("COMMIT");
         }
         finally
         {

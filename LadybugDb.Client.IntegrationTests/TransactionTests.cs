@@ -15,12 +15,12 @@ public class TransactionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             await using (var tx = await conn.BeginTransactionAsync())
             {
-                await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+                await conn.ExecuteAsync("CREATE (n:T {id: 1})");
                 await tx.CommitAsync();
             }
 
@@ -39,8 +39,8 @@ public class TransactionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             await using (var tx = await conn.BeginTransactionAsync())
             {
@@ -63,8 +63,8 @@ public class TransactionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             await using var tx = await conn.BeginTransactionAsync();
             await tx.CommitAsync();
@@ -93,11 +93,11 @@ public class TransactionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             await using var tx1 = await conn.BeginTransactionAsync();
-            await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+            await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
             await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await conn.BeginTransactionAsync());
@@ -137,15 +137,20 @@ public class TransactionTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             await using var tx = await conn.BeginTransactionAsync();
-            await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+            await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
-            // Ends the engine-side transaction behind the wrapper's back - tx still believes it is
-            // open, so its own CommitAsync below will fail when it tries to COMMIT again.
-            await using (var _ = await conn.QueryAsync("COMMIT")) { }
+            // Ends the engine-side transaction behind the wrapper's back, through the UNCHECKED path.
+            // A raw COMMIT via QueryAsync/ExecuteAsync no longer produces this state: it now marks the
+            // wrapper completed too, so tx.CommitAsync() would fail fast client-side instead of
+            // reaching the engine - see TransactionGuardTests.RawCommit_CompletesTheManagedTransaction-
+            // InsteadOfDesyncingIt. That is the better behaviour, but it is not what this test is
+            // about: this one is about a commit that genuinely FAILS at the engine being terminal, so
+            // it still needs a real engine-level failure to observe.
+            await using (var _ = await conn.QueryUncheckedAsync("COMMIT")) { }
 
             await Assert.ThrowsAsync<LadybugException>(async () => await tx.CommitAsync());
 

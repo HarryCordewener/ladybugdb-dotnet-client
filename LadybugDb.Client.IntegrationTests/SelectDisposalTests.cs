@@ -59,10 +59,10 @@ public class SelectDisposalTests
     {
         var db = new LadybugDatabase(path);
         var conn = await db.ConnectAsync();
-        await using (var _ = await conn.QueryAsync(
-            "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+        await conn.ExecuteAsync(
+            "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
         for (var i = 1; i <= 5; i++)
-            await using (var _ = await conn.QueryAsync($"CREATE (n:Object {{dbref: {i}, name: 'n{i}'}})")) { }
+            await conn.ExecuteAsync($"CREATE (n:Object {{dbref: {i}, name: 'n{i}'}})");
         return (db, conn);
     }
 

@@ -22,7 +22,7 @@ public class DecimalBidirectionalTests
     {
         var db = new LadybugDatabase(path);
         var conn = await db.ConnectAsync();
-        await using (var _ = await conn.QueryAsync($"CREATE NODE TABLE T(id INT64, v {colType}, PRIMARY KEY(id))")) { }
+        await conn.ExecuteAsync($"CREATE NODE TABLE T(id INT64, v {colType}, PRIMARY KEY(id))");
         return (db, conn);
     }
 
@@ -30,7 +30,7 @@ public class DecimalBidirectionalTests
     {
         await using var stmt = await conn.PrepareAsync("CREATE (n:T {id: 1, v: $v})");
         stmt.Bind("v", value);
-        await using (var _ = await stmt.ExecuteAsync()) { }
+        await stmt.ExecuteNonQueryAsync();
 
         await using var r = await conn.QueryAsync("MATCH (n:T) RETURN n.v");
         await using var e = r.GetAsyncEnumerator();
@@ -218,10 +218,10 @@ public class DecimalBidirectionalTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, v DECIMAL(18,4), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:T {id: 1, v: 12345.6789})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, v DECIMAL(18,4), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:T {id: 1, v: 12345.6789})");
 
             await using var r1 = await conn.QueryAsync("MATCH (n:T) WHERE n.id = 1 RETURN n.v");
             await using var e1 = r1.GetAsyncEnumerator();
@@ -230,7 +230,7 @@ public class DecimalBidirectionalTests
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:T {id: 2, v: $v})");
             stmt.Bind("v", firstRead);
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r2 = await conn.QueryAsync("MATCH (n:T) WHERE n.id = 2 RETURN n.v");
             await using var e2 = r2.GetAsyncEnumerator();

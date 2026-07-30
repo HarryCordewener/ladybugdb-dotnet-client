@@ -1081,10 +1081,12 @@ entire text is a transaction-control statement, so a multi-statement script like
 `"BEGIN TRANSACTION; CREATE ...; COMMIT"` is *not* tracked and a transaction opened that way remains
 invisible to the guard. The trade is one-directional on purpose — failing to notice a transaction
 leaves you exactly where you were, whereas a false match would refuse a query that works, so
-`CREATE (n {s: 'BEGIN TRANSACTION'})` is correctly left alone. And tracking is not management: a raw
-transaction is still **not** rolled back for you when the connection or database is disposed, which is
-the thing `BeginTransactionAsync` adds. Reaching for the raw form means you own that transaction's
-lifetime — commit or roll it back yourself.
+`CREATE (n {s: 'BEGIN TRANSACTION'})` is correctly left alone. And tracking is not management. Uncommitted work is
+discarded either way — measured: abandoning a raw transaction and disposing the connection and
+database leaves only the previously committed rows — so the raw form does not risk half-written data.
+What `BeginTransactionAsync` adds is a *deterministic* close at a point you choose rather than
+whenever the connection is destroyed, refusal of a second commit or rollback, and rollback even when
+the database is disposed first. Reaching for the raw form means you own that timing.
 
 Issuing a raw `COMMIT` or `ROLLBACK` while a `LadybugTransaction` from `BeginTransactionAsync` is open
 closes the transaction at the engine level behind that object's back. Its later `CommitAsync` or

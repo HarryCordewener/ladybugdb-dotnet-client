@@ -172,6 +172,20 @@ public sealed class LadybugConnection : IAsyncDisposable
 
             var result = Execute(cypher);
             _rawTransactionOpen = effect == TransactionEffect.Begin;
+
+            // A raw COMMIT or ROLLBACK closes the transaction at the engine level whichever way it was
+            // opened, including through BeginTransactionAsync. Left alone, that LadybugTransaction
+            // would go on believing it was open - and would later commit into nothing, or roll back a
+            // transaction that no longer exists. Follow the engine instead of asserting a state that
+            // stopped being true. Cleared here, under the gate this method already holds, rather than
+            // through OnTransactionCompleted, which takes that same non-reentrant gate.
+            if (effect == TransactionEffect.End && _activeTransaction is { } managed)
+            {
+                managed.MarkCompletedExternally();
+                _activeTransaction = null;
+                _database.TrackTransactionClosed(this);
+            }
+
             return result;
         }
         finally
@@ -200,7 +214,7 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// native memory that has to be released. Reading rows you do not want in order to dispose a
     /// result you never wanted is the overwhelmingly common case, so this exists to say it once:
     /// <c>await conn.ExecuteAsync("CREATE (:Object {dbref: 42})")</c> rather than
-    /// <c>await using (var _ = await conn.QueryAsync("CREATE (:Object {dbref: 42})")) { }</c>.
+    /// <c>await conn.ExecuteAsync("CREATE (:Object {dbref: 42})");</c>.
     /// </para>
     /// <para>
     /// <b>Nothing is returned, because the engine reports nothing to return.</b> Measured directly:

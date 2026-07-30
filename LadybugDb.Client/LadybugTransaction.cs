@@ -358,6 +358,33 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// exactly the kind of thing that can work by chance for a long time and then not.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Marks this transaction completed because it was closed at the engine level by something other
+    /// than this object - a raw <c>COMMIT</c> or <c>ROLLBACK</c> issued through the connection. Sends
+    /// nothing itself. Not for direct use.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if this call was the one that claimed completion; <see langword="false"/>
+    /// if the transaction had already been completed by some other path.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Without this, a raw <c>COMMIT</c> left this wrapper believing it was still open: its later
+    /// <see cref="CommitAsync"/> would have hit the engine with nothing to commit, and its
+    /// <see cref="DisposeAsync"/> would have issued a rollback for a transaction that no longer
+    /// existed - the client's view of the connection silently disagreeing with the engine's. The
+    /// statement really did close the transaction, so the honest response is to follow the engine
+    /// rather than to keep asserting a state that is no longer true.
+    /// </para>
+    /// <para>
+    /// Deliberately does <em>not</em> call <see cref="LadybugConnection.OnTransactionCompleted"/>:
+    /// the only caller already holds the connection's transaction gate, which that method also takes,
+    /// and <see cref="SemaphoreSlim"/> is not reentrant. Clearing the connection's own field is the
+    /// caller's job, under the gate it already holds.
+    /// </para>
+    /// </remarks>
+    internal bool MarkCompletedExternally() => TryClaimCompletion();
+
     internal void EnsureClosedForDispose()
     {
         if (!TryClaimCompletion()) return;

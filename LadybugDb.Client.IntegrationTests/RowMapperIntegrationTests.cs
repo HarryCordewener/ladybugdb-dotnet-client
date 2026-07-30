@@ -36,11 +36,11 @@ public class RowMapperIntegrationTests
     {
         var db = new LadybugDatabase(path);
         var conn = await db.ConnectAsync();
-        await using (var _ = await conn.QueryAsync(
-            "CREATE NODE TABLE Object(dbref INT64, name STRING, parent INT64, PRIMARY KEY(dbref))")) { }
-        await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo', parent: 0})")) { }
-        await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'Master Room', parent: 1})")) { }
-        await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 3, name: 'Void'})")) { }
+        await conn.ExecuteAsync(
+            "CREATE NODE TABLE Object(dbref INT64, name STRING, parent INT64, PRIMARY KEY(dbref))");
+        await conn.ExecuteAsync("CREATE (n:Object {dbref: 1, name: 'Limbo', parent: 0})");
+        await conn.ExecuteAsync("CREATE (n:Object {dbref: 2, name: 'Master Room', parent: 1})");
+        await conn.ExecuteAsync("CREATE (n:Object {dbref: 3, name: 'Void'})");
         return (db, conn);
     }
 
@@ -289,12 +289,12 @@ public class RowMapperIntegrationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Account(id INT64, balance DECIMAL(38,0), PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Account(id INT64, balance DECIMAL(38,0), PRIMARY KEY(id))");
             await using (var stmt = await conn.PrepareAsync("CREATE (n:Account {id: 1, balance: $b})"))
             {
                 stmt.Bind("b", BigDecimal.Parse(exact));
-                await using (var _ = await stmt.ExecuteAsync()) { }
+                await stmt.ExecuteNonQueryAsync();
             }
 
             const string cypher = "MATCH (n:Account) RETURN n.balance AS Balance";
