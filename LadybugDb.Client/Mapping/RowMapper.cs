@@ -20,21 +20,26 @@ namespace LadybugDb.Client.Mapping;
 /// </para>
 /// <code>
 /// await using var result = await connection.QueryAsync(cypher, parameters, ct);
-/// RowPlan&lt;T&gt;? plan = null;
+/// var plan = RowMapper.ResolvePlan&lt;T&gt;(result.ColumnNames);
 /// await foreach (var row in result.WithCancellation(ct))
 /// {
-///     plan ??= RowMapper.ResolvePlan&lt;T&gt;(row);
 ///     yield return plan.Map(row);
 /// }
 /// </code>
 /// <para>
-/// The plan is resolved from the first <em>row</em> rather than from the result, because a
-/// <see cref="LadybugRow"/> is the only place the client exposes column names. A consequence worth
-/// knowing: a query that returns <b>zero rows</b> never resolves a plan, so a mapping error
-/// (unmatched constructor, ambiguity, unsupported target type) that a one-row result would have
-/// raised is not raised for an empty one. That is the right behaviour for a streaming projection -
-/// there is nothing to map - but it does mean "it worked" on an empty result says nothing about
-/// whether <c>T</c> matches the query.
+/// <b>Resolve from the <em>result</em>'s column shape, not from the first row</b> - which is what
+/// <see cref="LadybugConnection.Select{T}"/> does. The two are equivalent for every result that has a
+/// first row; they differ for one that has none. Resolving from a row means a query returning
+/// <b>zero rows</b> never resolves a plan at all, so a mismatched <c>T</c> - unmatched constructor,
+/// ambiguity, unsupported target type - raises nothing whatsoever, and an empty result silently
+/// "succeeds" against a <c>T</c> that could never have mapped its columns. Resolving from
+/// <see cref="LadybugQueryResult.ColumnNames"/> reports that mismatch on an empty result too, which is
+/// why that accessor exists.
+/// </para>
+/// <para>
+/// <see cref="ResolvePlan{T}(LadybugRow)"/> remains for the single-row read, where a row is what the
+/// caller has in hand; it is the same resolution against the same cache, just keyed off the row's
+/// names.
 /// </para>
 /// <para>
 /// This is reflective code, isolated in this folder alongside <see cref="ParameterBinder"/> so the

@@ -67,6 +67,41 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     private bool _nextResultConsumed;
 
     /// <summary>
+    /// <c>1</c> once <see cref="DisposeAsync"/> has run, so a second disposal - which is legal, and
+    /// which <c>await using</c> plus an explicit <see cref="DisposeAsync"/> produces routinely - does
+    /// not decrement <see cref="_liveCount"/> twice.
+    /// </summary>
+    private int _disposed;
+
+    /// <summary>Backing field for <see cref="LiveCount"/>.</summary>
+    private static long _liveCount;
+
+    /// <summary>
+    /// How many <see cref="LadybugQueryResult"/> instances have been constructed and not yet
+    /// disposed, process-wide.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Exists for the tests, and specifically for one class of them.</b> Nothing in this client's
+    /// behaviour reads it. A caller who never receives a result - which is the whole shape of
+    /// <see cref="LadybugConnection.Select{T}"/>, where the result lives and dies inside a compiler-
+    /// generated iterator - has no handle to assert disposal against, so without a counter here the
+    /// only available evidence that the iterator released its result is an
+    /// <see cref="Environment.WorkingSet"/> measurement: a whole-process metric this repository has
+    /// already had to quarantine on hosted CI, and one that a
+    /// <see cref="System.Runtime.InteropServices.SafeHandle"/> finalizer can silently paper over. This
+    /// counter makes "the result was released" a deterministic assertion instead.
+    /// </para>
+    /// <para>
+    /// Deliberately counts <em>explicit disposal</em> only: this type has no finalizer, so a leaked
+    /// result never decrements this, which is exactly the property the leak assertion needs. Note the
+    /// counter is process-wide - there is nothing to scope it to a single test - so a test reading it
+    /// must run alone (<c>[NotInParallel]</c>), for the same reason <c>LeakTests</c> does.
+    /// </para>
+    /// </remarks>
+    internal static long LiveCount => Interlocked.Read(ref _liveCount);
+
+    /// <summary>
     /// Constructs a result directly owned by <paramref name="handle"/> (see <see cref="_root"/>),
     /// disposing <paramref name="handle"/> if construction fails - reading column names below can
     /// throw, and without this the already-adopted handle would be orphaned to the finalizer
@@ -95,9 +130,33 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
         _handle = handle;
         _root = root;
         _columnNames = ReadColumnNames();
+
+        // Last, so a constructor that threw above (ReadColumnNames can) does not count a result that
+        // was never handed out and so can never be disposed - see LiveCount.
+        Interlocked.Increment(ref _liveCount);
     }
 
     internal LbugQueryResultHandle Handle => _handle;
+
+    /// <summary>
+    /// This result's column names, in result order - read once from the engine when the result was
+    /// constructed (see <see cref="_columnNames"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The live array, not a copy: this is <see langword="internal"/> precisely so it can be, and
+    /// callers inside this assembly must treat it as read-only. <see cref="LadybugRow"/> is handed the
+    /// same array for the same reason.
+    /// </para>
+    /// <para>
+    /// <b>Why the result, and not just a row, exposes the column shape.</b> A projection resolved from
+    /// the first <em>row</em> cannot be resolved at all for a result that returns none, so a query
+    /// returning zero rows would silently "succeed" against a <c>T</c> that could never have mapped
+    /// its columns. Reading the shape here lets <see cref="LadybugConnection.Select{T}"/> resolve its
+    /// plan before the first row and report a mismatched <c>T</c> on an empty result too.
+    /// </para>
+    /// </remarks>
+    internal string[] ColumnNames => _columnNames;
 
     /// <summary>
     /// <see langword="true"/> if there is at least one more row available from
@@ -114,9 +173,12 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
         }
     }
 
-    /// <summary>Closes the result. Safe to call even if the parent database was disposed first.</summary>
+    /// <summary>Closes the result. Safe to call even if the parent database was disposed first, and idempotent.</summary>
     public ValueTask DisposeAsync()
     {
+        // Once, however many times this is called - see LiveCount and _disposed.
+        if (Interlocked.Exchange(ref _disposed, 1) == 0) Interlocked.Decrement(ref _liveCount);
+
         _handle.Dispose();
         return ValueTask.CompletedTask;
     }
