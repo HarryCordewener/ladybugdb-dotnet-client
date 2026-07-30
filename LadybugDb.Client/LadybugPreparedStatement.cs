@@ -1,8 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ExtendedNumerics;
 using LadybugDb.Client.Interop;
+using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
 
 namespace LadybugDb.Client;
@@ -15,9 +17,9 @@ namespace LadybugDb.Client;
 /// <para>
 /// Leases only its own <see cref="LbugPreparedStatementHandle"/> for every <c>Bind*</c> call: none
 /// of the <c>lbug_prepared_statement_bind_*</c> entry points take a connection or database
-/// pointer, so - unlike <see cref="ExecuteAsync"/>, which calls <c>lbug_connection_execute</c> and
+/// pointer, so - unlike <see cref="ExecuteAsync(CancellationToken)"/>, which calls <c>lbug_connection_execute</c> and
 /// therefore leases the parent database and connection too, exactly like
-/// <see cref="LadybugConnection.QueryAsync"/> - there is no ancestor storage a bind call could
+/// <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> - there is no ancestor storage a bind call could
 /// dereference after it was freed.
 /// </para>
 /// <para>
@@ -33,10 +35,10 @@ namespace LadybugDb.Client;
 /// which only protects against a concurrent <em>disposal</em>, a separate concern from concurrent
 /// re-entry into the same mutable native state. This is not a hot path relative to the native call
 /// itself, so a plain <see cref="Lock"/> is the right tool - no need for anything fancier.
-/// <see cref="ExecuteAsync"/> deliberately does NOT take this lock: it does not touch
+/// <see cref="ExecuteAsync(CancellationToken)"/> deliberately does NOT take this lock: it does not touch
 /// <c>_bound_values</c> itself (the engine reads whatever was bound most recently, whenever
 /// <c>lbug_connection_execute</c> runs), so serializing it against binds would only add contention
-/// without closing any actual gap - see that method's remarks. What <see cref="ExecuteAsync"/> gets
+/// without closing any actual gap - see that method's remarks. What <see cref="ExecuteAsync(CancellationToken)"/> gets
 /// concurrently with a <c>Bind</c> in flight, if a caller races the two, is a query result that
 /// reflects the bound values as of whenever the engine happened to read them - a correctness
 /// question for the CALLER to avoid by not doing that, not a memory-safety one.
@@ -59,7 +61,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
 
     /// <summary>
     /// Runs <c>lbug_connection_prepare</c> and checks <c>lbug_prepared_statement_is_success</c>,
-    /// throwing on failure - the compile-time counterpart of how <see cref="LadybugConnection.QueryAsync"/>
+    /// throwing on failure - the compile-time counterpart of how <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>
     /// checks <c>lbug_query_result_is_success</c> after a plain query.
     /// </summary>
     internal static unsafe LadybugPreparedStatement Prepare(
@@ -558,7 +560,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// whatever values the most recent <c>Bind</c> calls set.
     /// </summary>
     /// <remarks>
-    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="LadybugConnection.QueryAsync"/>:
+    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>:
     /// <see cref="Execute"/> leases this statement's handle and both its ancestor connection's and
     /// database's handles internally (via <see cref="LbugQueryResultHandle.ExecutePrepared"/>), and
     /// those leases already throw <see cref="ObjectDisposedException"/> if any of the three has been
@@ -567,6 +569,59 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     public ValueTask<LadybugQueryResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(Execute());
+    }
+
+    /// <summary>
+    /// Binds every parameter named by <paramref name="parameters"/>, then executes this statement -
+    /// the one-call equivalent of a <c>Bind</c> per parameter followed by
+    /// <see cref="ExecuteAsync(CancellationToken)"/>.
+    /// </summary>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L, name = "Limbo" }</c> - whose public properties name the parameters. Each
+    /// value dispatches on its runtime type to the matching typed <c>Bind</c> overload.
+    /// </param>
+    /// <param name="cancellationToken">Checked before any binding happens.</param>
+    /// <returns>The statement's result, exactly as <see cref="ExecuteAsync(CancellationToken)"/> returns it.</returns>
+    /// <remarks>
+    /// <para>
+    /// Binds only the parameters <paramref name="parameters"/> names. Any parameter bound by an
+    /// earlier call and not named here keeps its previous value - this statement's bound values are
+    /// engine-side state that survives execution, which is what makes reuse across executions work
+    /// at all.
+    /// </para>
+    /// <para>
+    /// <b>Integer and floating-point values bind at their natural width, which the engine then
+    /// coerces to the target column.</b> An <see langword="int"/> binds <c>INT32</c> and reaches an
+    /// <c>INT64</c> column fine; a <see langword="float"/> binds <c>FLOAT</c> and reaches a
+    /// <c>DOUBLE</c> column fine. This was measured against the engine, not assumed - see the
+    /// integration suite's <c>ParameterWidthCoercionTests</c>. A value outside the target column's
+    /// range is rejected with a <see cref="LadybugException"/> carrying the engine's overflow error,
+    /// not silently truncated.
+    /// </para>
+    /// <para>
+    /// The 19 typed <c>Bind</c> overloads remain the reflection-free, allocation-free path and stay
+    /// the recommendation wherever the parameter types are known at the call site.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="parameters"/> is not a usable parameter bag - a single value, a sequence, a
+    /// dictionary with non-<see cref="string"/> keys, or an object exposing no readable properties -
+    /// or names a value whose runtime type has no <c>Bind</c> overload, in which case the message
+    /// names both the parameter and that type.
+    /// </exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public ValueTask<LadybugQueryResult> ExecuteAsync(
+        object parameters, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ParameterBinder.BindAll(this, parameters);
         return ValueTask.FromResult(Execute());
     }
 

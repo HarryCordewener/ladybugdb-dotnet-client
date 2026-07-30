@@ -1,5 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using LadybugDb.Client.Interop;
+using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
 
 namespace LadybugDb.Client;
@@ -13,7 +16,7 @@ namespace LadybugDb.Client;
 /// <remarks>
 /// <b>Thread-safety.</b> Every public member of this type is safe to call concurrently, from
 /// multiple threads, on the same instance - including two overlapping calls to
-/// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync"/> and <see cref="PrepareAsync"/>
+/// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync(string, CancellationToken)"/> and <see cref="PrepareAsync"/>
 /// were already safe this way - concurrent native re-entry on one connection is the underlying
 /// <c>lbug_connection</c>'s own guarantee ("Each connection is thread-safe", per
 /// <c>third-party/lbug.h</c>'s <c>lbug_connection</c> doc comment), not something this client
@@ -96,11 +99,195 @@ public sealed class LadybugConnection : IAsyncDisposable
     }
 
     /// <summary>
+    /// Executes a parameterized Cypher statement once - preparing it, binding
+    /// <paramref name="parameters"/>, executing, and disposing the statement - and returns its
+    /// result.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L, name = "Limbo" }</c> - whose public properties name the parameters. Each
+    /// value dispatches on its runtime type to the matching typed
+    /// <see cref="LadybugPreparedStatement"/> <c>Bind</c> overload.
+    /// </param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>The statement's result.</returns>
+    /// <remarks>
+    /// <para>
+    /// For a statement run <em>once</em>, which is what this overload is for. To run the same
+    /// statement repeatedly with different values, <see cref="PrepareAsync"/> it and call
+    /// <see cref="LadybugPreparedStatement.ExecuteAsync(object, CancellationToken)"/> per execution,
+    /// so the engine plans the query once instead of on every call.
+    /// </para>
+    /// <para>
+    /// <b>The returned result deliberately outlives the statement this method disposes.</b> That is
+    /// safe, and not by accident: a <see cref="LadybugQueryResult"/> leases its parent
+    /// <see cref="LadybugDatabase"/> and its own handle chain (see
+    /// <see cref="LbugQueryResultHandle.ExecutePrepared"/>), and never the prepared statement that
+    /// produced it - covered directly by the integration suite's
+    /// <c>DisposingStatementBeforeConsumingResult_ResultRemainsUsable</c>, and by
+    /// <c>OneShotQueryAsync_ResultOutlivesTheInternalStatement</c> for this path specifically,
+    /// including the DML case whose result outliving its <em>database</em> is a known
+    /// process-crashing shape in this client. What the result does keep alive is the database, so
+    /// the ordinary rule still holds: dispose the result before the database.
+    /// </para>
+    /// <para>
+    /// Values bind at their natural width and the engine coerces them to the target column - see
+    /// <see cref="LadybugPreparedStatement.ExecuteAsync(object, CancellationToken)"/>'s remarks for
+    /// the measured behaviour.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace; or
+    /// <paramref name="parameters"/> is not a usable parameter bag, or names a value whose runtime
+    /// type has no <c>Bind</c> overload.
+    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or " +
+        "PrepareAsync with the typed Bind overloads, when trimming.")]
+    public async ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        ArgumentNullException.ThrowIfNull(parameters);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var statement = LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher);
+        try
+        {
+            return await statement.ExecuteAsync(parameters, cancellationToken);
+        }
+        finally
+        {
+            // Runs on both paths: after the result exists (which does not depend on the statement
+            // staying alive - see this method's remarks) and if binding or execution threw.
+            await statement.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Executes a Cypher statement and streams its rows projected into <typeparamref name="T"/>.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The type to project each row into: either a type with exactly one public constructor whose
+    /// parameter names match the returned columns (case-insensitively - a <c>record</c> is the usual
+    /// shape), or a scalar type for a single-column result. See <see cref="Mapping.RowMapper"/> for the
+    /// full resolution and conversion rules.
+    /// </typeparam>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { min = 40L }</c> - whose public properties name the parameters; or
+    /// <see langword="null"/> (the default) for a statement with no parameters, which runs the plain
+    /// <see cref="QueryAsync(string, CancellationToken)"/> path.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Checked before the statement runs and between rows, exactly as
+    /// <see cref="LadybugQueryResult.GetAsyncEnumerator"/> does - honoured whether passed here or via
+    /// <c>await foreach (... in conn.Select&lt;T&gt;(cypher).WithCancellation(token))</c>.
+    /// </param>
+    /// <returns>
+    /// A stream of projected rows. Nothing runs until enumeration starts, and nothing is
+    /// materialized: one row is read and projected per <c>MoveNextAsync</c>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>This method owns the underlying <see cref="LadybugQueryResult"/>, which the caller never
+    /// sees.</b> The result is held in an <c>await using</c> <em>inside</em> the iterator body, so the
+    /// compiler-generated enumerator's <c>DisposeAsync</c> releases it - and that runs on every exit
+    /// path <c>await foreach</c> has: enumeration completing, the caller <c>break</c>ing out early, the
+    /// caller's loop body throwing, and cancellation. A leaked result per query is precisely the class
+    /// of defect this client has repeatedly found, so the <c>break</c> path in particular is pinned by
+    /// <c>SelectDisposalTests</c>, which asserts against
+    /// <see cref="LadybugQueryResult.LiveCount"/> rather than inferring release from process memory.
+    /// </para>
+    /// <para>
+    /// The projection plan is resolved <b>once, from the result's column shape, before the first
+    /// row</b> - not from the first row - so a <typeparamref name="T"/> that cannot map these columns
+    /// is reported even for a query that returns no rows. See <see cref="Mapping.RowMapper"/>'s remarks
+    /// for why that distinction is worth the accessor it needs.
+    /// </para>
+    /// <para>
+    /// Argument validation on <paramref name="cypher"/> happens eagerly, at the call - not deferred to
+    /// the first <c>MoveNextAsync</c> the way an iterator's body otherwise would be. Everything that
+    /// needs the engine or reflection (an unusable <paramref name="parameters"/> bag, a statement the
+    /// engine rejects, a <typeparamref name="T"/> that does not match the columns) necessarily surfaces
+    /// from the first <c>MoveNextAsync</c> instead, since none of it can be known before the query runs.
+    /// </para>
+    /// <para>
+    /// This is the reflective, allocating path: one <c>object?[]</c> per row and one box per column.
+    /// <see cref="QueryAsync(string, CancellationToken)"/> with <see cref="LadybugRow"/>'s typed
+    /// accessors remains the allocation-free way to read a result.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace. Raised from this
+    /// call. On enumeration, also raised when <paramref name="parameters"/> is not a usable parameter
+    /// bag or names a value whose runtime type has no <c>Bind</c> overload.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// Raised on enumeration: <typeparamref name="T"/> has no constructor matching the returned
+    /// columns, or more than one, or is a scalar type against a result that does not have exactly one
+    /// column, or names a parameter of a type no column converts to.
+    /// </exception>
+    /// <exception cref="LadybugException">
+    /// Raised on enumeration: the statement failed, or a column cannot be converted to its target -
+    /// including a <c>NULL</c> read into a non-nullable value type.
+    /// </exception>
+    [RequiresUnreferencedCode(
+        "Resolves T's constructor and its parameter types by reflection, and reads the parameters " +
+        "object's public properties the same way. Use QueryAsync with LadybugRow's typed accessors " +
+        "when trimming.")]
+    public IAsyncEnumerable<T> Select<T>(
+        string cypher, object? parameters = null, CancellationToken cancellationToken = default)
+    {
+        // Validated here rather than in the iterator below, whose body would not run - and so would
+        // not throw - until the caller's first MoveNextAsync.
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        return SelectCore<T>(cypher, parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// The iterator behind <see cref="Select{T}"/>. Separate so that method can validate its
+    /// arguments eagerly - see its remarks.
+    /// </summary>
+    [RequiresUnreferencedCode(
+        "Resolves T's constructor and its parameter types by reflection, and reads the parameters " +
+        "object's public properties the same way.")]
+    private async IAsyncEnumerable<T> SelectCore<T>(
+        string cypher,
+        object? parameters,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // The await using is INSIDE the iterator body deliberately, and this is the whole lifetime
+        // contract: the caller never receives this result, so nothing else can dispose it, and the
+        // generated enumerator's DisposeAsync is what runs this scope's exit - on early break and on a
+        // throw from the caller's loop body just as much as on running to the end.
+        //
+        // `parameters is null` routes to the plain overload rather than passing null to the
+        // parameter-taking one, which rejects null: an omitted parameters argument means "no
+        // parameters", not "a null parameter bag".
+        await using var result = parameters is null
+            ? await QueryAsync(cypher, cancellationToken)
+            : await QueryAsync(cypher, parameters, cancellationToken);
+
+        // Once, before the first row, and from the result's own column shape - so a T that cannot map
+        // these columns is reported even when there are no rows to map. See RowMapper's remarks.
+        var plan = RowMapper.ResolvePlan<T>(result.ColumnNames);
+
+        await foreach (var row in result.WithCancellation(cancellationToken))
+        {
+            yield return plan.Map(row);
+        }
+    }
+
+    /// <summary>
     /// Prepares a parameterized Cypher statement for repeated execution with different bound
     /// values, avoiding re-planning the same query on every call.
     /// </summary>
     /// <remarks>
-    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync"/>:
+    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync(string, CancellationToken)"/>:
     /// <see cref="LadybugPreparedStatement.Prepare"/> leases both this connection's handle and its
     /// parent <see cref="LadybugDatabase"/>'s handle internally.
     /// </remarks>

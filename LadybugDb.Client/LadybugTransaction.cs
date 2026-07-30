@@ -10,11 +10,11 @@ namespace LadybugDb.Client;
 /// <see cref="LadybugConnection.BeginTransactionAsync"/> issues the Cypher statement
 /// <c>BEGIN TRANSACTION</c>, <see cref="CommitAsync"/> issues <c>COMMIT</c>, and
 /// <see cref="RollbackAsync"/> issues <c>ROLLBACK</c>, all through the exact same query path as
-/// <see cref="LadybugConnection.QueryAsync"/>. This type exists to make that lifecycle hard to
+/// <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>. This type exists to make that lifecycle hard to
 /// misuse - commit or rollback exactly once, and an undisposed-without-either transaction rolls
 /// back automatically - not because the engine hands back some native transaction handle
 /// underneath it. Nothing stops a caller from issuing <c>BEGIN TRANSACTION</c>/<c>COMMIT</c>/
-/// <c>ROLLBACK</c> directly through <see cref="LadybugConnection.QueryAsync"/> instead; this
+/// <c>ROLLBACK</c> directly through <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> instead; this
 /// type is a convenience over that, not a different code path.
 /// </para>
 /// <para>
