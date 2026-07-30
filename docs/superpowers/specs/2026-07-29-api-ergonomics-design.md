@@ -123,6 +123,26 @@ completes *and* when the caller `break`s early, so the result is released on bot
 `LadybugQueryResult` per query would be precisely the class of defect this codebase has repeatedly
 found; it gets an explicit test.
 
+**Settled during implementation:**
+
+- **The plan is resolved from the result's column shape, before the first row** — not from the first
+  row, which is all `RowMapper` could do while `LadybugQueryResult`'s column names were private. A
+  plan resolved from a row is never resolved at all for a result that has none, so a mismatched `T`
+  raised *nothing* and a zero-row query silently "succeeded" against a `T` that could never have
+  mapped its columns. `LadybugQueryResult` now exposes its column shape internally for this.
+- **Disposal is asserted against a counter, not process memory.** `LadybugQueryResult` carries an
+  internal `LiveCount` (constructed-minus-disposed, process-wide, no finalizer involved).
+  `Environment.WorkingSet` is the wrong instrument for this specific leak twice over: it is a
+  whole-process metric this repository already had to quarantine on hosted CI, and the handle under a
+  leaked result *has* a finalizer, so a `GC.Collect()` before the measurement can release the very
+  leak the test is looking for and report success. Each disposal test also asserts the count went
+  **up** while the stream was open, so it cannot pass against an implementation whose result the
+  counter never observed.
+- **Argument validation splits.** `cypher` is validated eagerly by a non-iterator wrapper; everything
+  needing the engine or reflection necessarily surfaces from the first `MoveNextAsync`.
+- **`parameters: null` means "no parameters"** and routes to `QueryAsync(cypher, ct)`, rather than
+  the `ArgumentNullException` the parameter-taking overload raises for an explicit null bag.
+
 ### 4. Mapping: constructor only, with scalar unwrap
 
 **Constructor matching.** Select the constructor whose parameter names all match returned column
@@ -164,6 +184,44 @@ error naming the column count.
 type. A column whose `LadybugType` has no conversion to the target throws, naming the column, its
 `LadybugType`, and the target type. `null` columns map to `null` for reference and `Nullable<T>`
 targets, and are an error for non-nullable value types — naming the column.
+
+**Amended during implementation: conversion accepts lossless widening, not exact matches only.**
+As first implemented, conversion was exact in both directions — an `INT32` column read into a `long`
+target was an error — on the grounds that silent numeric coercion has already produced one defect in
+this project. That is the right instinct pointed in one wrong direction, for two reasons found while
+building on it:
+
+- It makes a projected record's parameter types track the schema's *declared widths*, which is the
+  opposite of what an ergonomics feature is for. A `long` field against an `INT32` column is not a
+  coercion a caller can be surprised by; there is no value for which it is wrong.
+- It is asymmetric with the bind side, where the engine was **measured** to coerce a bound `INT32`
+  into an `INT64` column and to range-*check* rather than truncate (Decision 2's open question,
+  settled). Refusing on read what the engine accepts on write is a rule with no principle behind it.
+
+A target therefore reads the `LadybugType` that backs it exactly, plus every narrower type provably
+contained in it: `INT8`/`INT16`/`INT32` into wider signed targets and `Int128`, `FLOAT` into
+`double`, unsigned into wider unsigned, and unsigned into a signed target whose range contains the
+whole unsigned range (`UINT32` into `long`, `UINT64` into `Int128`).
+
+Nothing that can lose a bit, a digit, or a sign is accepted, and each refusal keeps the error naming
+the column, its `LadybugType`, and the target type:
+
+- **No narrowing** (`INT64` into `int`).
+- **No signed into unsigned** (`INT8` into `byte`), however small the value — the alternative is
+  reinterpreting the sign bit.
+- **No unsigned into a same-width signed target** (`UINT32` into `int`, `UINT64` into `long`). The
+  rule is about what the column's type can hold, not what one row happens to hold.
+- **No integer into floating-point**, *including the cases that would be lossless.* `INT32` into
+  `double` loses nothing, but `INT64` into `double` loses integers above 2^53 and `INT32` into
+  `float` loses them above 2^24. A rule whose boundary is a mantissa width is not one callers can
+  hold in their heads, and admitting its safe half would make the unsafe half look like an
+  oversight. `CAST` in the Cypher expresses the conversion explicitly where it is wanted.
+
+`decimal` keeps its own behaviour unchanged: a `DECIMAL` too precise for it throws rather than
+rounding, and points at `BigDecimal`.
+
+One existing unit assertion encoded the replaced rule (`INT32` into `long` throwing) and is
+re-pointed at `INT64` into `int` — the direction that genuinely loses data — rather than dropped.
 
 **Caching.** The resolved constructor and per-column conversion plan are cached per `T` in a static
 `ConcurrentDictionary<Type, …>`, keyed additionally by the result's column-name set so that two

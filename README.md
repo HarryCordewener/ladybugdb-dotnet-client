@@ -73,6 +73,28 @@ Execute Cypher directly (`QueryAsync`) or as prepared statements (`PrepareAsync`
 `await foreach` over `IAsyncEnumerable<LadybugRow>`, addressing columns by position or name. Walk
 multi-statement scripts with `NextResultAsync()`.
 
+**Typed projection**
+`conn.Select<T>(cypher, parameters)` streams rows projected into a type you define — a positional
+`record` needs no attributes or settable properties — or into a scalar for a single-column result:
+
+```csharp
+record Person(long Dbref, string Name);
+
+await foreach (var p in conn.Select<Person>(
+    "MATCH (o:Object) WHERE o.dbref > $min RETURN o.dbref AS Dbref, o.name AS Name",
+    new { min = 40L }))
+{
+    Console.WriteLine($"{p.Dbref}: {p.Name}");
+}
+
+var total = await conn.Select<long>("MATCH (o:Object) RETURN count(*)").FirstAsync();
+```
+
+Nothing is materialized, and the underlying result is owned and released by the projection itself —
+including when you `break` out early. Columns convert to their target type with lossless widening
+(an `INT32` column reads into a `long`) but never narrowing, and a mismatch is a typed error naming
+the column, its engine type, and the target — reported even for a query that returns no rows.
+
 **Type coverage**
 Every value type the engine returns marshals to a typed `LadybugValue`:
 
@@ -87,6 +109,20 @@ Every value type the engine returns marshals to a typed `LadybugValue`:
 **Parameterized queries**
 23 binding methods: 19 typed `Bind` overloads (including `Guid`, `Int128`, and `BigDecimal`), three
 timestamp-precision variants, and `BindNull`. A statement executed repeatedly is planned once.
+
+Or pass every parameter at once, as an anonymous object or any string-keyed dictionary — one call for
+a statement run once, and one per execution for a prepared one:
+
+```csharp
+await using (var _ = await conn.QueryAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})", new { dbref = 42L, name = "Limbo" })) { }
+
+await using var stmt = await conn.PrepareAsync("CREATE (o:Object {dbref: $dbref, name: $name})");
+await using (var _ = await stmt.ExecuteAsync(new { dbref = 43L, name = "The Void" })) { }
+```
+
+Values bind at their natural width and the engine range-checks the coercion rather than truncating; a
+value whose type has no `Bind` overload is an `ArgumentException` naming the parameter and the type.
 
 **Transactions**
 `BeginTransactionAsync` returns a `LadybugTransaction` wrapping `BEGIN`/`COMMIT`/`ROLLBACK`.

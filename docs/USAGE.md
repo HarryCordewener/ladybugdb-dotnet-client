@@ -9,6 +9,7 @@ real engine while this guide was written.
 - [Executing Cypher](#executing-cypher)
 - [Prepared statements](#prepared-statements)
   - [Bind method reference](#bind-method-reference)
+- [Parameter objects](#parameter-objects)
 - [Reading results](#reading-results)
   - [LadybugRow: columns](#ladybugrow-columns)
   - [LadybugValue: accessor reference](#ladybugvalue-accessor-reference)
@@ -17,6 +18,10 @@ real engine while this guide was written.
   - [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths)
   - [Graph values: LadybugNode, LadybugRel, LadybugPath, LadybugInternalId](#graph-values-ladybugnode-ladybugrel-ladybugpath-ladybuginternalid)
   - [UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough)
+- [Typed projection: Select&lt;T&gt;](#typed-projection-selectt)
+  - [How a row maps to T](#how-a-row-maps-to-t)
+  - [Conversion: lossless widening only](#conversion-lossless-widening-only)
+  - [Errors Select&lt;T&gt; reports](#errors-selectt-reports)
 - [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
@@ -77,6 +82,8 @@ using var db = new LadybugDatabase("./mydb", config);
 | Member | Description |
 |---|---|
 | `QueryAsync(string cypher, CancellationToken = default)` | Executes a Cypher statement, returns a `LadybugQueryResult`. See [Executing Cypher](#executing-cypher). |
+| `QueryAsync(string cypher, object parameters, CancellationToken = default)` | Runs a parameterized statement **once** — prepares, binds `parameters`, executes, and disposes the statement internally — and returns its `LadybugQueryResult`. `parameters` is a dictionary or an object (typically anonymous) whose properties name the parameters; `null` throws `ArgumentNullException`. See [Parameter objects](#parameter-objects). |
+| `Select<T>(string cypher, object? parameters = null, CancellationToken = default)` | Streams the statement's rows projected into `T`, as an `IAsyncEnumerable<T>`. Owns and disposes the underlying result itself. `parameters` may be `null` (the default), meaning "no parameters". See [Typed projection](#typed-projection-selectt). |
 | `PrepareAsync(string cypher, CancellationToken = default)` | Compiles a parameterized Cypher statement, returns a `LadybugPreparedStatement`. See [Prepared statements](#prepared-statements). |
 | `BeginTransactionAsync(CancellationToken = default)` | Issues `BEGIN TRANSACTION`, returns a `LadybugTransaction`. See [Transactions](#transactions). |
 | `DisposeAsync()` | Closes the connection. Safe even if the parent database was disposed first. |
@@ -212,6 +219,7 @@ All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
 | `Bind(string, BigDecimal)` | `DECIMAL` | See [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below - lossless, all 38 digits. |
 | `BindNull(string)` | typed `NULL` | Binds a `NULL` of the parameter's own type. |
 | `ExecuteAsync(CancellationToken = default)` | - | Runs the statement with the currently bound values; may be called more than once. |
+| `ExecuteAsync(object parameters, CancellationToken = default)` | - | Binds every name/value pair `parameters` names, then runs the statement. See [Parameter objects](#parameter-objects). |
 | `DisposeAsync()` | - | Destroys the prepared statement. Safe even if the parent connection/database was disposed first. |
 
 ```csharp
@@ -227,6 +235,65 @@ stmt.Bind("tag", Guid.NewGuid());
 stmt.BindNull("note");
 await using (var _ = await stmt.ExecuteAsync()) { }
 ```
+
+## Parameter objects
+
+The typed `Bind` overloads above are the precise, allocation-free path. For a statement whose
+parameters you know at the call site, one overload per entry point takes them all at once:
+
+```csharp
+// A parameterized statement run once: prepared, bound, executed and disposed internally.
+await using (var _ = await conn.QueryAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})",
+    new { dbref = 42L, name = "Limbo" })) { }
+
+// The same statement run repeatedly: planned once, bound per execution.
+await using (var stmt = await conn.PrepareAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})"))
+{
+    await using (var _ = await stmt.ExecuteAsync(new { dbref = 43L, name = "The Void" })) { }
+    await using (var _ = await stmt.ExecuteAsync(new { dbref = 44L, name = "Master Room" })) { }
+}
+
+// Names computed at runtime, which an anonymous object cannot express.
+var parameters = new Dictionary<string, object?> { ["dbref"] = 45L, ["name"] = "Nowhere" };
+await using (var _ = await conn.QueryAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})", parameters)) { }
+```
+
+`conn.QueryAsync(cypher, parameters)` is for a statement run **once** — it prepares, binds, executes,
+and disposes the statement for you, and the result it returns deliberately outlives that statement.
+For a statement run in a loop, `PrepareAsync` it and call `stmt.ExecuteAsync(parameters)` per
+execution so the engine plans the query once.
+
+Both take a single `object`, which accepts either shape:
+
+| `parameters` | How it's read |
+|---|---|
+| An object, typically anonymous (`new { dbref = 42L }`) | Its public readable instance properties name the parameters. This is the reflective path. |
+| Any dictionary keyed by `string` — `Dictionary<string, object?>`, `Dictionary<string, long>`, `SortedDictionary`, `ConcurrentDictionary`, `ImmutableDictionary`, `FrozenDictionary`, `ReadOnlyDictionary` | Read directly by its own keys, with **no reflection**, whatever its value type. |
+| `null` | `ArgumentNullException`. `Select<T>` is the exception: there, `null` means "no parameters". |
+| A single value (`42L`, `"Limbo"`), or a sequence (`List<T>`, an array) | `ArgumentException` naming the type. Parameters are named, not positional. |
+
+Each value dispatches on its **runtime** type to the matching typed `Bind` overload, so the set of
+supported value types is exactly the [Bind method reference](#bind-method-reference) above, plus
+`null` for `BindNull`. A value of any other type is an `ArgumentException` naming both the parameter
+and the type — including an `enum` (which boxes as itself, not as its underlying integer) and a
+`decimal` (whose message points at `BigDecimal`, the target that holds all 38 digits the engine's
+`DECIMAL` does).
+
+Values bind at their **natural width** and the engine coerces them to the target column — measured
+against the engine, not assumed. A bound `INT32` reaches an `INT64` column, `FLOAT` reaches `DOUBLE`,
+and a value outside the column's range is *rejected* with an overflow error surfaced as
+`LadybugException`, never silently truncated. So `new { dbref = 42 }` works against an `INT64`
+column; you do not have to write `42L`.
+
+Validation is eager and complete before anything is bound: a parameters object carrying one
+unbindable value throws without having bound any of them, so a prepared statement's previously bound
+values survive intact for a retry.
+
+Both overloads are annotated `[RequiresUnreferencedCode]`, since either may reflect. If you are
+trimming or publishing AOT, use the typed `Bind` overloads.
 
 ## Reading results
 
@@ -329,7 +396,7 @@ outside the normal path.
 | `AsDouble()` | `Double` | `double` |
 | `AsDecimal()` | `Decimal` | `decimal` (throws beyond ~28-29 significant digits) |
 | `AsBigDecimal()` | `Decimal` | `ExtendedNumerics.BigDecimal` (always lossless, all 38 digits) |
-| `AsString()` | `String`, plus **any** type whose payload happens to be a string (currently only `Unsupported`, i.e. `POINTER` - see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
+| `AsString()` | `String`, plus **any** type whose payload happens to be a string: `Decimal` (the engine's exact decimal string, trailing zeros included - see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal)) and `Unsupported`, i.e. `POINTER` (see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
 | `AsBlob()` | `Blob` | `byte[]` (a fresh copy every call) |
 | `AsGuid()` | `Uuid` | `Guid` |
 | `AsDateOnly()` | `Date` | `DateOnly` |
@@ -747,6 +814,198 @@ one native cursor behind a multi-statement script, not one per result: only ever
 *later* one already advanced further throws `InvalidOperationException` — without that guard, it
 would silently hand back a stale duplicate of a result already in hand (and can leave a later
 statement in the script never read through any result at all), rather than failing loudly.
+
+## Typed projection: `Select<T>`
+
+Everything above reads columns one accessor call at a time, which is precise and allocation-free.
+`Select<T>` is the other end of that trade: it projects each row into a type you define, so the
+per-column extraction is written once — by this client — instead of at every call site.
+
+```csharp
+record Person(long Dbref, string Name);
+
+await foreach (var person in conn.Select<Person>(
+    "MATCH (o:Object) WHERE o.dbref > $min RETURN o.dbref AS Dbref, o.name AS Name ORDER BY o.dbref",
+    new { min = 42L }))
+{
+    Console.WriteLine($"{person.Dbref}: {person.Name}");
+}
+```
+
+When `T` is a scalar type and the result has exactly one column, that column *is* the value — no
+type to declare:
+
+```csharp
+await foreach (var total in conn.Select<long>("MATCH (o:Object) RETURN count(*)"))
+{
+    Console.WriteLine($"{total} objects");
+}
+
+// .NET 10's in-box System.Linq.AsyncEnumerable operators work over it, so a one-row read is a
+// one-liner. Anything that enumerates it more than once will not: a LadybugQueryResult is
+// single-pass (see Reading results above), and Select<T> streams straight off it.
+var count = await conn.Select<long>("MATCH (o:Object) RETURN count(*)").FirstAsync();
+```
+
+**It streams, and it owns the result.** Nothing happens until you start enumerating; one row is read
+and projected per `MoveNextAsync`, and no list of rows is ever built. The `LadybugQueryResult`
+underneath is never handed to you, so `Select<T>` disposes it itself — on the loop finishing, on
+`break`, on an exception from inside your loop body, and on cancellation:
+
+```csharp
+await foreach (var person in conn.Select<Person>(
+    "MATCH (o:Object) RETURN o.dbref AS Dbref, o.name AS Name ORDER BY o.dbref"))
+{
+    Console.WriteLine($"first only: {person.Name}");
+    break; // the result is released here, by the enumerator this loop disposes
+}
+```
+
+There is therefore no `await using` to write, and no result to leak — but also no result to keep:
+if you need `HasNext`, `NextResultAsync`, or the raw `LadybugValue`s, use
+[`QueryAsync`](#reading-results) instead.
+
+Cancellation works either way round — passed to the call, or attached with `WithCancellation` — and
+is checked between rows, exactly as `QueryAsync`'s enumerator does it:
+
+```csharp
+await foreach (var person in conn.Select<Person>(cypher, null, token)) { /* ... */ }
+await foreach (var person in conn.Select<Person>(cypher).WithCancellation(token)) { /* ... */ }
+```
+
+`Select<T>` is annotated `[RequiresUnreferencedCode]`: it resolves `T`'s constructor by reflection.
+If you are trimming or publishing AOT, read results through `QueryAsync` and `LadybugRow`'s typed
+accessors.
+
+### How a row maps to `T`
+
+**Constructor matching.** The constructor whose parameter names all match returned column names,
+compared case-insensitively, is the one used — which is why a positional `record` works with no
+settable properties and no attributes:
+
+- Exactly one fully-matching constructor → it is used.
+- No matching constructor → `InvalidOperationException` listing the returned columns *and* every
+  candidate constructor with the parameters it could not match.
+- More than one fully-matching constructor → `InvalidOperationException`. This does not guess.
+- A parameterless constructor never matches: it would "match" any result vacuously and produce
+  objects holding none of the returned data.
+- Columns matching no parameter are ignored. A parameter matching no column is an error.
+- A column name repeated in one result (legal Cypher: `RETURN n.a AS x, n.b AS x`) resolves to the
+  leftmost, the same rule `LadybugRow`'s string indexer uses.
+
+**Scalar unwrap.** If `T` is one of the types in the [conversion table](#conversion-lossless-widening-only)
+below — or a `Nullable<>` of one — the single column is converted directly to it. A scalar `T`
+against a result with any other number of columns is an `InvalidOperationException` naming the count.
+The unwrap is checked *before* any constructor, so `string` and `decimal` are never constructed from
+a column by name-matching their own constructors.
+
+**NULL.** A `NULL` column reads as `null` for a reference type or a `Nullable<>` target. Into a
+non-nullable value type it is a `LadybugException` naming the column — never `default(T)`, which
+would be indistinguishable from a real zero:
+
+```csharp
+record Reading(long Small, string? Note);   // Note is NULL-able; Small is not
+```
+
+**Reflection runs once per query, not per row.** The resolved constructor and per-column plan are
+cached, keyed by `T` *and* the result's ordered column names — so two queries returning the same
+columns in a different order get their own plans instead of one reading the other's positions.
+
+### Conversion: lossless widening only
+
+Each column converts through the `LadybugValue` accessor for the target type, and also reads any
+**narrower** type that provably fits — so a record can declare `long` against a schema's `INT32`
+column without a `CAST`:
+
+| Target | `LadybugType`s it reads |
+|---|---|
+| `bool` | `Boolean` |
+| `sbyte` | `Int8` |
+| `short` | `Int16`, `Int8`, `UInt8` |
+| `int` | `Int32`, `Int16`, `Int8`, `UInt16`, `UInt8` |
+| `long` | `Int64`, `Int32`, `Int16`, `Int8`, `UInt32`, `UInt16`, `UInt8` |
+| `Int128` | `Int128`, every signed width, every unsigned width (including `UInt64`) |
+| `byte` | `UInt8` |
+| `ushort` | `UInt16`, `UInt8` |
+| `uint` | `UInt32`, `UInt16`, `UInt8` |
+| `ulong` | `UInt64`, `UInt32`, `UInt16`, `UInt8` |
+| `float` | `Single` |
+| `double` | `Double`, `Single` |
+| `decimal` | `Decimal` (throws beyond 28-29 significant digits — see below) |
+| `BigDecimal` | `Decimal` (lossless, all 38 digits) |
+| `string` | `String`, plus any value whose payload is already a string (`Decimal`, `Unsupported`) |
+| `byte[]` | `Blob` |
+| `Guid` | `Uuid` |
+| `DateOnly` | `Date` |
+| `DateTime` | `Timestamp` (and its `_SEC`/`_MS`/`_NS` variants) |
+| `DateTimeOffset` | `TimestampTz` |
+| `TimeSpan` | `Interval` (lossy — the engine converts months at 30 days each) |
+
+Each also as a `Nullable<>` value type. Anything not in this table — `Node`, `Rel`, `Path`, `List`,
+`Struct`, `Map`, `InternalId` — has no projection target; read those through
+[`LadybugValue`](#ladybugvalue-accessor-reference).
+
+**Only widening, and only where nothing can be lost:**
+
+- **No narrowing.** An `Int64` column into an `int` target is an error, not a truncation.
+- **No signed into unsigned.** An `Int8` column into a `byte` target is an error however small the
+  value: a negative one has nowhere to go, and reinterpreting the bits is exactly the silent
+  corruption this rule prevents.
+- **No unsigned into a same-width signed target.** `UInt32` reads into `long`, not into `int`;
+  `UInt64` reads into `Int128`, not into `long`. The rule is about what the column's *type* can hold,
+  not what one row happens to hold.
+- **No integer into floating-point**, even where it would be lossless. `Int32` into `double` loses
+  nothing, but `Int64` into `double` loses integers above 2^53 and `Int32` into `float` loses them
+  above 2^24. A rule whose boundary is a mantissa width is not one you should have to remember, so
+  the whole cross-family conversion is refused; `CAST` in the Cypher says it explicitly where you
+  want it.
+
+This mirrors what binding already does in the other direction (see
+[Parameter objects](#parameter-objects)): the engine coerces a bound value into a wider column and
+range-*checks* rather than truncating.
+
+### Errors `Select<T>` reports
+
+Only a null/blank `cypher` is rejected by the `Select<T>` call itself. Everything else needs the
+query to have run, so it surfaces from the first `MoveNextAsync` — i.e. from your `await foreach`:
+
+| Condition | Exception | Names |
+|---|---|---|
+| `cypher` is null, empty, or whitespace | `ArgumentException` (**eagerly**, at the call) | the parameter |
+| `parameters` is not a usable bag, or holds a value with no `Bind` overload | `ArgumentException` | the parameter, and the offending value's type |
+| No constructor of `T` matches the returned columns | `InvalidOperationException` | the columns, and every rejected candidate constructor |
+| More than one constructor matches | `InvalidOperationException` | the competing constructors |
+| `T` is scalar but the result has ≠ 1 column | `InvalidOperationException` | the column count |
+| The matched constructor takes a parameter of a type no column converts to | `InvalidOperationException` | the parameter, its type, and every supported target type |
+| A column's `LadybugType` does not convert to its target | `LadybugException` | the column, its `LadybugType`, and the target type |
+| A `NULL` column into a non-nullable value type | `LadybugException` | the column and the target type |
+| A `DECIMAL` needing more than `decimal`'s 28-29 significant digits | `LadybugException` | the column, and `BigDecimal` as the lossless target |
+| The statement itself failed | `LadybugException` / `LadybugWriteConflictException` | see [Error handling](#error-handling) |
+| The token was cancelled | `OperationCanceledException` | - |
+
+Every one of these names the column or parameter at fault, because a projection spanning a dozen
+columns is otherwise a debugger session. Two worked examples:
+
+```
+Cannot project into Person: no public constructor's parameters all match the returned columns
+(matching is case-insensitive; extra columns are ignored). Returned columns: 'o.dbref', 'o.name'.
+Candidate constructor(s): Person(long Dbref, string Name) - no returned column matches parameters
+'Dbref', 'Name'.
+```
+
+```
+Column 'Dbref' is Int64, which cannot be read as int. Conversion accepts only lossless widening -
+never narrowing, never signed into unsigned, never integer into floating-point: declare the target
+as the type the column actually has (or a wider one of the same kind), or CAST the column in the
+Cypher.
+```
+
+The first is the missing-`AS` mistake: the engine names an unaliased column `o.dbref`, which does
+not match a parameter called `Dbref`.
+
+A mismatched `T` is reported even when the query returns **no rows**. The projection is resolved from
+the result's column shape before the first row is read, precisely so that an empty result cannot
+silently "succeed" against a `T` that could never have mapped its columns.
 
 ## Transactions
 
