@@ -642,7 +642,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// </remarks>
     public async ValueTask ExecuteNonQueryAsync(CancellationToken cancellationToken = default)
     {
-        await using var _ = await ExecuteAsync(cancellationToken);
+        await using var _ = ((IAsyncDisposable)await ExecuteAsync(cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -660,7 +661,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     public async ValueTask ExecuteNonQueryAsync(
         object parameters, CancellationToken cancellationToken = default)
     {
-        await using var _ = await ExecuteAsync(parameters, cancellationToken);
+        await using var _ = ((IAsyncDisposable)await ExecuteAsync(parameters, cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -711,8 +713,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         // null means "use what is already bound", not "bind a null parameter bag" - the same
         // distinction LadybugConnection.Select<T> draws.
         await using var result = parameters is null
-            ? await ExecuteAsync(cancellationToken)
-            : await ExecuteAsync(parameters, cancellationToken);
+            ? await ExecuteAsync(cancellationToken).ConfigureAwait(false)
+            : await ExecuteAsync(parameters, cancellationToken).ConfigureAwait(false);
 
         // From the result's column shape rather than its first row, so a T that cannot map these
         // columns is reported even when the statement returns none.

@@ -156,7 +156,7 @@ public sealed class LadybugConnection : IAsyncDisposable
     private async ValueTask<LadybugQueryResult> TrackedTransactionStatementAsync(
         string cypher, TransactionEffect effect, CancellationToken cancellationToken)
     {
-        await _transactionGate.WaitAsync(cancellationToken);
+        await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (effect == TransactionEffect.Begin && (_activeTransaction is not null || _rawTransactionOpen))
@@ -232,7 +232,8 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// </remarks>
     public async ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default)
     {
-        await using var _ = await QueryAsync(cypher, cancellationToken);
+        await using var _ = ((IAsyncDisposable)await QueryAsync(cypher, cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -260,7 +261,8 @@ public sealed class LadybugConnection : IAsyncDisposable
     public async ValueTask ExecuteAsync(
         string cypher, object parameters, CancellationToken cancellationToken = default)
     {
-        await using var _ = await QueryAsync(cypher, parameters, cancellationToken);
+        await using var _ = ((IAsyncDisposable)await QueryAsync(cypher, parameters, cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -448,8 +450,8 @@ public sealed class LadybugConnection : IAsyncDisposable
         // parameter-taking one, which rejects null: an omitted parameters argument means "no
         // parameters", not "a null parameter bag".
         await using var result = parameters is null
-            ? await QueryAsync(cypher, cancellationToken)
-            : await QueryAsync(cypher, parameters, cancellationToken);
+            ? await QueryAsync(cypher, cancellationToken).ConfigureAwait(false)
+            : await QueryAsync(cypher, parameters, cancellationToken).ConfigureAwait(false);
 
         // Once, before the first row, and from the result's own column shape - so a T that cannot map
         // these columns is reported even when there are no rows to map. See RowMapper's remarks.
@@ -547,7 +549,7 @@ public sealed class LadybugConnection : IAsyncDisposable
         // EnsureNoOpenTransactionForDispose) on this same connection - see _transactionGate's
         // remarks for why an unsynchronized version of exactly this sequence used to invalidate
         // the winner's transaction at the engine level under a race.
-        await _transactionGate.WaitAsync(cancellationToken);
+        await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_activeTransaction is not null)
