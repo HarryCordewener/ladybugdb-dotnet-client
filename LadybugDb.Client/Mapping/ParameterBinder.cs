@@ -93,6 +93,154 @@ internal static class ParameterBinder
     }
 
     /// <summary>
+    /// Enumerates <paramref name="parameters"/> and binds every name/value pair it names to
+    /// <paramref name="statement"/>.
+    /// </summary>
+    /// <param name="statement">The statement to bind onto.</param>
+    /// <param name="parameters">A dictionary keyed by parameter name, or an object whose public
+    /// instance properties name the parameters.</param>
+    /// <param name="paramName">The name of the caller's parameter, used in thrown exceptions.</param>
+    /// <remarks>
+    /// Runs in two passes - every value's type is checked before <em>any</em> value is bound - so a
+    /// parameters object carrying one unbindable value leaves the statement's bound values exactly
+    /// as they were rather than partially overwritten. That matters on the reuse path
+    /// (<c>statement.ExecuteAsync(parameters)</c>): a caller who catches the
+    /// <see cref="ArgumentException"/> and executes the statement again with its previously bound
+    /// values gets those values, not a half-applied mixture. Both passes run the same
+    /// <see cref="BindOrValidate"/> switch, so the set of types the check accepts cannot drift from
+    /// the set the bind pass handles.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="parameters"/> is not a usable parameter
+    /// bag (see <see cref="Enumerate"/>), or names a value whose runtime type has no
+    /// <c>Bind</c> overload.</exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    internal static void BindAll(
+        LadybugPreparedStatement statement, object parameters, string paramName = "parameters")
+    {
+        var pairs = Enumerate(parameters, paramName);
+
+        foreach (var (name, value) in pairs)
+        {
+            if (!BindOrValidate(statement: null, name, value))
+            {
+                throw new ArgumentException(
+                    UnsupportedValueMessage(name, value!.GetType()), paramName);
+            }
+        }
+
+        // Goes through Bind rather than BindOrValidate directly so exactly one place turns an
+        // unbindable value into an exception. Bind's own check cannot fire here - pass one already
+        // cleared every value - which is the point: no second copy of the failure message to drift.
+        foreach (var (name, value) in pairs)
+        {
+            Bind(statement, name, value, paramName);
+        }
+    }
+
+    /// <summary>
+    /// Binds one name/value pair to <paramref name="statement"/>, dispatching on the value's
+    /// runtime type to the matching typed <c>Bind</c> overload.
+    /// </summary>
+    /// <param name="statement">The statement to bind onto.</param>
+    /// <param name="name">The Cypher parameter name, without its leading <c>$</c>.</param>
+    /// <param name="value">The value to bind. <see langword="null"/> binds a typed
+    /// <c>NULL</c> via <see cref="LadybugPreparedStatement.BindNull"/>.</param>
+    /// <param name="paramName">The name of the caller's parameter, used in thrown exceptions.</param>
+    /// <exception cref="ArgumentException"><paramref name="value"/>'s runtime type has no
+    /// <c>Bind</c> overload.</exception>
+    internal static void Bind(
+        LadybugPreparedStatement statement, string name, object? value,
+        string paramName = "parameters")
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+
+        if (!BindOrValidate(statement, name, value))
+        {
+            throw new ArgumentException(UnsupportedValueMessage(name, value!.GetType()), paramName);
+        }
+    }
+
+    /// <summary>
+    /// The single dispatch table behind both <see cref="Bind"/> and <see cref="BindAll"/>, mapping a
+    /// value's runtime type onto one of <see cref="LadybugPreparedStatement"/>'s typed <c>Bind</c>
+    /// overloads. Returns <see langword="false"/>, rather than throwing, when the type has no
+    /// overload, so the caller can attach its own <c>paramName</c>.
+    /// </summary>
+    /// <param name="statement">The statement to bind onto, or <see langword="null"/> to check
+    /// whether <paramref name="value"/> <em>could</em> be bound without binding it. One switch
+    /// serving both is deliberate: a separate <c>IsBindable</c> predicate would be a second copy of
+    /// this type list, free to drift out of step with it.</param>
+    /// <param name="name">The Cypher parameter name.</param>
+    /// <param name="value">The value to bind or check.</param>
+    /// <returns><see langword="true"/> if <paramref name="value"/>'s runtime type is bindable.</returns>
+    /// <remarks>
+    /// <para>
+    /// Every case matches its type <em>exactly</em> - a <see langword="switch"/> pattern on a boxed
+    /// value tests the boxed type, with no implicit numeric conversion - so no value is ever bound
+    /// at a width other than the one it was written at. An <see langword="enum"/> boxes as itself,
+    /// not as its underlying integer, so it does not match <c>case int</c> and is reported
+    /// unsupported rather than silently binding its ordinal.
+    /// </para>
+    /// <para>
+    /// <b>The natural widths here are what the engine accepts, measured against it rather than
+    /// assumed</b> - see <c>ParameterWidthCoercionTests</c>. A bound <c>INT32</c> is coerced into an
+    /// <c>INT64</c> column (and likewise every narrower integer width, in both directions, and
+    /// <c>FLOAT</c> into <c>DOUBLE</c>), so an <see langword="int"/> value need not be widened to
+    /// <see cref="long"/> to reach a wider column. A value outside the target column's range is
+    /// <em>rejected</em> by the engine with an overflow error surfaced as
+    /// <see cref="LadybugException"/>, not silently truncated.
+    /// </para>
+    /// </remarks>
+    private static bool BindOrValidate(LadybugPreparedStatement? statement, string name, object? value)
+    {
+        switch (value)
+        {
+            case null: statement?.BindNull(name); return true;
+            case bool v: statement?.Bind(name, v); return true;
+            case sbyte v: statement?.Bind(name, v); return true;
+            case short v: statement?.Bind(name, v); return true;
+            case int v: statement?.Bind(name, v); return true;
+            case long v: statement?.Bind(name, v); return true;
+            case byte v: statement?.Bind(name, v); return true;
+            case ushort v: statement?.Bind(name, v); return true;
+            case uint v: statement?.Bind(name, v); return true;
+            case ulong v: statement?.Bind(name, v); return true;
+            case float v: statement?.Bind(name, v); return true;
+            case double v: statement?.Bind(name, v); return true;
+            case string v: statement?.Bind(name, v); return true;
+            case DateOnly v: statement?.Bind(name, v); return true;
+            case DateTime v: statement?.Bind(name, v); return true;
+            case DateTimeOffset v: statement?.Bind(name, v); return true;
+            case TimeSpan v: statement?.Bind(name, v); return true;
+            case Guid v: statement?.Bind(name, v); return true;
+            case Int128 v: statement?.Bind(name, v); return true;
+            case BigDecimal v: statement?.Bind(name, v); return true;
+            default: return false;
+        }
+    }
+
+    /// <summary>
+    /// Explains an unbindable value, naming both the parameter and its runtime type - either alone
+    /// leaves the caller guessing which of several parameters is at fault, or what about it.
+    /// </summary>
+    private static string UnsupportedValueMessage(string name, Type type)
+    {
+        // decimal and BigDecimal are one keystroke apart at the call site and the client binds only
+        // the latter (it holds all 38 digits the engine's DECIMAL does), so that specific mistake
+        // gets told what to do about it instead of only what went wrong.
+        var hint = type == typeof(decimal)
+            ? " Convert it to BigDecimal, which binds all 38 digits the engine's DECIMAL holds, " +
+              "rather than decimal's 28-29."
+            : string.Empty;
+
+        return $"The value supplied for parameter '{name}' is of type {Describe(type)}, which has no " +
+               $"Bind overload.{hint}";
+    }
+
+    /// <summary>
     /// Reads parameters from an object's public instance properties, rejecting the shapes whose
     /// properties would silently stand in for parameters the caller never wrote.
     /// </summary>
