@@ -181,6 +181,75 @@ public sealed class LadybugConnection : IAsyncDisposable
     }
 
     /// <summary>
+    /// Executes a Cypher statement whose rows you do not need - DDL, <c>CREATE</c>, <c>SET</c>,
+    /// <c>DELETE</c>, <c>COPY</c> - and disposes its result for you.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ArgumentException"><paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">This connection or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="cypher"/> is a <c>BEGIN TRANSACTION</c> and this connection already has a
+    /// transaction open - see <see cref="QueryAsync(string, CancellationToken)"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Every statement returns a result, including those that produce no rows, and that result owns
+    /// native memory that has to be released. Reading rows you do not want in order to dispose a
+    /// result you never wanted is the overwhelmingly common case, so this exists to say it once:
+    /// <c>await conn.ExecuteAsync("CREATE (:Object {dbref: 42})")</c> rather than
+    /// <c>await using (var _ = await conn.QueryAsync("CREATE (:Object {dbref: 42})")) { }</c>.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is returned, because the engine reports nothing to return.</b> Measured directly:
+    /// <c>CREATE</c>, <c>SET</c>, and <c>DELETE</c> all produce a result with zero rows and zero
+    /// columns - there is no affected-row count to hand back, and inventing a <c>0</c> would be worse
+    /// than returning nothing. DDL is the one exception: it produces a single-column row carrying a
+    /// human-readable confirmation such as <c>"Table T has been created."</c>, which this method
+    /// discards. Use <see cref="QueryAsync(string, CancellationToken)"/> if you want to read it.
+    /// </para>
+    /// <para>
+    /// Transaction-control statements are classified exactly as they are by
+    /// <see cref="QueryAsync(string, CancellationToken)"/>, which this delegates to, so running
+    /// <c>BEGIN TRANSACTION</c> through here is tracked and guarded identically.
+    /// </para>
+    /// </remarks>
+    public async ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default)
+    {
+        await using var _ = await QueryAsync(cypher, cancellationToken);
+    }
+
+    /// <summary>
+    /// Executes a parameterized Cypher statement whose rows you do not need, and disposes its result
+    /// for you.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L }</c> - whose public properties name the parameters.
+    /// </param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="cypher"/> is blank, or <paramref name="parameters"/> is not a usable parameter source.</exception>
+    /// <exception cref="ObjectDisposedException">This connection or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    /// <remarks>
+    /// Returns nothing for the same measured reason as
+    /// <see cref="ExecuteAsync(string, CancellationToken)"/>.
+    /// </remarks>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public async ValueTask ExecuteAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        await using var _ = await QueryAsync(cypher, parameters, cancellationToken);
+    }
+
+    /// <summary>
     /// Executes <paramref name="cypher"/> without classifying it as transaction control. For
     /// <see cref="LadybugTransaction"/>, which does its own bookkeeping under
     /// <see cref="_transactionGate"/> and would deadlock against
@@ -370,7 +439,7 @@ public sealed class LadybugConnection : IAsyncDisposable
 
         // Once, before the first row, and from the result's own column shape - so a T that cannot map
         // these columns is reported even when there are no rows to map. See RowMapper's remarks.
-        var plan = RowMapper.ResolvePlan<T>(result.ColumnNames);
+        var plan = RowMapper.ResolvePlan<T>(result.ColumnNamesArray);
 
         await foreach (var row in result.WithCancellation(cancellationToken))
         {

@@ -20,7 +20,7 @@ namespace LadybugDb.Client.Mapping;
 /// </para>
 /// <code>
 /// await using var result = await connection.QueryAsync(cypher, parameters, ct);
-/// var plan = RowMapper.ResolvePlan&lt;T&gt;(result.ColumnNames);
+/// var plan = RowMapper.ResolvePlan&lt;T&gt;(result.ColumnNamesArray);
 /// await foreach (var row in result.WithCancellation(ct))
 /// {
 ///     yield return plan.Map(row);

@@ -156,7 +156,21 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     /// plan before the first row and report a mismatched <c>T</c> on an empty result too.
     /// </para>
     /// </remarks>
-    internal string[] ColumnNames => _columnNames;
+    public IReadOnlyList<string> ColumnNames => _columnNamesView ??= Array.AsReadOnly(_columnNames);
+
+    /// <summary>
+    /// Read-only view over <see cref="_columnNames"/>, built once on first access. The array itself is
+    /// never handed out: <see cref="string"/><c>[]</c> implements
+    /// <see cref="IReadOnlyList{T}"/>, so returning it directly would let a caller cast back to the
+    /// array and rewrite this result's column names.
+    /// </summary>
+    private IReadOnlyList<string>? _columnNamesView;
+
+    /// <summary>
+    /// The column names, as the array this result owns. For the mapping layer, which compares and
+    /// hashes them per row and should not pay for the read-only wrapper. Not for direct use.
+    /// </summary>
+    internal string[] ColumnNamesArray => _columnNames;
 
     /// <summary>
     /// <see langword="true"/> if there is at least one more row available from

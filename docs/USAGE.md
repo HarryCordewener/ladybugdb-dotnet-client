@@ -84,6 +84,8 @@ using var db = new LadybugDatabase("./mydb", config);
 | `QueryAsync(string cypher, CancellationToken = default)` | Executes a Cypher statement, returns a `LadybugQueryResult`. See [Executing Cypher](#executing-cypher). |
 | `QueryAsync(string cypher, object parameters, CancellationToken = default)` | Runs a parameterized statement **once** — prepares, binds `parameters`, executes, and disposes the statement internally — and returns its `LadybugQueryResult`. `parameters` is a dictionary or an object (typically anonymous) whose properties name the parameters; `null` throws `ArgumentNullException`. See [Parameter objects](#parameter-objects). |
 | `Select<T>(string cypher, object? parameters = null, CancellationToken = default)` | Streams the statement's rows projected into `T`, as an `IAsyncEnumerable<T>`. Owns and disposes the underlying result itself. `parameters` may be `null` (the default), meaning "no parameters". See [Typed projection](#typed-projection-selectt). |
+| `ExecuteAsync(string cypher, CancellationToken = default)` | Runs a statement whose rows you do not need — DDL, `CREATE`, `SET`, `DELETE` — and disposes its result for you. Returns nothing: the engine reports no affected-row count. |
+| `ExecuteAsync(string cypher, object parameters, CancellationToken = default)` | As above, binding `parameters` first. |
 | `PrepareAsync(string cypher, CancellationToken = default)` | Compiles a parameterized Cypher statement, returns a `LadybugPreparedStatement`. See [Prepared statements](#prepared-statements). |
 | `BeginTransactionAsync(CancellationToken = default)` | Issues `BEGIN TRANSACTION`, returns a `LadybugTransaction`. See [Transactions](#transactions). |
 | `DisposeAsync()` | Closes the connection. Safe even if the parent database was disposed first. |
@@ -110,10 +112,10 @@ call for cancellation to preempt.
 ## Executing Cypher
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})");
 ```
 
 `QueryAsync` takes a plain Cypher string and returns a `LadybugQueryResult`. For a statement you
@@ -135,11 +137,11 @@ A statement that fails throws `LadybugException` or `LadybugWriteConflictExcepti
 await using var stmt = await conn.PrepareAsync("CREATE (o:Object {dbref: $dbref, name: $name})");
 stmt.Bind("dbref", 42L);
 stmt.Bind("name", "Limbo");
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 
 stmt.Bind("dbref", 43L);
 stmt.Bind("name", "The Void");
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 ```
 
 `conn.PrepareAsync(cypher)` compiles a Cypher string once and returns a `LadybugPreparedStatement`
@@ -219,12 +221,15 @@ All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
 | `Bind(string, BigDecimal)` | `DECIMAL` | See [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below - lossless, all 38 digits. |
 | `BindNull(string)` | typed `NULL` | Binds a `NULL` of the parameter's own type. |
 | `ExecuteAsync(CancellationToken = default)` | - | Runs the statement with the currently bound values; may be called more than once. |
+| `ExecuteNonQueryAsync(CancellationToken = default)` | Executes with whatever is bound and discards the result — the reuse-a-plan-for-writes case. |
+| `ExecuteNonQueryAsync(object parameters, CancellationToken = default)` | Binds `parameters`, executes, discards the result. |
+| `Select<T>(object? parameters = null, CancellationToken = default)` | Executes and streams rows projected into `T`, disposing the result itself. Lets one statement be planned once *and* read typed. |
 | `ExecuteAsync(object parameters, CancellationToken = default)` | - | Binds every name/value pair `parameters` names, then runs the statement. See [Parameter objects](#parameter-objects). |
 | `DisposeAsync()` | - | Destroys the prepared statement. Safe even if the parent connection/database was disposed first. |
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Multi(id INT64, flag BOOL, big INT128, tag UUID, note STRING, PRIMARY KEY(id))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Multi(id INT64, flag BOOL, big INT128, tag UUID, note STRING, PRIMARY KEY(id))");
 
 await using var stmt = await conn.PrepareAsync(
     "CREATE (n:Multi {id: $id, flag: $flag, big: $big, tag: $tag, note: $note})");
@@ -233,7 +238,7 @@ stmt.Bind("flag", true);
 stmt.Bind("big", Int128.MaxValue);
 stmt.Bind("tag", Guid.NewGuid());
 stmt.BindNull("note");
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 ```
 
 ## Parameter objects
@@ -243,22 +248,22 @@ parameters you know at the call site, one overload per entry point takes them al
 
 ```csharp
 // A parameterized statement run once: prepared, bound, executed and disposed internally.
-await using (var _ = await conn.QueryAsync(
+await conn.ExecuteAsync(
     "CREATE (o:Object {dbref: $dbref, name: $name})",
-    new { dbref = 42L, name = "Limbo" })) { }
+    new { dbref = 42L, name = "Limbo" });
 
 // The same statement run repeatedly: planned once, bound per execution.
 await using (var stmt = await conn.PrepareAsync(
     "CREATE (o:Object {dbref: $dbref, name: $name})"))
 {
-    await using (var _ = await stmt.ExecuteAsync(new { dbref = 43L, name = "The Void" })) { }
-    await using (var _ = await stmt.ExecuteAsync(new { dbref = 44L, name = "Master Room" })) { }
+    await stmt.ExecuteNonQueryAsync(new { dbref = 43L, name = "The Void" });
+    await stmt.ExecuteNonQueryAsync(new { dbref = 44L, name = "Master Room" });
 }
 
 // Names computed at runtime, which an anonymous object cannot express.
 var parameters = new Dictionary<string, object?> { ["dbref"] = 45L, ["name"] = "Nowhere" };
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: $dbref, name: $name})", parameters)) { }
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})", parameters);
 ```
 
 `conn.QueryAsync(cypher, parameters)` is for a statement run **once** — it prepares, binds, executes,
@@ -351,10 +356,10 @@ row["label"]                    // by name
 | `ToString()` | `{col: value, ...}` rendering for debugger/diagnostic output. `default(LadybugRow)` renders as `{}`. |
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})");
 
 await using var r = await conn.QueryAsync("MATCH (o:Object) RETURN o.dbref, o.name AS label");
 await using var e = r.GetAsyncEnumerator();
@@ -422,10 +427,10 @@ Beyond the accessors:
 | `ToString()` | A human-readable rendering (the payload's natural form, or the type name for `null`), for debugger/diagnostic output - not for parsing. |
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Flags(id INT64, active BOOL, tags STRING[], PRIMARY KEY(id))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:Flags {id: 1, active: true, tags: ['a', 'b']})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Flags(id INT64, active BOOL, tags STRING[], PRIMARY KEY(id))");
+await conn.ExecuteAsync(
+    "CREATE (n:Flags {id: 1, active: true, tags: ['a', 'b']})");
 
 await using var r = await conn.QueryAsync("MATCH (n:Flags) RETURN n.active, n.tags");
 await using var e = r.GetAsyncEnumerator();
@@ -501,14 +506,14 @@ resolved value's own real `LadybugType` (one of the rows above) rather than as `
 ### INT128 and UUID
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Wide(id INT64, big INT128, tag UUID, PRIMARY KEY(id))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Wide(id INT64, big INT128, tag UUID, PRIMARY KEY(id))");
 
 await using (var stmt = await conn.PrepareAsync("CREATE (n:Wide {id: 1, big: $big, tag: $tag})"))
 {
     stmt.Bind("big", Int128.MaxValue);
     stmt.Bind("tag", Guid.NewGuid());
-    await using (var _ = await stmt.ExecuteAsync()) { }
+    await stmt.ExecuteNonQueryAsync();
 }
 
 await using (var r = await conn.QueryAsync("MATCH (n:Wide) RETURN n.big, n.tag"))
@@ -578,14 +583,14 @@ above). `LadybugInternalId` is a `readonly record struct`, so it gets structural
 `GetHashCode`, `ToString`, and `==`/`!=` for free from the language.
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
-await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
-await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
-await using (var _ = await conn.QueryAsync(
-    "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))");
+await conn.ExecuteAsync(
+    "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)");
+await conn.ExecuteAsync("CREATE (:Person {id: 1, name: 'Ada'})");
+await conn.ExecuteAsync("CREATE (:Person {id: 2, name: 'Grace'})");
+await conn.ExecuteAsync(
+    "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)");
 
 await using var r = await conn.QueryAsync("MATCH (a:Person)-[k:Knows]->(b:Person) RETURN a, k, b");
 await using var e = r.GetAsyncEnumerator();
@@ -668,14 +673,14 @@ cross-coerce into the other member at all) resolves the same way with no fallbac
 `AsBoolean()`, ...) simply works on it.
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 1, val: 42})")) { }                       // bare literal -> num (INT64)
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 2, val: '42'})")) { }                     // bare literal -> num (INT64), coerced
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 3, val: union_value(txt := '42')})")) { } // explicit constructor -> txt (STRING)
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))");
+await conn.ExecuteAsync(
+    "CREATE (n:UN {id: 1, val: 42})");                       // bare literal -> num (INT64)
+await conn.ExecuteAsync(
+    "CREATE (n:UN {id: 2, val: '42'})");                     // bare literal -> num (INT64), coerced
+await conn.ExecuteAsync(
+    "CREATE (n:UN {id: 3, val: union_value(txt := '42')})"); // explicit constructor -> txt (STRING)
 
 await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
 await foreach (var row in r)
@@ -730,7 +735,7 @@ using ExtendedNumerics;
 await using var stmt = await conn.PrepareAsync("CREATE (n:Ledger {id: $id, amount: $amount})");
 stmt.Bind("id", 1L);
 stmt.Bind("amount", BigDecimal.Parse("12345.6789"));
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 ```
 
 **Precision and scale are derived from the value itself**, not from the target column's declared
@@ -1024,8 +1029,8 @@ If you need a single logical write to span more than one statement, use
 ```csharp
 await using (var tx = await conn.BeginTransactionAsync())
 {
-    await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})")) { }
-    await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})")) { }
+    await conn.ExecuteAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})");
+    await conn.ExecuteAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})");
     await tx.CommitAsync();
 }
 ```
@@ -1060,15 +1065,15 @@ client-side, before it can reach the engine, whether it arrives as raw Cypher or
 `BeginTransactionAsync` call that would otherwise have believed nothing was open:
 
 ```csharp
-await using (var _ = await conn.QueryAsync("BEGIN TRANSACTION")) { }
-await using (var _ = await conn.QueryAsync("CREATE (:T {id: 1})")) { }
+await conn.ExecuteAsync("BEGIN TRANSACTION");
+await conn.ExecuteAsync("CREATE (:T {id: 1})");
 
 // Both of these throw InvalidOperationException without sending anything to the engine,
 // so the transaction above — and its write — survive.
 await conn.QueryAsync("BEGIN TRANSACTION");
 await conn.BeginTransactionAsync();
 
-await using (var _ = await conn.QueryAsync("COMMIT")) { }   // commits, 1 row
+await conn.ExecuteAsync("COMMIT");   // commits, 1 row
 ```
 
 **Two limits to know.** Recognition is conservative by design: a statement is tracked only when its
@@ -1182,7 +1187,7 @@ finalize, AFTER — including a DML result (`CREATE`/`SET`/`DELETE`/...), not ju
 ```csharp
 var db = new LadybugDatabase(path);
 var conn = await db.ConnectAsync();
-await using (var _ = await conn.QueryAsync("CREATE NODE TABLE Object(dbref INT64, PRIMARY KEY(dbref))")) { }
+await conn.ExecuteAsync("CREATE NODE TABLE Object(dbref INT64, PRIMARY KEY(dbref))");
 
 var result = await conn.QueryAsync("CREATE (o:Object {dbref: 1})"); // a DML result, kept alive
 
@@ -1213,7 +1218,7 @@ further effect:
 var db = new LadybugDatabase(path);
 var conn = await db.ConnectAsync();
 var tx = await conn.BeginTransactionAsync();
-await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1})")) { } // never committed
+await conn.ExecuteAsync("CREATE (n:Object {dbref: 1})"); // never committed
 
 db.Dispose(); // rolls the open transaction back first, then releases its own handle
 
@@ -1343,12 +1348,12 @@ client you're using, because it's about how LadybugDB itself performs, not about
 
 ```csharp
 // Good: INT64 primary key.
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Attr(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Attr(dbref INT64, name STRING, PRIMARY KEY(dbref))");
 
 // Avoid: composite STRING primary key costs ~4.8x an INT64 key at equal row count.
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE AttrByString(key STRING, name STRING, PRIMARY KEY(key))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE AttrByString(key STRING, name STRING, PRIMARY KEY(key))");
 ```
 
 **Don't pack many values into one wide column.** A `MAP(STRING,STRING)` holding ten attributes
@@ -1388,7 +1393,7 @@ static string EscapeForCypherLiteral(string value) =>
     value.Replace(@"\", @"\\").Replace("'", @"\'"); // backslashes first, then apostrophes
 
 var escapedCsvPath = EscapeForCypherLiteral(csvPath);
-await using (var _ = await conn.QueryAsync($"COPY Object FROM '{escapedCsvPath}'")) { }
+await conn.ExecuteAsync($"COPY Object FROM '{escapedCsvPath}'");
 ```
 
 Run against the real engine (`csvPath = @"C:\data\O'Brien's exports\x.csv"`, round-tripped through

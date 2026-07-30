@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 namespace LadybugDb.Client;
 
 /// <summary>
@@ -106,6 +107,88 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// <see cref="DisposeAsync"/> performs when neither ran first.
     /// </summary>
     public bool IsCompleted => Volatile.Read(ref _completed) != 0;
+
+    /// <summary>The connection this transaction is open on, and which its statements run against.</summary>
+    /// <remarks>
+    /// A transaction belongs to its connection, not the other way round - that is what
+    /// <c>BEGIN TRANSACTION</c> means to the engine - so every statement run on
+    /// <see cref="Connection"/> participates in this transaction whether it is issued through this
+    /// object or directly. This property, and the three methods below, exist because that is not what
+    /// the shape of the API suggests: a caller holding a transaction reasonably reaches for
+    /// <c>tx.QueryAsync(...)</c> first, and finding nothing there reads as a missing feature rather
+    /// than as a deliberate model. They delegate; they do not add scoping this type cannot provide.
+    /// </remarks>
+    public LadybugConnection Connection => _connection;
+
+    /// <summary>
+    /// Runs a Cypher statement inside this transaction, by delegating to <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>The statement's result.</returns>
+    /// <remarks>
+    /// Exactly <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> on
+    /// <see cref="Connection"/> - see that property's remarks for why this delegation exists rather
+    /// than a scoped execution path.
+    /// </remarks>
+    public ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, CancellationToken cancellationToken = default) =>
+        _connection.QueryAsync(cypher, cancellationToken);
+
+    /// <summary>
+    /// Runs a parameterized Cypher statement inside this transaction, by delegating to
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">A dictionary, or an object whose public properties name the parameters.</param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>The statement's result.</returns>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default) =>
+        _connection.QueryAsync(cypher, parameters, cancellationToken);
+
+    /// <summary>
+    /// Runs a Cypher statement inside this transaction whose rows you do not need, by delegating to
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    public ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default) =>
+        _connection.ExecuteAsync(cypher, cancellationToken);
+
+    /// <summary>
+    /// Runs a parameterized Cypher statement inside this transaction whose rows you do not need, by
+    /// delegating to <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">A dictionary, or an object whose public properties name the parameters.</param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public ValueTask ExecuteAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default) =>
+        _connection.ExecuteAsync(cypher, parameters, cancellationToken);
+
+    /// <summary>
+    /// Streams this transaction's rows projected into <typeparamref name="T"/>, by delegating to
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <typeparam name="T">The shape to project each row into.</typeparam>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="parameters">A dictionary, an object whose properties name the parameters, or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">Observed while streaming.</param>
+    /// <returns>The projected rows.</returns>
+    [RequiresUnreferencedCode(
+        "Projection resolves a constructor and column conversions by reflection.")]
+    public IAsyncEnumerable<T> Select<T>(
+        string cypher, object? parameters = null, CancellationToken cancellationToken = default) =>
+        _connection.Select<T>(cypher, parameters, cancellationToken);
 
     /// <summary>Commits the transaction by issuing <c>COMMIT</c>.</summary>
     /// <param name="cancellationToken">Forwarded to the underlying <c>COMMIT</c> query.</param>

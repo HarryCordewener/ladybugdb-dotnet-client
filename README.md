@@ -47,16 +47,26 @@ using LadybugDb.Client;
 using var db = new LadybugDatabase("./mydb");
 await using var conn = await db.ConnectAsync();
 
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})");
 
 await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
 await foreach (var row in result)
 {
-    Console.WriteLine(row.GetValue(0).AsString()); // Limbo
+    Console.WriteLine(row.GetString(0)); // Limbo
 }
+
+// Or project straight into your own shape:
+await foreach (var o in conn.Select<Room>(
+    "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.dbref AS Dbref, o.name AS Name",
+    new { dbref = 42L }))
+{
+    Console.WriteLine($"{o.Dbref}: {o.Name}"); // 42: Limbo
+}
+
+record Room(long Dbref, string Name);
 ```
 
 [docs/USAGE.md](docs/USAGE.md) documents every public member with worked examples.
@@ -114,11 +124,11 @@ Or pass every parameter at once, as an anonymous object or any string-keyed dict
 a statement run once, and one per execution for a prepared one:
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: $dbref, name: $name})", new { dbref = 42L, name = "Limbo" })) { }
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})", new { dbref = 42L, name = "Limbo" });
 
 await using var stmt = await conn.PrepareAsync("CREATE (o:Object {dbref: $dbref, name: $name})");
-await using (var _ = await stmt.ExecuteAsync(new { dbref = 43L, name = "The Void" })) { }
+await stmt.ExecuteNonQueryAsync(new { dbref = 43L, name = "The Void" });
 ```
 
 Values bind at their natural width and the engine range-checks the coercion rather than truncating; a

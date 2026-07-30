@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
@@ -623,6 +624,104 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
 
         ParameterBinder.BindAll(this, parameters);
         return ValueTask.FromResult(Execute());
+    }
+
+    /// <summary>
+    /// Executes this statement with whatever is currently bound, discarding its result.
+    /// </summary>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ObjectDisposedException">This statement, its connection, or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    /// <remarks>
+    /// The counterpart to <see cref="LadybugConnection.ExecuteAsync(string, CancellationToken)"/>, for
+    /// the case a prepared statement is most often used for: the same write run many times. Without
+    /// it, reusing a plan for writes means disposing a result per execution that has nothing in it -
+    /// <see cref="ExecuteAsync(CancellationToken)"/> returns one because reads need it.
+    /// Returns nothing for the same measured reason: the engine reports no affected-row count.
+    /// </remarks>
+    public async ValueTask ExecuteNonQueryAsync(CancellationToken cancellationToken = default)
+    {
+        await using var _ = await ExecuteAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Binds <paramref name="parameters"/>, executes this statement, and discards its result.
+    /// </summary>
+    /// <param name="parameters">A dictionary keyed by parameter name, or an object whose public properties name the parameters.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ObjectDisposedException">This statement, its connection, or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public async ValueTask ExecuteNonQueryAsync(
+        object parameters, CancellationToken cancellationToken = default)
+    {
+        await using var _ = await ExecuteAsync(parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Executes this statement and streams its rows projected into <typeparamref name="T"/>,
+    /// disposing the underlying result itself.
+    /// </summary>
+    /// <typeparam name="T">The shape to project each row into - a record or class whose constructor
+    /// parameters match the returned column names, or a scalar type for a single-column result.</typeparam>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object whose public properties name the
+    /// parameters; or <see langword="null"/> to execute with whatever is already bound, which is what
+    /// the typed <c>Bind</c> overloads are for.
+    /// </param>
+    /// <param name="cancellationToken">Observed while streaming.</param>
+    /// <returns>The projected rows, streamed.</returns>
+    /// <exception cref="ObjectDisposedException">This statement, its connection, or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement, or a column will not convert to its target.</exception>
+    /// <exception cref="InvalidOperationException">No constructor of <typeparamref name="T"/> matches the returned columns, or more than one does.</exception>
+    /// <remarks>
+    /// <para>
+    /// Without this, typed projection and statement reuse were mutually exclusive: projection lived
+    /// only on <see cref="LadybugConnection.Select{T}"/>, which prepares and discards a statement per
+    /// call, so a caller who wanted both the ergonomic read and the planned-once execution had to give
+    /// one of them up and hand-map rows. Preparing once and projecting per execution is the
+    /// combination this exists to allow.
+    /// </para>
+    /// <para>
+    /// Lifetime matches <see cref="LadybugConnection.Select{T}"/>: the result is held in an
+    /// <see langword="await"/> <see langword="using"/> inside the iterator, so it is released when
+    /// enumeration completes, when the caller breaks out early, and when the caller's loop body
+    /// throws. The statement itself is <em>not</em> disposed - it is yours, and reusing it is the
+    /// point.
+    /// </para>
+    /// <para>
+    /// <b>One execution at a time per statement.</b> Bound values live on the shared native statement,
+    /// so two overlapping enumerations of the same <see cref="LadybugPreparedStatement"/> would
+    /// interleave their parameters. Enumerate one fully - or prepare a statement per concurrent
+    /// caller.
+    /// </para>
+    /// </remarks>
+    [RequiresUnreferencedCode(
+        "Projection resolves a constructor and column conversions by reflection, and reading a " +
+        "parameters object reads its public properties the same way.")]
+    public async IAsyncEnumerable<T> Select<T>(
+        object? parameters = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // null means "use what is already bound", not "bind a null parameter bag" - the same
+        // distinction LadybugConnection.Select<T> draws.
+        await using var result = parameters is null
+            ? await ExecuteAsync(cancellationToken)
+            : await ExecuteAsync(parameters, cancellationToken);
+
+        // From the result's column shape rather than its first row, so a T that cannot map these
+        // columns is reported even when the statement returns none.
+        var plan = RowMapper.ResolvePlan<T>(result.ColumnNamesArray);
+
+        await foreach (var row in result.WithCancellation(cancellationToken))
+        {
+            yield return plan.Map(row);
+        }
     }
 
     private unsafe LadybugQueryResult Execute()
