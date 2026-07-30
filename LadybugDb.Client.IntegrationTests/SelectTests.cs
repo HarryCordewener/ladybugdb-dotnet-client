@@ -453,6 +453,44 @@ public class SelectTests
     }
 
     /// <summary>
+    /// The database disposed while a projection is streaming: the next row throws
+    /// <see cref="ObjectDisposedException"/> - reading is new work against a closed database - and the
+    /// iterator's own disposal of the result still runs, on a database that is already gone. That
+    /// second half is the ordering this client documents as safe (destroying a result after its
+    /// database is cleanup, not new work) and the one that used to crash the process outright, so it is
+    /// worth pinning through this path too, where the disposal order is the client's rather than the
+    /// caller's (contrast <c>EnumerationTests.Enumeration_DatabaseDisposedMidEnumeration_ThrowsObjectDisposedException</c>).
+    /// </summary>
+    [Test]
+    public async Task Select_DatabaseDisposedMidEnumeration_ThrowsObjectDisposedException()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            var (db, conn) = await OpenWithObjects(path);
+
+            var seen = 0;
+            await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            {
+                await foreach (var _ in conn.Select<Person>(
+                    "MATCH (o:Object) RETURN o.dbref AS Dbref, o.name AS Name ORDER BY o.dbref"))
+                {
+                    // One row read while the database is still open, so this cannot pass by never
+                    // having started; then the database goes away underneath the stream.
+                    seen++;
+                    db.Dispose();
+                }
+            });
+
+            await Assert.That(seen).IsEqualTo(1);
+
+            // And the connection is still safely disposable afterward.
+            await conn.DisposeAsync();
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>
     /// Two queries returning different column shapes for the same record both project correctly through
     /// <see cref="LadybugConnection.Select{T}"/> - the plan cache is keyed by shape, and a projection
     /// resolved once per query is exactly where a type-only key would read the wrong columns.
