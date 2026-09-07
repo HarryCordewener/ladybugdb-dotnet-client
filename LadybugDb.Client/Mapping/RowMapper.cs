@@ -509,7 +509,7 @@ internal static class RowMapper
     /// (<see cref="ParameterBinder"/> has its own renderer, which speaks a different vocabulary - CLR
     /// type names, and "an anonymous type" for the shapes a parameters object comes in.)
     /// </summary>
-    private static string Describe(Type type)
+    internal static string Describe(Type type)
     {
         if (Nullable.GetUnderlyingType(type) is { } underlying) return $"{Describe(underlying)}?";
         if (type.IsArray) return $"{Describe(type.GetElementType()!)}[]";

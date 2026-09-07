@@ -1,3 +1,5 @@
+using LadybugDb.Client.Linq;
+using LadybugDb.Client.Schema;
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
@@ -12,6 +14,10 @@ namespace LadybugDb.Client.IntegrationTests;
 public class GuideSamplesTests
 {
     private record GameObject(long Dbref, string Name);
+
+    [Node("Object")] private record Obj([property: Key] long Dbref, string Name);
+    [Node("Attr")] private record AttrNode([property: Key] string Key, string Name, string Value);
+    [Rel("Has", From = typeof(Obj), To = typeof(AttrNode))] private record Has;
 
     private static async Task WithRetryAsync(Func<Task> work, int attempts = 5)
     {
@@ -132,6 +138,52 @@ public class GuideSamplesTests
         {
             TestDatabase.Cleanup(path);
             try { File.Delete(csv); } catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>Section 5b, on the state section 4 leaves: objects 1 (Limbo) and 2 (Wizard), 2 located in 1, DESC on 2.</summary>
+    [Test]
+    public async Task TheLinqSection_RunsOnTheGuidesData()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn = await db.ConnectAsync();
+            await conn.ExecuteAsync("CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync("CREATE NODE TABLE Attr(key STRING, name STRING, value STRING, PRIMARY KEY(key))");
+            await conn.ExecuteAsync("CREATE REL TABLE Has(FROM Object TO Attr)");
+            await conn.ExecuteAsync("CREATE REL TABLE Located(FROM Object TO Object)");
+            await conn.ExecuteAsync("CREATE (:Object {dbref: $dbref, name: $name})", new { dbref = 1L, name = "Limbo" });
+            await conn.ExecuteAsync("CREATE (:Object {dbref: $dbref, name: $name})", new { dbref = 2L, name = "Wizard" });
+            await conn.ExecuteAsync(
+                "MATCH (o:Object {dbref: $dbref}) CREATE (o)-[:Has]->(:Attr {key: $key, name: $name, value: $value})",
+                new { dbref = 2L, key = "2/DESC", name = "DESC", value = "A tall figure." });
+            await conn.ExecuteAsync(
+                "MATCH (a:Object {dbref: $a}), (b:Object {dbref: $b}) CREATE (a)-[:Located]->(b)",
+                new { a = 2L, b = 1L });
+
+            // 5b. LINQ
+            var wizard = await conn.Nodes<Obj>().Where(o => o.Dbref == 2).Select(o => o.Name).SingleAsync();
+            await Assert.That(wizard).IsEqualTo("Wizard");
+
+            var desc = await conn.Nodes<Obj>()
+                .Where(o => o.Dbref == 2)
+                .Out<Obj, Has, AttrNode>()
+                .Where(p => p.Target.Name == "DESC")
+                .Select(p => p.Target.Value)
+                .FirstOrDefaultAsync();
+            await Assert.That(desc).IsEqualTo("A tall figure.");
+            await Assert.That(conn.Nodes<Obj>().Where(o => o.Dbref == 2).Out<Obj, Has, AttrNode>().Where(p => p.Target.Name == "DESC").Select(p => p.Target.Value).ToString())
+                .IsEqualTo("MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.name = $p1 RETURN n1.value AS Value");
+
+            var exits = await conn.Match<Obj>("(r:Object {dbref: $room})<-[:Located]-(n:Object)", new { room = 1L })
+                .Select(n => n.Name).ToListAsync();
+            await Assert.That(exits).IsEquivalentTo(["Wizard"]);
+        }
+        finally
+        {
+            TestDatabase.Cleanup(path);
         }
     }
 }

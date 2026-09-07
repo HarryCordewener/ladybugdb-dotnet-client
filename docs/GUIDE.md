@@ -13,6 +13,7 @@ engine by `LadybugDb.Client.IntegrationTests/GuideSamplesTests.cs` (and the DI b
 - [3. Define the schema](#3-define-the-schema)
 - [4. Write](#4-write)
 - [5. Read](#5-read)
+- [5b. LINQ](#5b-linq)
 - [6. Hot paths: prepared statements and the cache](#6-hot-paths-prepared-statements-and-the-cache)
 - [7. Transactions and conflicts](#7-transactions-and-conflicts)
 - [8. Cancellation](#8-cancellation)
@@ -151,6 +152,40 @@ await foreach (var row in nodes)
 Every engine type marshals to a typed `LadybugValue` (`AsInt64()`, `AsString()`, `AsList()`,
 `AsNode()`, `AsBigDecimal()`, ...). [USAGE.md's type table](USAGE.md#type-coverage) has the full
 list.
+
+## 5b. LINQ
+
+The same reads as typed C#: annotate the records with `[Node]`, `[Rel]` and `[Key]`, and
+`conn.Nodes<T>()` is an `IQueryable<T>` that translates `Where`, `Select`, `OrderBy`, `Skip`/`Take`,
+the graph steps and the `...Async` terminals into one parameterized Cypher statement. Nothing runs
+on the client; an expression outside the whitelist throws at translation, naming it.
+
+```csharp
+using LadybugDb.Client.Linq;
+using LadybugDb.Client.Schema;
+
+[Node("Object")] record Obj([property: Key] long Dbref, string Name);
+[Node("Attr")]   record AttrNode([property: Key] string Key, string Name, string Value);
+[Rel("Has", From = typeof(Obj), To = typeof(AttrNode))] record Has;
+
+var wizard = await conn.Nodes<Obj>().Where(o => o.Dbref == 2).Select(o => o.Name).SingleAsync();
+// MATCH (o:Object) WHERE o.dbref = $p0 RETURN o.name AS Name LIMIT $p1
+
+var desc = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 2)
+    .Out<Obj, Has, AttrNode>()
+    .Where(p => p.Target.Name == "DESC")
+    .Select(p => p.Target.Value)
+    .FirstOrDefaultAsync();
+// MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.name = $p1 RETURN n1.value AS Value LIMIT $p2
+
+var exits = await conn.Match<Obj>("(r:Object {dbref: $room})<-[:Located]-(n:Object)", new { room = 1L })
+    .Select(n => n.Name).ToListAsync();            // the escape hatch: your MATCH, the same typed chain after it
+```
+
+`AsAsyncEnumerable()` is the boundary: before it, Cypher; after it, the in-box
+`System.Linq.AsyncEnumerable` over the streamed rows. [USAGE.md's LINQ chapter](USAGE.md#linq) has
+the whole whitelist, the graph steps, `GroupBy` aggregates and every refusal message.
 
 ## 6. Hot paths: prepared statements and the cache
 
