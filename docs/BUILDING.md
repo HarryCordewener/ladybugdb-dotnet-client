@@ -122,4 +122,6 @@ To bump the pinned version: edit `third-party/liblbug.version`, bump the `Ladybu
 package reference in the test, benchmark and crash-repro projects to match, run
 `bash scripts/regen-interop.sh`, review the interop diff (new entry points, changed structs), and
 run the full suite and the benchmarks. Upstream publishes native packages a little after each
-engine release, so the pin can only move to a version that has one.
+engine release, so the pin can only move to a version that has one. The weekly `upstream-check`
+workflow (`.github/workflows/upstream-check.yml`) polls nuget.org for a newer `LadybugDB.Native`
+and opens an issue with the C API diff link when one appears.

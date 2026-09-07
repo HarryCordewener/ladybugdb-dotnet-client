@@ -194,13 +194,13 @@ that abstraction.
 
 The platforms are whatever upstream's `LadybugDB.Native.<rid>` packages cover:
 
-| RID | OS | Verified in this repository's CI |
+| RID | OS | This repository's CI |
 |---|---|---|
-| `linux-x64` | Linux x64 | Yes |
-| `win-x64` | Windows x64 | Yes |
-| `linux-arm64` | Linux ARM64 | No |
-| `osx-x64` | macOS x64 | No |
-| `osx-arm64` | macOS ARM64 | No |
+| `linux-x64` | Linux x64 | Unit and integration tests, required |
+| `win-x64` | Windows x64 | Unit tests, required |
+| `linux-arm64` | Linux ARM64 | Integration tests on `ubuntu-24.04-arm`, advisory until its first green run |
+| `osx-arm64` | macOS ARM64 | Unit and integration tests on `macos-latest`, advisory until its first green run |
+| `osx-x64` | macOS x64 | Not run (no GitHub-hosted Intel macOS runner) |
 
 Upstream publishes a `win-arm64` engine build but no native package for it yet; on that platform,
 place `lbug_shared.dll` from the upstream release next to the application (the resolver probes

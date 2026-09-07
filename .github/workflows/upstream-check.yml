@@ -1,0 +1,88 @@
+name: upstream-check
+# Weekly: is there a LadybugDB.Native package on nuget.org newer than the engine this client is
+# generated against (third-party/liblbug.version)? If so, open one issue (or retitle the open
+# one) with the header-diff link, so bumping the pin (docs/BUILDING.md, "How the engine version
+# is pinned") starts from the ABI change rather than from a release-notes page. Upstream's
+# native packages, not its GitHub releases, are what is polled: the pin can only move to a
+# version that has one.
+on:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare the newest stable LadybugDB.Native to the pinned engine
+        id: compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          pinned="$(tr -d '[:space:]' < third-party/liblbug.version)"
+          pinned="${pinned#v}"
+          # The flat-container index lists every version, pre-releases included; "-" marks those.
+          newest="$(curl -fsSL https://api.nuget.org/v3-flatcontainer/ladybugdb.native/index.json \
+            | jq -r '.versions[] | select(test("-") | not)' | sort -V | tail -n1)"
+          if [ -z "$newest" ]; then
+            echo "::error::No stable LadybugDB.Native version found on nuget.org." >&2
+            exit 1
+          fi
+          newer=false
+          if [ "$pinned" != "$newest" ] && [ "$(printf '%s\n%s\n' "$pinned" "$newest" | sort -V | tail -n1)" = "$newest" ]; then
+            newer=true
+          fi
+          echo "pinned=$pinned; newest stable=$newest; newer=$newer"
+          {
+            echo "pinned=$pinned"
+            echo "newest=$newest"
+            echo "newer=$newer"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the issue
+        if: steps.compare.outputs.newer == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PINNED: ${{ steps.compare.outputs.pinned }}
+          NEWEST: ${{ steps.compare.outputs.newest }}
+        run: |
+          set -euo pipefail
+          title="Upstream LadybugDB.Native ${NEWEST} is available"
+          body_file="$(mktemp)"
+          cat > "$body_file" <<EOF
+          Upstream published \`LadybugDB.Native\` **${NEWEST}** on nuget.org. This repository's interop is generated against engine **v${PINNED}** (\`third-party/liblbug.version\`).
+
+          C API diff between the two engines: https://github.com/LadybugDB/ladybug/compare/v${PINNED}...v${NEWEST}
+
+          Watch \`src/include/c_api/lbug.h\` in that diff: a new entry point is optional to adopt, a changed signature or struct is not.
+
+          To bump the pin, follow [docs/BUILDING.md, "How the engine version is pinned"](https://github.com/${GH_REPO}/blob/main/docs/BUILDING.md#how-the-engine-version-is-pinned): edit \`third-party/liblbug.version\`, bump every \`LadybugDB.Native\` package reference to match, run \`scripts/regen-interop.sh\`, review the interop diff, run the full suite and the benchmarks, and add a \`Changed\` line to \`CHANGELOG.md\`.
+
+          _Opened by the weekly \`upstream-check\` workflow; it retitles this issue if a newer version appears before the pin moves._
+          EOF
+
+          # One issue at a time: reuse the open one this workflow created (matched by its title
+          # prefix), retitling it when the newest version has moved on since it was opened.
+          existing="$(gh issue list --state open --search '"Upstream LadybugDB.Native" in:title' \
+            --json number,title --jq '[.[] | select(.title | startswith("Upstream LadybugDB.Native "))] | first')"
+          if [ -n "$existing" ] && [ "$existing" != "null" ]; then
+            number="$(jq -r '.number' <<< "$existing")"
+            current_title="$(jq -r '.title' <<< "$existing")"
+            if [ "$current_title" = "$title" ]; then
+              echo "Issue #${number} already tracks ${NEWEST}; nothing to do."
+            else
+              gh issue edit "$number" --title "$title" --body-file "$body_file"
+              gh issue comment "$number" --body "Updated: the newest stable \`LadybugDB.Native\` is now **${NEWEST}**."
+              echo "Retitled issue #${number} for ${NEWEST}."
+            fi
+          else
+            gh issue create --title "$title" --body-file "$body_file"
+          fi
