@@ -32,16 +32,33 @@ public class RowMapperIntegrationTests
 
     private record Truncatable(decimal Balance);
 
+    /// <remarks>Ownership passes to the caller only on the way out - see ParameterObjectTests.Open.</remarks>
     private static async Task<(LadybugDatabase Db, LadybugConnection Connection)> OpenWithObjects(string path)
     {
         var db = new LadybugDatabase(path);
-        var conn = await db.ConnectAsync();
-        await conn.ExecuteAsync(
-            "CREATE NODE TABLE Object(dbref INT64, name STRING, parent INT64, PRIMARY KEY(dbref))");
-        await conn.ExecuteAsync("CREATE (n:Object {dbref: 1, name: 'Limbo', parent: 0})");
-        await conn.ExecuteAsync("CREATE (n:Object {dbref: 2, name: 'Master Room', parent: 1})");
-        await conn.ExecuteAsync("CREATE (n:Object {dbref: 3, name: 'Void'})");
-        return (db, conn);
+        try
+        {
+            var conn = await db.ConnectAsync();
+            try
+            {
+                await conn.ExecuteAsync(
+                    "CREATE NODE TABLE Object(dbref INT64, name STRING, parent INT64, PRIMARY KEY(dbref))");
+                await conn.ExecuteAsync("CREATE (n:Object {dbref: 1, name: 'Limbo', parent: 0})");
+                await conn.ExecuteAsync("CREATE (n:Object {dbref: 2, name: 'Master Room', parent: 1})");
+                await conn.ExecuteAsync("CREATE (n:Object {dbref: 3, name: 'Void'})");
+                return (db, conn);
+            }
+            catch
+            {
+                await conn.DisposeAsync();
+                throw;
+            }
+        }
+        catch
+        {
+            db.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

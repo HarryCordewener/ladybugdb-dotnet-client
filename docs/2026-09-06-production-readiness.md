@@ -20,6 +20,13 @@ Companion documents written the same day:
 
 ## Verdict
 
+**Addendum, same day, after the roadmap was executed:** items 3 through 5 and 8 of the roadmap
+below are done (the read path, `IDisposable`, the checkpoint settings, the statement cache,
+cancellation, telemetry, package hygiene, and the Extensions package), and the LINQ surface
+landed as a separate set of commits; the checklist table is updated in place and the changelog
+carries the details. What still stands between this and a 1.0 is now only time in production and
+an engine pin that can move once upstream publishes a native package for 0.20.x.
+
 **Ready for SharpMUSH to build against on a branch. Not ready to publish as a general-purpose
 package.** The core is sound: the lifetime model, the type coverage and the transaction guard are
 better than either other .NET binding, the test suite is 384 tests against the real engine, and
@@ -98,7 +105,7 @@ Exceptions carry the native message and the statement. The classifier is the one
 wording is matched; it now covers both conflict wordings and both dispatch paths. Gap: no error
 code. The C API exposes none, so this is a documentation matter only.
 
-### API surface and usability — good, three gaps
+### API surface and usability — good, three gaps (all three closed the same day; see the addendum under the verdict)
 
 What works well: parameter objects with silent-corruption cases tested, `Select<T>` resolved from
 the column shape (so an empty result still reports a mismatched target), typed row accessors,
@@ -171,14 +178,14 @@ packaging rather than improving our own:
   `RequiresUnreferencedCode` correctly; the assembly is not marked `IsAotCompatible` and nothing in
   CI publishes an AOT sample.
 
-### Observability — absent
+### Observability — absent at review time (closed the same day: `LadybugDiagnostics` and `LadybugDb.Client.Extensions`)
 
 No logging, no `ActivitySource`, no `Meter`, no health check, no DI registration. For SharpMUSH this
 is optional; for an outside consumer it is what "production" means. The research appendix gives
 the OpenTelemetry database conventions (stable since 1.33) and the Aspire client-integration shape;
 put them in an `Extensions` package so the core stays dependency-free.
 
-### Platforms — six packaged, two verified
+### Platforms — five packaged, two verified
 
 linux-x64 and win-x64 run in CI. linux-arm64, osx-x64 and osx-arm64 come from upstream's packages
 and are never executed here (win-arm64 has no upstream package; see the packaging addendum). A GitHub-hosted macOS runner and an arm64 Linux runner both
@@ -376,27 +383,29 @@ From the research appendix, marked against this repository today.
 | README positions against `LadybugDB` | done today |
 | Trusted Publishing, no API keys | done |
 | `PackageReadmeFile`, license expression, repository URL | done |
-| `PackageIcon`, `PackageTags`, `PublishRepositoryUrl`, release notes | missing |
-| `ContinuousIntegrationBuild` on CI, snupkg | missing |
-| `EnablePackageValidation` | missing |
-| `PublicApiAnalyzers` with shipped/unshipped files | missing |
-| `IsAotCompatible` + an AOT publish in CI | missing |
+| `PackageIcon`, `PackageTags`, `PublishRepositoryUrl`, release notes | done (package hygiene, same day) |
+| `ContinuousIntegrationBuild` on CI, snupkg | done |
+| `EnablePackageValidation` | done; the baseline version is set at the first publish |
+| `PublicApiAnalyzers` with shipped/unshipped files | done (both packages; RS0026/RS0027 disabled with the reason in the csproj) |
+| `IsAotCompatible` + an AOT publish in CI | done (`samples/LadybugDb.Client.AotSample`, `aot-publish` job) |
 | `[LibraryImport]` | done; `DisableRuntimeMarshalling` and `SuppressGCTransition` not applied |
 | Native binaries with verified provenance, `runtimes/{rid}/native` | done via upstream's `LadybugDB.Native.<rid>` packages (addendum) |
 | Resolver remapping `lbug_shared` ↔ `liblbug` | done |
 | Thread-safety and disposal contract per type, tested | done |
 | SafeHandle everywhere, parent/child lifetime | done |
-| SemVer, `CHANGELOG.md`, tagged releases, engine-compatibility policy | version only; the rest missing |
+| SemVer, `CHANGELOG.md`, tagged releases, engine-compatibility policy | done (`CHANGELOG.md`, `docs/RELEASING.md` versioning section, `.github/release.yml`) |
 | Exceptions carry native text | done |
-| `IDisposable` alongside `IAsyncDisposable` | missing |
-| Cancellation via `interrupt` | missing |
-| DI / health / telemetry extensions | missing |
+| `IDisposable` alongside `IAsyncDisposable` | done |
+| Cancellation via `interrupt` | done |
+| DI / health / telemetry extensions | done (`LadybugDiagnostics` in the core; `LadybugDb.Client.Extensions` for DI and the health check) |
 | Benchmarks in-tree with published numbers | done today |
-| CI on every packaged RID | two of six |
+| CI on every packaged RID | four of five (linux-x64, win-x64, osx-arm64, linux-arm64 legs; osx-x64 has no hosted runner) |
 
 ## LINQ direction
 
-The design is in the spec linked above. The short version: a small immutable Cypher AST and
+**Implemented the same day** as designed (Phases A and B; the source-generator phase C remains
+future work): see the LINQ chapter of `docs/USAGE.md` and section 5b of `docs/GUIDE.md`. The
+design is in the spec linked above. The short version: a small immutable Cypher AST and
 renderer as the substrate (usable on its own as a fluent DSL and as the never-interpolate guarantee
 SharpMUSH wants), `[Node]`/`[Rel]` descriptors validated against `CALL show_tables()`/`table_info()`
 at start-up, and an `IQueryable<T>` front end whose translator is a published whitelist that throws

@@ -24,6 +24,19 @@ internal static class ValueReader
     internal static unsafe LadybugValue Read(lbug_value* value) => Read(value, 0);
 
     /// <summary>
+    /// Reads a column value whose type <see cref="LadybugQueryResult"/> already read once, skipping
+    /// the per-value <c>lbug_value_get_data_type</c> (a C++ allocation per call). An <c>ANY</c>
+    /// column says nothing about the value and falls back to the per-value lookup.
+    /// </summary>
+    internal static unsafe LadybugValue Read(lbug_value* value, lbug_data_type_id columnType)
+    {
+        if (columnType == lbug_data_type_id.LBUG_ANY) return Read(value, 0);
+        if (LbugNative.lbug_value_is_null(value) != 0)
+            return new LadybugValue(LadybugType.Null, null);
+        return ReadOfType(value, columnType, 0);
+    }
+
+    /// <summary>
     /// Recursive worker behind <see cref="Read(lbug_value*)"/>. <paramref name="depth"/> counts
     /// how many container levels have already been entered to read <paramref name="value"/>;
     /// each container branch (list/struct/map/node) passes <c>depth + 1</c> when it recurses into
@@ -45,6 +58,11 @@ internal static class ValueReader
             typeId = LbugNative.lbug_data_type_get_id((lbug_logical_type*)lease.Pointer);
         }
 
+        return ReadOfType(value, typeId, depth);
+    }
+
+    private static unsafe LadybugValue ReadOfType(lbug_value* value, lbug_data_type_id typeId, int depth)
+    {
         return typeId switch
         {
             lbug_data_type_id.LBUG_BOOL => ReadBool(value),

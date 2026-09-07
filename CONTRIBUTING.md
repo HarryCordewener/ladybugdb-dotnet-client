@@ -38,6 +38,12 @@ generated against is pinned in `third-party/liblbug.version` — see
 [docs/BUILDING.md](docs/BUILDING.md#how-the-engine-version-is-pinned). If your change needs a newer
 engine, bump the pin and the package references together and regenerate the interop.
 
+## Public API changes
+
+Every public member is listed in `PublicAPI.Unshipped.txt` (or `PublicAPI.Shipped.txt`) next to
+the project; the build fails until it is. Add the line the RS0016 error prints, and describe the
+change under `Unreleased` in `CHANGELOG.md`. See [docs/RELEASING.md](docs/RELEASING.md#the-public-api-files).
+
 ## Generated interop
 
 `LadybugDb.Client/Native/LbugNative.g.cs` is generated from the pinned `lbug.h` header — see
@@ -46,6 +52,15 @@ shape needs to change, change `scripts/regen-interop.sh` (or the pinned generato
 regenerate, so the change survives the next regeneration instead of being silently reverted by it.
 CI's `interop-drift` job fails any pull request where the committed file doesn't match a fresh
 regeneration, so this is enforced, not just requested.
+
+## Pull request labels and the changelog
+
+Label every pull request with one of `added`, `changed`, `fixed`, `documentation` or
+`dependencies` (`enhancement` and `bug` work as synonyms for the first and third). GitHub's
+generated release notes sort PRs into sections by those labels
+([`.github/release.yml`](.github/release.yml)); an unlabelled PR lands in "Other", and
+`skip-changelog` keeps it out entirely. A change that a consumer would notice also gets a line
+under `Unreleased` in [CHANGELOG.md](CHANGELOG.md), in the matching section.
 
 ## Code style
 

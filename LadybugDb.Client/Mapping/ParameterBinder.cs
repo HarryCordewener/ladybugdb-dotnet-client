@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using ExtendedNumerics;
@@ -68,7 +69,14 @@ internal static class ParameterBinder
             return pairs;
         }
 
-        // Every other dictionary shape, at any value type. Values box on the way through.
+        // Any other dictionary, at any value type: every one of them enumerates as
+        // KeyValuePair<string, TValue>, which is the one shape they all share. The public contract
+        // says a string-keyed dictionary is accepted, and testing only for the two interfaces above
+        // rejected anything that implements neither - a custom IReadOnlyDictionary<string, int>, or
+        // ExpandoObject, which implements IDictionary<string, object?> and nothing else here.
+        if (StringKeyedPairReader.TryRead(parameters, out var generic)) return generic;
+
+        // Non-generic dictionaries, including a key type that is not a string (reported below).
         if (parameters is IDictionary untyped)
         {
             var pairs = new List<KeyValuePair<string, object?>>(untyped.Count);
@@ -118,10 +126,18 @@ internal static class ParameterBinder
         "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
         "typed Bind overloads, when trimming.")]
     internal static void BindAll(
-        LadybugPreparedStatement statement, object parameters, string paramName = "parameters")
-    {
-        var pairs = Enumerate(parameters, paramName);
+        LadybugPreparedStatement statement, object parameters, string paramName = "parameters") =>
+        BindAll(statement, Enumerate(parameters, paramName), paramName);
 
+    /// <summary>
+    /// The second half of <see cref="BindAll(LadybugPreparedStatement, object, string)"/>, for a
+    /// caller that already enumerated the parameters (the statement cache checks their names
+    /// first and must not reflect over the object twice).
+    /// </summary>
+    internal static void BindAll(
+        LadybugPreparedStatement statement, IReadOnlyList<KeyValuePair<string, object?>> pairs,
+        string paramName = "parameters")
+    {
         foreach (var (name, value) in pairs)
         {
             if (!BindOrValidate(statement: null, name, value))
@@ -164,7 +180,7 @@ internal static class ParameterBinder
     }
 
     /// <summary>
-    /// The single dispatch table behind both <see cref="Bind"/> and <see cref="BindAll"/>, mapping a
+    /// The single dispatch table behind both <see cref="Bind"/> and <see cref="BindAll(LadybugPreparedStatement, object, string)"/>, mapping a
     /// value's runtime type onto one of <see cref="LadybugPreparedStatement"/>'s typed <c>Bind</c>
     /// overloads. Returns <see langword="false"/>, rather than throwing, when the type has no
     /// overload, so the caller can attach its own <c>paramName</c>.
@@ -343,5 +359,60 @@ internal static class ParameterBinder
         var name = type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)];
         var args = string.Join(", ", type.GetGenericArguments().Select(Describe));
         return $"{name}<{args}>";
+    }
+
+    /// <summary>
+    /// Reads any <c>IEnumerable&lt;KeyValuePair&lt;string, TValue&gt;&gt;</c> - which every
+    /// string-keyed dictionary is - into the binder's own pair list.
+    /// </summary>
+    /// <remarks>
+    /// The element's <c>Key</c> and <c>Value</c> are read through cached <see cref="PropertyInfo"/>s
+    /// rather than a generic method built per value type: constructing one would need
+    /// <see cref="System.Reflection.MethodInfo.MakeGenericMethod"/>, which is not AOT-safe and would
+    /// force <c>RequiresDynamicCode</c> onto every parameterized query overload. This path is only
+    /// reached by dictionaries that implement neither of the two interfaces checked first, so it is
+    /// the rare case paying for the reflection, not the common one.
+    /// </remarks>
+    private static class StringKeyedPairReader
+    {
+        /// <summary><see langword="null"/> for a type that is not a string-keyed dictionary.</summary>
+        private static readonly ConcurrentDictionary<Type, ElementAccess?> Accessors = new();
+
+        private sealed record ElementAccess(PropertyInfo Key, PropertyInfo Value);
+
+        [RequiresUnreferencedCode("Inspects the parameters object's interfaces and reads KeyValuePair members by reflection.")]
+        internal static bool TryRead(
+            object parameters, [NotNullWhen(true)] out IReadOnlyList<KeyValuePair<string, object?>>? pairs)
+        {
+            var access = Accessors.GetOrAdd(parameters.GetType(), static type =>
+            {
+                var element = type.GetInterfaces()
+                    .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+                    .Select(i => i.GetGenericArguments()[0])
+                    .FirstOrDefault(e => e.IsGenericType
+                        && e.GetGenericTypeDefinition() == typeof(KeyValuePair<,>)
+                        && e.GetGenericArguments()[0] == typeof(string));
+
+                return element is null
+                    ? null
+                    : new ElementAccess(element.GetProperty("Key")!, element.GetProperty("Value")!);
+            });
+
+            if (access is null)
+            {
+                pairs = null;
+                return false;
+            }
+
+            var read = new List<KeyValuePair<string, object?>>();
+            foreach (var entry in (IEnumerable)parameters)
+            {
+                read.Add(new KeyValuePair<string, object?>(
+                    (string)access.Key.GetValue(entry)!, access.Value.GetValue(entry)));
+            }
+
+            pairs = read;
+            return true;
+        }
     }
 }

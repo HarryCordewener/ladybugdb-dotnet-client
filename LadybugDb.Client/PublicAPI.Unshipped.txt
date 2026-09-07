@@ -1,0 +1,1125 @@
+#nullable enable
+LadybugDb.Client.Cypher.AliasExpr
+LadybugDb.Client.Cypher.AliasExpr.Alias.get -> string!
+LadybugDb.Client.Cypher.AliasExpr.Alias.init -> void
+LadybugDb.Client.Cypher.AliasExpr.AliasExpr(LadybugDb.Client.Cypher.Expr! Expression, string! Alias) -> void
+LadybugDb.Client.Cypher.AliasExpr.Deconstruct(out LadybugDb.Client.Cypher.Expr! Expression, out string! Alias) -> void
+LadybugDb.Client.Cypher.AliasExpr.Equals(LadybugDb.Client.Cypher.AliasExpr? other) -> bool
+LadybugDb.Client.Cypher.AliasExpr.Expression.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.AliasExpr.Expression.init -> void
+LadybugDb.Client.Cypher.BinaryExpr
+LadybugDb.Client.Cypher.BinaryExpr.BinaryExpr(LadybugDb.Client.Cypher.BinaryOperator Operator, LadybugDb.Client.Cypher.Expr! Left, LadybugDb.Client.Cypher.Expr! Right) -> void
+LadybugDb.Client.Cypher.BinaryExpr.Deconstruct(out LadybugDb.Client.Cypher.BinaryOperator Operator, out LadybugDb.Client.Cypher.Expr! Left, out LadybugDb.Client.Cypher.Expr! Right) -> void
+LadybugDb.Client.Cypher.BinaryExpr.Equals(LadybugDb.Client.Cypher.BinaryExpr? other) -> bool
+LadybugDb.Client.Cypher.BinaryExpr.Left.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.BinaryExpr.Left.init -> void
+LadybugDb.Client.Cypher.BinaryExpr.Operator.get -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryExpr.Operator.init -> void
+LadybugDb.Client.Cypher.BinaryExpr.Right.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.BinaryExpr.Right.init -> void
+LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Add = 11 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.And = 6 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Contains = 10 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Divide = 14 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.EndsWith = 9 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Equal = 0 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.GreaterThan = 4 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.GreaterThanOrEqual = 5 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.LessThan = 2 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.LessThanOrEqual = 3 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Modulo = 15 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Multiply = 13 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.NotEqual = 1 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Or = 7 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.StartsWith = 8 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.BinaryOperator.Subtract = 12 -> LadybugDb.Client.Cypher.BinaryOperator
+LadybugDb.Client.Cypher.CaseBranch
+LadybugDb.Client.Cypher.CaseBranch.<Clone>$() -> LadybugDb.Client.Cypher.CaseBranch!
+LadybugDb.Client.Cypher.CaseBranch.CaseBranch(LadybugDb.Client.Cypher.Expr! When, LadybugDb.Client.Cypher.Expr! Then) -> void
+LadybugDb.Client.Cypher.CaseBranch.Deconstruct(out LadybugDb.Client.Cypher.Expr! When, out LadybugDb.Client.Cypher.Expr! Then) -> void
+LadybugDb.Client.Cypher.CaseBranch.Equals(LadybugDb.Client.Cypher.CaseBranch? other) -> bool
+LadybugDb.Client.Cypher.CaseBranch.Then.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.CaseBranch.Then.init -> void
+LadybugDb.Client.Cypher.CaseBranch.When.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.CaseBranch.When.init -> void
+LadybugDb.Client.Cypher.CaseExpr
+LadybugDb.Client.Cypher.CaseExpr.Branches.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.CaseBranch!>!
+LadybugDb.Client.Cypher.CaseExpr.Branches.init -> void
+LadybugDb.Client.Cypher.CaseExpr.CaseExpr(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.CaseBranch!>! Branches, LadybugDb.Client.Cypher.Expr? Else) -> void
+LadybugDb.Client.Cypher.CaseExpr.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.CaseBranch!>! Branches, out LadybugDb.Client.Cypher.Expr? Else) -> void
+LadybugDb.Client.Cypher.CaseExpr.Else.get -> LadybugDb.Client.Cypher.Expr?
+LadybugDb.Client.Cypher.CaseExpr.Else.init -> void
+LadybugDb.Client.Cypher.CaseExpr.Equals(LadybugDb.Client.Cypher.CaseExpr? other) -> bool
+LadybugDb.Client.Cypher.CastExpr
+LadybugDb.Client.Cypher.CastExpr.CastExpr(LadybugDb.Client.Cypher.Expr! Operand, string! TypeName) -> void
+LadybugDb.Client.Cypher.CastExpr.Deconstruct(out LadybugDb.Client.Cypher.Expr! Operand, out string! TypeName) -> void
+LadybugDb.Client.Cypher.CastExpr.Equals(LadybugDb.Client.Cypher.CastExpr? other) -> bool
+LadybugDb.Client.Cypher.CastExpr.Operand.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.CastExpr.Operand.init -> void
+LadybugDb.Client.Cypher.CastExpr.TypeName.get -> string!
+LadybugDb.Client.Cypher.CastExpr.TypeName.init -> void
+LadybugDb.Client.Cypher.Clause
+LadybugDb.Client.Cypher.Clause.Clause() -> void
+LadybugDb.Client.Cypher.Clause.Clause(LadybugDb.Client.Cypher.Clause! original) -> void
+LadybugDb.Client.Cypher.CountExpr
+LadybugDb.Client.Cypher.CountExpr.CountExpr(bool Distinct, LadybugDb.Client.Cypher.Expr? Operand) -> void
+LadybugDb.Client.Cypher.CountExpr.Deconstruct(out bool Distinct, out LadybugDb.Client.Cypher.Expr? Operand) -> void
+LadybugDb.Client.Cypher.CountExpr.Distinct.get -> bool
+LadybugDb.Client.Cypher.CountExpr.Distinct.init -> void
+LadybugDb.Client.Cypher.CountExpr.Equals(LadybugDb.Client.Cypher.CountExpr? other) -> bool
+LadybugDb.Client.Cypher.CountExpr.Operand.get -> LadybugDb.Client.Cypher.Expr?
+LadybugDb.Client.Cypher.CountExpr.Operand.init -> void
+LadybugDb.Client.Cypher.CountSubqueryExpr
+LadybugDb.Client.Cypher.CountSubqueryExpr.CountSubqueryExpr(LadybugDb.Client.Cypher.Query! Subquery) -> void
+LadybugDb.Client.Cypher.CountSubqueryExpr.Deconstruct(out LadybugDb.Client.Cypher.Query! Subquery) -> void
+LadybugDb.Client.Cypher.CountSubqueryExpr.Equals(LadybugDb.Client.Cypher.CountSubqueryExpr? other) -> bool
+LadybugDb.Client.Cypher.CountSubqueryExpr.Subquery.get -> LadybugDb.Client.Cypher.Query!
+LadybugDb.Client.Cypher.CountSubqueryExpr.Subquery.init -> void
+LadybugDb.Client.Cypher.CreateClause
+LadybugDb.Client.Cypher.CreateClause.CreateClause(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternPath!>! Paths) -> void
+LadybugDb.Client.Cypher.CreateClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternPath!>! Paths) -> void
+LadybugDb.Client.Cypher.CreateClause.Equals(LadybugDb.Client.Cypher.CreateClause? other) -> bool
+LadybugDb.Client.Cypher.CreateClause.Paths.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternPath!>!
+LadybugDb.Client.Cypher.CreateClause.Paths.init -> void
+LadybugDb.Client.Cypher.CypherDsl
+LadybugDb.Client.Cypher.CypherText
+LadybugDb.Client.Cypher.CypherText.<Clone>$() -> LadybugDb.Client.Cypher.CypherText!
+LadybugDb.Client.Cypher.CypherText.Cypher.get -> string!
+LadybugDb.Client.Cypher.CypherText.Cypher.init -> void
+LadybugDb.Client.Cypher.CypherText.CypherText(string! Cypher, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! Parameters) -> void
+LadybugDb.Client.Cypher.CypherText.Deconstruct(out string! Cypher, out System.Collections.Generic.IReadOnlyDictionary<string!, object?>! Parameters) -> void
+LadybugDb.Client.Cypher.CypherText.Equals(LadybugDb.Client.Cypher.CypherText? other) -> bool
+LadybugDb.Client.Cypher.CypherText.Parameters.get -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+LadybugDb.Client.Cypher.CypherText.Parameters.init -> void
+LadybugDb.Client.Cypher.DeleteClause
+LadybugDb.Client.Cypher.DeleteClause.Aliases.get -> System.Collections.Generic.IReadOnlyList<string!>!
+LadybugDb.Client.Cypher.DeleteClause.Aliases.init -> void
+LadybugDb.Client.Cypher.DeleteClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<string!>! Aliases, out bool Detach) -> void
+LadybugDb.Client.Cypher.DeleteClause.DeleteClause(System.Collections.Generic.IReadOnlyList<string!>! Aliases, bool Detach) -> void
+LadybugDb.Client.Cypher.DeleteClause.Detach.get -> bool
+LadybugDb.Client.Cypher.DeleteClause.Detach.init -> void
+LadybugDb.Client.Cypher.DeleteClause.Equals(LadybugDb.Client.Cypher.DeleteClause? other) -> bool
+LadybugDb.Client.Cypher.Direction
+LadybugDb.Client.Cypher.Direction.Incoming = 1 -> LadybugDb.Client.Cypher.Direction
+LadybugDb.Client.Cypher.Direction.Outgoing = 0 -> LadybugDb.Client.Cypher.Direction
+LadybugDb.Client.Cypher.Direction.Undirected = 2 -> LadybugDb.Client.Cypher.Direction
+LadybugDb.Client.Cypher.ExistsExpr
+LadybugDb.Client.Cypher.ExistsExpr.Deconstruct(out LadybugDb.Client.Cypher.Query! Subquery) -> void
+LadybugDb.Client.Cypher.ExistsExpr.Equals(LadybugDb.Client.Cypher.ExistsExpr? other) -> bool
+LadybugDb.Client.Cypher.ExistsExpr.ExistsExpr(LadybugDb.Client.Cypher.Query! Subquery) -> void
+LadybugDb.Client.Cypher.ExistsExpr.Subquery.get -> LadybugDb.Client.Cypher.Query!
+LadybugDb.Client.Cypher.ExistsExpr.Subquery.init -> void
+LadybugDb.Client.Cypher.Expr
+LadybugDb.Client.Cypher.Expr.And(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.As(string! alias) -> LadybugDb.Client.Cypher.AliasExpr!
+LadybugDb.Client.Cypher.Expr.Asc() -> LadybugDb.Client.Cypher.SortKey!
+LadybugDb.Client.Cypher.Expr.Cast(string! typeName) -> LadybugDb.Client.Cypher.CastExpr!
+LadybugDb.Client.Cypher.Expr.Contains(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Desc() -> LadybugDb.Client.Cypher.SortKey!
+LadybugDb.Client.Cypher.Expr.DividedBy(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.EndsWith(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Eq(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Expr() -> void
+LadybugDb.Client.Cypher.Expr.Expr(LadybugDb.Client.Cypher.Expr! original) -> void
+LadybugDb.Client.Cypher.Expr.Ge(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Gt(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.In(params LadybugDb.Client.Cypher.Expr![]! items) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.InList(LadybugDb.Client.Cypher.Expr! list) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.IsNotNull() -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.IsNull() -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Le(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Lt(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Minus(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Modulo(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Ne(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Negate() -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Not() -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Or(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Plus(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.StartsWith(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.Expr.Times(LadybugDb.Client.Cypher.Expr! other) -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.FunctionExpr
+LadybugDb.Client.Cypher.FunctionExpr.Arguments.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>!
+LadybugDb.Client.Cypher.FunctionExpr.Arguments.init -> void
+LadybugDb.Client.Cypher.FunctionExpr.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Arguments) -> void
+LadybugDb.Client.Cypher.FunctionExpr.Equals(LadybugDb.Client.Cypher.FunctionExpr? other) -> bool
+LadybugDb.Client.Cypher.FunctionExpr.FunctionExpr(string! Name, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Arguments) -> void
+LadybugDb.Client.Cypher.FunctionExpr.Name.get -> string!
+LadybugDb.Client.Cypher.FunctionExpr.Name.init -> void
+LadybugDb.Client.Cypher.Identifier
+LadybugDb.Client.Cypher.InExpr
+LadybugDb.Client.Cypher.InExpr.Deconstruct(out LadybugDb.Client.Cypher.Expr! Operand, out LadybugDb.Client.Cypher.Expr! List) -> void
+LadybugDb.Client.Cypher.InExpr.Equals(LadybugDb.Client.Cypher.InExpr? other) -> bool
+LadybugDb.Client.Cypher.InExpr.InExpr(LadybugDb.Client.Cypher.Expr! Operand, LadybugDb.Client.Cypher.Expr! List) -> void
+LadybugDb.Client.Cypher.InExpr.List.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.InExpr.List.init -> void
+LadybugDb.Client.Cypher.InExpr.Operand.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.InExpr.Operand.init -> void
+LadybugDb.Client.Cypher.IsNullExpr
+LadybugDb.Client.Cypher.IsNullExpr.Deconstruct(out LadybugDb.Client.Cypher.Expr! Operand, out bool Negated) -> void
+LadybugDb.Client.Cypher.IsNullExpr.Equals(LadybugDb.Client.Cypher.IsNullExpr? other) -> bool
+LadybugDb.Client.Cypher.IsNullExpr.IsNullExpr(LadybugDb.Client.Cypher.Expr! Operand, bool Negated) -> void
+LadybugDb.Client.Cypher.IsNullExpr.Negated.get -> bool
+LadybugDb.Client.Cypher.IsNullExpr.Negated.init -> void
+LadybugDb.Client.Cypher.IsNullExpr.Operand.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.IsNullExpr.Operand.init -> void
+LadybugDb.Client.Cypher.LimitClause
+LadybugDb.Client.Cypher.LimitClause.Count.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.LimitClause.Count.init -> void
+LadybugDb.Client.Cypher.LimitClause.Deconstruct(out LadybugDb.Client.Cypher.Expr! Count) -> void
+LadybugDb.Client.Cypher.LimitClause.Equals(LadybugDb.Client.Cypher.LimitClause? other) -> bool
+LadybugDb.Client.Cypher.LimitClause.LimitClause(LadybugDb.Client.Cypher.Expr! Count) -> void
+LadybugDb.Client.Cypher.ListExpr
+LadybugDb.Client.Cypher.ListExpr.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Items) -> void
+LadybugDb.Client.Cypher.ListExpr.Equals(LadybugDb.Client.Cypher.ListExpr? other) -> bool
+LadybugDb.Client.Cypher.ListExpr.Items.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>!
+LadybugDb.Client.Cypher.ListExpr.Items.init -> void
+LadybugDb.Client.Cypher.ListExpr.ListExpr(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Items) -> void
+LadybugDb.Client.Cypher.LiteralExpr
+LadybugDb.Client.Cypher.LiteralExpr.Deconstruct(out object? Value) -> void
+LadybugDb.Client.Cypher.LiteralExpr.Equals(LadybugDb.Client.Cypher.LiteralExpr? other) -> bool
+LadybugDb.Client.Cypher.LiteralExpr.LiteralExpr(object? Value) -> void
+LadybugDb.Client.Cypher.LiteralExpr.Value.get -> object?
+LadybugDb.Client.Cypher.LiteralExpr.Value.init -> void
+LadybugDb.Client.Cypher.MatchClause
+LadybugDb.Client.Cypher.MatchClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternPath!>! Paths, out bool Optional) -> void
+LadybugDb.Client.Cypher.MatchClause.Equals(LadybugDb.Client.Cypher.MatchClause? other) -> bool
+LadybugDb.Client.Cypher.MatchClause.MatchClause(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternPath!>! Paths, bool Optional) -> void
+LadybugDb.Client.Cypher.MatchClause.Optional.get -> bool
+LadybugDb.Client.Cypher.MatchClause.Optional.init -> void
+LadybugDb.Client.Cypher.MatchClause.Paths.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternPath!>!
+LadybugDb.Client.Cypher.MatchClause.Paths.init -> void
+LadybugDb.Client.Cypher.MergeClause
+LadybugDb.Client.Cypher.MergeClause.Deconstruct(out LadybugDb.Client.Cypher.PatternPath! Path) -> void
+LadybugDb.Client.Cypher.MergeClause.Equals(LadybugDb.Client.Cypher.MergeClause? other) -> bool
+LadybugDb.Client.Cypher.MergeClause.MergeClause(LadybugDb.Client.Cypher.PatternPath! Path) -> void
+LadybugDb.Client.Cypher.MergeClause.Path.get -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.MergeClause.Path.init -> void
+LadybugDb.Client.Cypher.NodePattern
+LadybugDb.Client.Cypher.NodePattern.<Clone>$() -> LadybugDb.Client.Cypher.NodePattern!
+LadybugDb.Client.Cypher.NodePattern.Alias.get -> string?
+LadybugDb.Client.Cypher.NodePattern.Alias.init -> void
+LadybugDb.Client.Cypher.NodePattern.Deconstruct(out string? Alias, out string? Label, out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PropertyValue!>! Properties) -> void
+LadybugDb.Client.Cypher.NodePattern.Equals(LadybugDb.Client.Cypher.NodePattern? other) -> bool
+LadybugDb.Client.Cypher.NodePattern.Label.get -> string?
+LadybugDb.Client.Cypher.NodePattern.Label.init -> void
+LadybugDb.Client.Cypher.NodePattern.NodePattern(string? Alias, string? Label, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PropertyValue!>! Properties) -> void
+LadybugDb.Client.Cypher.NodePattern.NodePattern(string? alias, string? label) -> void
+LadybugDb.Client.Cypher.NodePattern.Prop(string! name) -> LadybugDb.Client.Cypher.PropertyExpr!
+LadybugDb.Client.Cypher.NodePattern.Properties.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PropertyValue!>!
+LadybugDb.Client.Cypher.NodePattern.Properties.init -> void
+LadybugDb.Client.Cypher.NodePattern.Rel(string? type, LadybugDb.Client.Cypher.NodePattern! other, string? alias = null, int? minHops = null, int? maxHops = null) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.NodePattern.RelFrom(string? type, LadybugDb.Client.Cypher.NodePattern! source, string? alias = null, int? minHops = null, int? maxHops = null) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.NodePattern.RelTo(string? type, LadybugDb.Client.Cypher.NodePattern! target, string? alias = null, int? minHops = null, int? maxHops = null) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.NodePattern.ToPatternPath() -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.NodePattern.Variable() -> LadybugDb.Client.Cypher.VariableExpr!
+LadybugDb.Client.Cypher.NodePattern.With(string! name, LadybugDb.Client.Cypher.Expr! value) -> LadybugDb.Client.Cypher.NodePattern!
+LadybugDb.Client.Cypher.OrderByClause
+LadybugDb.Client.Cypher.OrderByClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.SortKey!>! Keys) -> void
+LadybugDb.Client.Cypher.OrderByClause.Equals(LadybugDb.Client.Cypher.OrderByClause? other) -> bool
+LadybugDb.Client.Cypher.OrderByClause.Keys.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.SortKey!>!
+LadybugDb.Client.Cypher.OrderByClause.Keys.init -> void
+LadybugDb.Client.Cypher.OrderByClause.OrderByClause(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.SortKey!>! Keys) -> void
+LadybugDb.Client.Cypher.ParameterExpr
+LadybugDb.Client.Cypher.ParameterExpr.Deconstruct(out string! Name, out object? Value) -> void
+LadybugDb.Client.Cypher.ParameterExpr.Equals(LadybugDb.Client.Cypher.ParameterExpr? other) -> bool
+LadybugDb.Client.Cypher.ParameterExpr.Name.get -> string!
+LadybugDb.Client.Cypher.ParameterExpr.Name.init -> void
+LadybugDb.Client.Cypher.ParameterExpr.ParameterExpr(string! Name, object? Value) -> void
+LadybugDb.Client.Cypher.ParameterExpr.Value.get -> object?
+LadybugDb.Client.Cypher.ParameterExpr.Value.init -> void
+LadybugDb.Client.Cypher.PatternPath
+LadybugDb.Client.Cypher.PatternPath.<Clone>$() -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.PatternPath.Deconstruct(out LadybugDb.Client.Cypher.NodePattern! Start, out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternStep!>! Steps) -> void
+LadybugDb.Client.Cypher.PatternPath.Equals(LadybugDb.Client.Cypher.PatternPath? other) -> bool
+LadybugDb.Client.Cypher.PatternPath.Extend(LadybugDb.Client.Cypher.RelPattern! rel, LadybugDb.Client.Cypher.NodePattern! node) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.PatternPath.PatternPath(LadybugDb.Client.Cypher.NodePattern! Start, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternStep!>! Steps) -> void
+LadybugDb.Client.Cypher.PatternPath.Rel(string? type, LadybugDb.Client.Cypher.NodePattern! other, string? alias = null, int? minHops = null, int? maxHops = null) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.PatternPath.RelFrom(string? type, LadybugDb.Client.Cypher.NodePattern! source, string? alias = null, int? minHops = null, int? maxHops = null) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.PatternPath.RelTo(string? type, LadybugDb.Client.Cypher.NodePattern! target, string? alias = null, int? minHops = null, int? maxHops = null) -> LadybugDb.Client.Cypher.PatternPath!
+LadybugDb.Client.Cypher.PatternPath.Start.get -> LadybugDb.Client.Cypher.NodePattern!
+LadybugDb.Client.Cypher.PatternPath.Start.init -> void
+LadybugDb.Client.Cypher.PatternPath.Steps.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PatternStep!>!
+LadybugDb.Client.Cypher.PatternPath.Steps.init -> void
+LadybugDb.Client.Cypher.PatternStep
+LadybugDb.Client.Cypher.PatternStep.<Clone>$() -> LadybugDb.Client.Cypher.PatternStep!
+LadybugDb.Client.Cypher.PatternStep.Deconstruct(out LadybugDb.Client.Cypher.RelPattern! Rel, out LadybugDb.Client.Cypher.NodePattern! Node) -> void
+LadybugDb.Client.Cypher.PatternStep.Equals(LadybugDb.Client.Cypher.PatternStep? other) -> bool
+LadybugDb.Client.Cypher.PatternStep.Node.get -> LadybugDb.Client.Cypher.NodePattern!
+LadybugDb.Client.Cypher.PatternStep.Node.init -> void
+LadybugDb.Client.Cypher.PatternStep.PatternStep(LadybugDb.Client.Cypher.RelPattern! Rel, LadybugDb.Client.Cypher.NodePattern! Node) -> void
+LadybugDb.Client.Cypher.PatternStep.Rel.get -> LadybugDb.Client.Cypher.RelPattern!
+LadybugDb.Client.Cypher.PatternStep.Rel.init -> void
+LadybugDb.Client.Cypher.PropertyExpr
+LadybugDb.Client.Cypher.PropertyExpr.Alias.get -> string!
+LadybugDb.Client.Cypher.PropertyExpr.Alias.init -> void
+LadybugDb.Client.Cypher.PropertyExpr.Deconstruct(out string! Alias, out string! Name) -> void
+LadybugDb.Client.Cypher.PropertyExpr.Equals(LadybugDb.Client.Cypher.PropertyExpr? other) -> bool
+LadybugDb.Client.Cypher.PropertyExpr.Name.get -> string!
+LadybugDb.Client.Cypher.PropertyExpr.Name.init -> void
+LadybugDb.Client.Cypher.PropertyExpr.PropertyExpr(string! Alias, string! Name) -> void
+LadybugDb.Client.Cypher.PropertyValue
+LadybugDb.Client.Cypher.PropertyValue.<Clone>$() -> LadybugDb.Client.Cypher.PropertyValue!
+LadybugDb.Client.Cypher.PropertyValue.Deconstruct(out string! Name, out LadybugDb.Client.Cypher.Expr! Value) -> void
+LadybugDb.Client.Cypher.PropertyValue.Equals(LadybugDb.Client.Cypher.PropertyValue? other) -> bool
+LadybugDb.Client.Cypher.PropertyValue.Name.get -> string!
+LadybugDb.Client.Cypher.PropertyValue.Name.init -> void
+LadybugDb.Client.Cypher.PropertyValue.PropertyValue(string! Name, LadybugDb.Client.Cypher.Expr! Value) -> void
+LadybugDb.Client.Cypher.PropertyValue.Value.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.PropertyValue.Value.init -> void
+LadybugDb.Client.Cypher.Query
+LadybugDb.Client.Cypher.Query.<Clone>$() -> LadybugDb.Client.Cypher.Query!
+LadybugDb.Client.Cypher.Query.Clauses.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Clause!>!
+LadybugDb.Client.Cypher.Query.Clauses.init -> void
+LadybugDb.Client.Cypher.Query.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Clause!>! Clauses) -> void
+LadybugDb.Client.Cypher.Query.Equals(LadybugDb.Client.Cypher.Query? other) -> bool
+LadybugDb.Client.Cypher.Query.Query(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Clause!>! Clauses) -> void
+LadybugDb.Client.Cypher.Query.Render() -> LadybugDb.Client.Cypher.CypherText!
+LadybugDb.Client.Cypher.QueryBuilder
+LadybugDb.Client.Cypher.QueryBuilder.Build() -> LadybugDb.Client.Cypher.Query!
+LadybugDb.Client.Cypher.QueryBuilder.Create(params LadybugDb.Client.Cypher.PatternPath![]! paths) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Delete(params string![]! aliases) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.DetachDelete(params string![]! aliases) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Limit(LadybugDb.Client.Cypher.Expr! count) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Limit(long count) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Match(params LadybugDb.Client.Cypher.PatternPath![]! paths) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.MatchRaw(string! pattern, System.Collections.Generic.IReadOnlyDictionary<string!, object?>? parameters = null) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Merge(LadybugDb.Client.Cypher.PatternPath! path) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.OptionalMatch(params LadybugDb.Client.Cypher.PatternPath![]! paths) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.OrderBy(params LadybugDb.Client.Cypher.SortKey![]! keys) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Render() -> LadybugDb.Client.Cypher.CypherText!
+LadybugDb.Client.Cypher.QueryBuilder.Return(params LadybugDb.Client.Cypher.Expr![]! items) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.ReturnDistinct(params LadybugDb.Client.Cypher.Expr![]! items) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Set(LadybugDb.Client.Cypher.PropertyExpr! target, LadybugDb.Client.Cypher.Expr! value) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Set(string! alias, string! name, LadybugDb.Client.Cypher.Expr! value) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Skip(LadybugDb.Client.Cypher.Expr! count) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Skip(long count) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Unwind(LadybugDb.Client.Cypher.Expr! list, string! alias) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.Where(LadybugDb.Client.Cypher.Expr! predicate) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.With(params LadybugDb.Client.Cypher.Expr![]! items) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.QueryBuilder.WithDistinct(params LadybugDb.Client.Cypher.Expr![]! items) -> LadybugDb.Client.Cypher.QueryBuilder!
+LadybugDb.Client.Cypher.RawMatchClause
+LadybugDb.Client.Cypher.RawMatchClause.Deconstruct(out string! Pattern, out System.Collections.Generic.IReadOnlyDictionary<string!, object?>! Parameters) -> void
+LadybugDb.Client.Cypher.RawMatchClause.Equals(LadybugDb.Client.Cypher.RawMatchClause? other) -> bool
+LadybugDb.Client.Cypher.RawMatchClause.Parameters.get -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+LadybugDb.Client.Cypher.RawMatchClause.Parameters.init -> void
+LadybugDb.Client.Cypher.RawMatchClause.Pattern.get -> string!
+LadybugDb.Client.Cypher.RawMatchClause.Pattern.init -> void
+LadybugDb.Client.Cypher.RawMatchClause.RawMatchClause(string! Pattern, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! Parameters) -> void
+LadybugDb.Client.Cypher.RelPattern
+LadybugDb.Client.Cypher.RelPattern.<Clone>$() -> LadybugDb.Client.Cypher.RelPattern!
+LadybugDb.Client.Cypher.RelPattern.Alias.get -> string?
+LadybugDb.Client.Cypher.RelPattern.Alias.init -> void
+LadybugDb.Client.Cypher.RelPattern.Deconstruct(out string? Alias, out string? Type, out LadybugDb.Client.Cypher.Direction Direction, out int? MinHops, out int? MaxHops, out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PropertyValue!>! Properties) -> void
+LadybugDb.Client.Cypher.RelPattern.Direction.get -> LadybugDb.Client.Cypher.Direction
+LadybugDb.Client.Cypher.RelPattern.Direction.init -> void
+LadybugDb.Client.Cypher.RelPattern.Equals(LadybugDb.Client.Cypher.RelPattern? other) -> bool
+LadybugDb.Client.Cypher.RelPattern.MaxHops.get -> int?
+LadybugDb.Client.Cypher.RelPattern.MaxHops.init -> void
+LadybugDb.Client.Cypher.RelPattern.MinHops.get -> int?
+LadybugDb.Client.Cypher.RelPattern.MinHops.init -> void
+LadybugDb.Client.Cypher.RelPattern.Properties.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PropertyValue!>!
+LadybugDb.Client.Cypher.RelPattern.Properties.init -> void
+LadybugDb.Client.Cypher.RelPattern.RelPattern(string? Alias, string? Type, LadybugDb.Client.Cypher.Direction Direction, int? MinHops, int? MaxHops, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.PropertyValue!>! Properties) -> void
+LadybugDb.Client.Cypher.RelPattern.RelPattern(string? alias, string? type, LadybugDb.Client.Cypher.Direction direction, int? minHops = null, int? maxHops = null) -> void
+LadybugDb.Client.Cypher.RelPattern.Type.get -> string?
+LadybugDb.Client.Cypher.RelPattern.Type.init -> void
+LadybugDb.Client.Cypher.RelPattern.With(string! name, LadybugDb.Client.Cypher.Expr! value) -> LadybugDb.Client.Cypher.RelPattern!
+LadybugDb.Client.Cypher.ReturnClause
+LadybugDb.Client.Cypher.ReturnClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Items, out bool Distinct) -> void
+LadybugDb.Client.Cypher.ReturnClause.Distinct.get -> bool
+LadybugDb.Client.Cypher.ReturnClause.Distinct.init -> void
+LadybugDb.Client.Cypher.ReturnClause.Equals(LadybugDb.Client.Cypher.ReturnClause? other) -> bool
+LadybugDb.Client.Cypher.ReturnClause.Items.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>!
+LadybugDb.Client.Cypher.ReturnClause.Items.init -> void
+LadybugDb.Client.Cypher.ReturnClause.ReturnClause(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Items, bool Distinct) -> void
+LadybugDb.Client.Cypher.SetClause
+LadybugDb.Client.Cypher.SetClause.Assignments.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.SetItem!>!
+LadybugDb.Client.Cypher.SetClause.Assignments.init -> void
+LadybugDb.Client.Cypher.SetClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.SetItem!>! Assignments) -> void
+LadybugDb.Client.Cypher.SetClause.Equals(LadybugDb.Client.Cypher.SetClause? other) -> bool
+LadybugDb.Client.Cypher.SetClause.SetClause(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.SetItem!>! Assignments) -> void
+LadybugDb.Client.Cypher.SetItem
+LadybugDb.Client.Cypher.SetItem.<Clone>$() -> LadybugDb.Client.Cypher.SetItem!
+LadybugDb.Client.Cypher.SetItem.Deconstruct(out LadybugDb.Client.Cypher.PropertyExpr! Target, out LadybugDb.Client.Cypher.Expr! Value) -> void
+LadybugDb.Client.Cypher.SetItem.Equals(LadybugDb.Client.Cypher.SetItem? other) -> bool
+LadybugDb.Client.Cypher.SetItem.SetItem(LadybugDb.Client.Cypher.PropertyExpr! Target, LadybugDb.Client.Cypher.Expr! Value) -> void
+LadybugDb.Client.Cypher.SetItem.Target.get -> LadybugDb.Client.Cypher.PropertyExpr!
+LadybugDb.Client.Cypher.SetItem.Target.init -> void
+LadybugDb.Client.Cypher.SetItem.Value.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.SetItem.Value.init -> void
+LadybugDb.Client.Cypher.SkipClause
+LadybugDb.Client.Cypher.SkipClause.Count.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.SkipClause.Count.init -> void
+LadybugDb.Client.Cypher.SkipClause.Deconstruct(out LadybugDb.Client.Cypher.Expr! Count) -> void
+LadybugDb.Client.Cypher.SkipClause.Equals(LadybugDb.Client.Cypher.SkipClause? other) -> bool
+LadybugDb.Client.Cypher.SkipClause.SkipClause(LadybugDb.Client.Cypher.Expr! Count) -> void
+LadybugDb.Client.Cypher.SortKey
+LadybugDb.Client.Cypher.SortKey.<Clone>$() -> LadybugDb.Client.Cypher.SortKey!
+LadybugDb.Client.Cypher.SortKey.Deconstruct(out LadybugDb.Client.Cypher.Expr! Expression, out bool Descending) -> void
+LadybugDb.Client.Cypher.SortKey.Descending.get -> bool
+LadybugDb.Client.Cypher.SortKey.Descending.init -> void
+LadybugDb.Client.Cypher.SortKey.Equals(LadybugDb.Client.Cypher.SortKey? other) -> bool
+LadybugDb.Client.Cypher.SortKey.Expression.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.SortKey.Expression.init -> void
+LadybugDb.Client.Cypher.SortKey.SortKey(LadybugDb.Client.Cypher.Expr! Expression, bool Descending) -> void
+LadybugDb.Client.Cypher.TypeName
+LadybugDb.Client.Cypher.UnaryExpr
+LadybugDb.Client.Cypher.UnaryExpr.Deconstruct(out LadybugDb.Client.Cypher.UnaryOperator Operator, out LadybugDb.Client.Cypher.Expr! Operand) -> void
+LadybugDb.Client.Cypher.UnaryExpr.Equals(LadybugDb.Client.Cypher.UnaryExpr? other) -> bool
+LadybugDb.Client.Cypher.UnaryExpr.Operand.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.UnaryExpr.Operand.init -> void
+LadybugDb.Client.Cypher.UnaryExpr.Operator.get -> LadybugDb.Client.Cypher.UnaryOperator
+LadybugDb.Client.Cypher.UnaryExpr.Operator.init -> void
+LadybugDb.Client.Cypher.UnaryExpr.UnaryExpr(LadybugDb.Client.Cypher.UnaryOperator Operator, LadybugDb.Client.Cypher.Expr! Operand) -> void
+LadybugDb.Client.Cypher.UnaryOperator
+LadybugDb.Client.Cypher.UnaryOperator.Negate = 1 -> LadybugDb.Client.Cypher.UnaryOperator
+LadybugDb.Client.Cypher.UnaryOperator.Not = 0 -> LadybugDb.Client.Cypher.UnaryOperator
+LadybugDb.Client.Cypher.UnwindClause
+LadybugDb.Client.Cypher.UnwindClause.Alias.get -> string!
+LadybugDb.Client.Cypher.UnwindClause.Alias.init -> void
+LadybugDb.Client.Cypher.UnwindClause.Deconstruct(out LadybugDb.Client.Cypher.Expr! List, out string! Alias) -> void
+LadybugDb.Client.Cypher.UnwindClause.Equals(LadybugDb.Client.Cypher.UnwindClause? other) -> bool
+LadybugDb.Client.Cypher.UnwindClause.List.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.UnwindClause.List.init -> void
+LadybugDb.Client.Cypher.UnwindClause.UnwindClause(LadybugDb.Client.Cypher.Expr! List, string! Alias) -> void
+LadybugDb.Client.Cypher.VariableExpr
+LadybugDb.Client.Cypher.VariableExpr.Alias.get -> string!
+LadybugDb.Client.Cypher.VariableExpr.Alias.init -> void
+LadybugDb.Client.Cypher.VariableExpr.Deconstruct(out string! Alias) -> void
+LadybugDb.Client.Cypher.VariableExpr.Equals(LadybugDb.Client.Cypher.VariableExpr? other) -> bool
+LadybugDb.Client.Cypher.VariableExpr.VariableExpr(string! Alias) -> void
+LadybugDb.Client.Cypher.WhereClause
+LadybugDb.Client.Cypher.WhereClause.Deconstruct(out LadybugDb.Client.Cypher.Expr! Predicate) -> void
+LadybugDb.Client.Cypher.WhereClause.Equals(LadybugDb.Client.Cypher.WhereClause? other) -> bool
+LadybugDb.Client.Cypher.WhereClause.Predicate.get -> LadybugDb.Client.Cypher.Expr!
+LadybugDb.Client.Cypher.WhereClause.Predicate.init -> void
+LadybugDb.Client.Cypher.WhereClause.WhereClause(LadybugDb.Client.Cypher.Expr! Predicate) -> void
+LadybugDb.Client.Cypher.WithClause
+LadybugDb.Client.Cypher.WithClause.Deconstruct(out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Items, out bool Distinct) -> void
+LadybugDb.Client.Cypher.WithClause.Distinct.get -> bool
+LadybugDb.Client.Cypher.WithClause.Distinct.init -> void
+LadybugDb.Client.Cypher.WithClause.Equals(LadybugDb.Client.Cypher.WithClause? other) -> bool
+LadybugDb.Client.Cypher.WithClause.Items.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>!
+LadybugDb.Client.Cypher.WithClause.Items.init -> void
+LadybugDb.Client.Cypher.WithClause.WithClause(System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Cypher.Expr!>! Items, bool Distinct) -> void
+LadybugDb.Client.Diagnostics.LadybugDiagnostics
+LadybugDb.Client.LadybugConfig
+LadybugDb.Client.LadybugConfig.<Clone>$() -> LadybugDb.Client.LadybugConfig!
+LadybugDb.Client.LadybugConfig.AutoCheckpoint.get -> bool
+LadybugDb.Client.LadybugConfig.AutoCheckpoint.init -> void
+LadybugDb.Client.LadybugConfig.BufferPoolSize.get -> ulong
+LadybugDb.Client.LadybugConfig.BufferPoolSize.init -> void
+LadybugDb.Client.LadybugConfig.CheckpointThreshold.get -> ulong
+LadybugDb.Client.LadybugConfig.CheckpointThreshold.init -> void
+LadybugDb.Client.LadybugConfig.EnableChecksums.get -> bool
+LadybugDb.Client.LadybugConfig.EnableChecksums.init -> void
+LadybugDb.Client.LadybugConfig.EnableCompression.get -> bool
+LadybugDb.Client.LadybugConfig.EnableCompression.init -> void
+LadybugDb.Client.LadybugConfig.EnableMultiWrites.get -> bool
+LadybugDb.Client.LadybugConfig.EnableMultiWrites.init -> void
+LadybugDb.Client.LadybugConfig.Equals(LadybugDb.Client.LadybugConfig? other) -> bool
+LadybugDb.Client.LadybugConfig.LadybugConfig() -> void
+LadybugDb.Client.LadybugConfig.MaxDbSize.get -> ulong
+LadybugDb.Client.LadybugConfig.MaxDbSize.init -> void
+LadybugDb.Client.LadybugConfig.MaxThreads.get -> ulong
+LadybugDb.Client.LadybugConfig.MaxThreads.init -> void
+LadybugDb.Client.LadybugConfig.ReadOnly.get -> bool
+LadybugDb.Client.LadybugConfig.ReadOnly.init -> void
+LadybugDb.Client.LadybugConfig.StatementCacheSize.get -> int
+LadybugDb.Client.LadybugConfig.StatementCacheSize.init -> void
+LadybugDb.Client.LadybugConfig.ThrowOnWalReplayFailure.get -> bool
+LadybugDb.Client.LadybugConfig.ThrowOnWalReplayFailure.init -> void
+LadybugDb.Client.LadybugConnection
+LadybugDb.Client.LadybugConnection.BeginTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugTransaction!>
+LadybugDb.Client.LadybugConnection.Dispose() -> void
+LadybugDb.Client.LadybugConnection.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugConnection.ExecuteAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugConnection.ExecuteAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugConnection.Match<T>(string! pattern, object? parameters = null, string! variable = "n", LadybugDb.Client.Schema.LadybugSchema? schema = null) -> System.Linq.IQueryable<T>!
+LadybugDb.Client.LadybugConnection.Nodes<T>(LadybugDb.Client.Schema.LadybugSchema? schema = null) -> System.Linq.IQueryable<T>!
+LadybugDb.Client.LadybugConnection.PrepareAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugPreparedStatement!>
+LadybugDb.Client.LadybugConnection.QueryAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugConnection.QueryAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugConnection.Select<T>(string! cypher, object? parameters = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+LadybugDb.Client.LadybugDatabase
+LadybugDb.Client.LadybugDatabase.Config.get -> LadybugDb.Client.LadybugConfig!
+LadybugDb.Client.LadybugDatabase.ConnectAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugConnection!>
+LadybugDb.Client.LadybugDatabase.Dispose() -> void
+LadybugDb.Client.LadybugDatabase.LadybugDatabase(string! path, LadybugDb.Client.LadybugConfig? config = null) -> void
+LadybugDb.Client.LadybugDatabase.Path.get -> string!
+LadybugDb.Client.LadybugException
+LadybugDb.Client.LadybugException.LadybugException(string! message, System.Exception! innerException) -> void
+LadybugDb.Client.LadybugException.LadybugException(string! message, string? statement = null) -> void
+LadybugDb.Client.LadybugException.Statement.get -> string?
+LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugInternalId.Deconstruct(out ulong TableId, out ulong Offset) -> void
+LadybugDb.Client.LadybugInternalId.Equals(LadybugDb.Client.LadybugInternalId other) -> bool
+LadybugDb.Client.LadybugInternalId.LadybugInternalId() -> void
+LadybugDb.Client.LadybugInternalId.LadybugInternalId(ulong TableId, ulong Offset) -> void
+LadybugDb.Client.LadybugInternalId.Offset.get -> ulong
+LadybugDb.Client.LadybugInternalId.Offset.init -> void
+LadybugDb.Client.LadybugInternalId.TableId.get -> ulong
+LadybugDb.Client.LadybugInternalId.TableId.init -> void
+LadybugDb.Client.LadybugNode
+LadybugDb.Client.LadybugNode.Equals(LadybugDb.Client.LadybugNode? other) -> bool
+LadybugDb.Client.LadybugNode.Id.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugNode.Label.get -> string!
+LadybugDb.Client.LadybugNode.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugPath
+LadybugDb.Client.LadybugPath.Equals(LadybugDb.Client.LadybugPath? other) -> bool
+LadybugDb.Client.LadybugPath.Nodes.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.LadybugNode!>!
+LadybugDb.Client.LadybugPath.Relationships.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.LadybugRel!>!
+LadybugDb.Client.LadybugPreparedStatement
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, ExtendedNumerics.BigDecimal value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.DateOnly value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.DateTimeOffset value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.Guid value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.Int128 value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.TimeSpan value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, bool value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, byte value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, double value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, float value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, int value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, long value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, sbyte value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, short value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, string! value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, uint value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, ulong value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, ushort value) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindNull(string! name) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindTimestampMilliseconds(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindTimestampNanoseconds(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindTimestampSeconds(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Dispose() -> void
+LadybugDb.Client.LadybugPreparedStatement.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugPreparedStatement.ExecuteAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugPreparedStatement.ExecuteAsync(object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugPreparedStatement.ExecuteNonQueryAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugPreparedStatement.ExecuteNonQueryAsync(object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugPreparedStatement.Select<T>(object? parameters = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+LadybugDb.Client.LadybugQueryResult
+LadybugDb.Client.LadybugQueryResult.ColumnNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+LadybugDb.Client.LadybugQueryResult.Dispose() -> void
+LadybugDb.Client.LadybugQueryResult.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugQueryResult.GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerator<LadybugDb.Client.LadybugRow>!
+LadybugDb.Client.LadybugQueryResult.HasNext.get -> bool
+LadybugDb.Client.LadybugQueryResult.NextResultAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult?>
+LadybugDb.Client.LadybugRel
+LadybugDb.Client.LadybugRel.DestinationId.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugRel.Equals(LadybugDb.Client.LadybugRel? other) -> bool
+LadybugDb.Client.LadybugRel.Id.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugRel.Label.get -> string!
+LadybugDb.Client.LadybugRel.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugRel.SourceId.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugRow
+LadybugDb.Client.LadybugRow.ColumnCount.get -> int
+LadybugDb.Client.LadybugRow.GetBigDecimal(int index) -> ExtendedNumerics.BigDecimal
+LadybugDb.Client.LadybugRow.GetBigDecimal(string! columnName) -> ExtendedNumerics.BigDecimal
+LadybugDb.Client.LadybugRow.GetBlob(int index) -> byte[]!
+LadybugDb.Client.LadybugRow.GetBlob(string! columnName) -> byte[]!
+LadybugDb.Client.LadybugRow.GetBoolean(int index) -> bool
+LadybugDb.Client.LadybugRow.GetBoolean(string! columnName) -> bool
+LadybugDb.Client.LadybugRow.GetByte(int index) -> byte
+LadybugDb.Client.LadybugRow.GetByte(string! columnName) -> byte
+LadybugDb.Client.LadybugRow.GetColumnName(int index) -> string!
+LadybugDb.Client.LadybugRow.GetDateOnly(int index) -> System.DateOnly
+LadybugDb.Client.LadybugRow.GetDateOnly(string! columnName) -> System.DateOnly
+LadybugDb.Client.LadybugRow.GetDateTime(int index) -> System.DateTime
+LadybugDb.Client.LadybugRow.GetDateTime(string! columnName) -> System.DateTime
+LadybugDb.Client.LadybugRow.GetDateTimeOffset(int index) -> System.DateTimeOffset
+LadybugDb.Client.LadybugRow.GetDateTimeOffset(string! columnName) -> System.DateTimeOffset
+LadybugDb.Client.LadybugRow.GetDecimal(int index) -> decimal
+LadybugDb.Client.LadybugRow.GetDecimal(string! columnName) -> decimal
+LadybugDb.Client.LadybugRow.GetDouble(int index) -> double
+LadybugDb.Client.LadybugRow.GetDouble(string! columnName) -> double
+LadybugDb.Client.LadybugRow.GetGuid(int index) -> System.Guid
+LadybugDb.Client.LadybugRow.GetGuid(string! columnName) -> System.Guid
+LadybugDb.Client.LadybugRow.GetInt128(int index) -> System.Int128
+LadybugDb.Client.LadybugRow.GetInt128(string! columnName) -> System.Int128
+LadybugDb.Client.LadybugRow.GetInt16(int index) -> short
+LadybugDb.Client.LadybugRow.GetInt16(string! columnName) -> short
+LadybugDb.Client.LadybugRow.GetInt32(int index) -> int
+LadybugDb.Client.LadybugRow.GetInt32(string! columnName) -> int
+LadybugDb.Client.LadybugRow.GetInt64(int index) -> long
+LadybugDb.Client.LadybugRow.GetInt64(string! columnName) -> long
+LadybugDb.Client.LadybugRow.GetSByte(int index) -> sbyte
+LadybugDb.Client.LadybugRow.GetSByte(string! columnName) -> sbyte
+LadybugDb.Client.LadybugRow.GetSingle(int index) -> float
+LadybugDb.Client.LadybugRow.GetSingle(string! columnName) -> float
+LadybugDb.Client.LadybugRow.GetString(int index) -> string!
+LadybugDb.Client.LadybugRow.GetString(string! columnName) -> string!
+LadybugDb.Client.LadybugRow.GetTimeSpan(int index) -> System.TimeSpan
+LadybugDb.Client.LadybugRow.GetTimeSpan(string! columnName) -> System.TimeSpan
+LadybugDb.Client.LadybugRow.GetUInt16(int index) -> ushort
+LadybugDb.Client.LadybugRow.GetUInt16(string! columnName) -> ushort
+LadybugDb.Client.LadybugRow.GetUInt32(int index) -> uint
+LadybugDb.Client.LadybugRow.GetUInt32(string! columnName) -> uint
+LadybugDb.Client.LadybugRow.GetUInt64(int index) -> ulong
+LadybugDb.Client.LadybugRow.GetUInt64(string! columnName) -> ulong
+LadybugDb.Client.LadybugRow.GetValue(int index) -> LadybugDb.Client.LadybugValue
+LadybugDb.Client.LadybugRow.LadybugRow() -> void
+LadybugDb.Client.LadybugRow.this[string! columnName].get -> LadybugDb.Client.LadybugValue
+LadybugDb.Client.LadybugTransaction
+LadybugDb.Client.LadybugTransaction.CommitAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.Connection.get -> LadybugDb.Client.LadybugConnection!
+LadybugDb.Client.LadybugTransaction.Dispose() -> void
+LadybugDb.Client.LadybugTransaction.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.ExecuteAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.ExecuteAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.IsCompleted.get -> bool
+LadybugDb.Client.LadybugTransaction.Nodes<T>(LadybugDb.Client.Schema.LadybugSchema? schema = null) -> System.Linq.IQueryable<T>!
+LadybugDb.Client.LadybugTransaction.QueryAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugTransaction.QueryAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugTransaction.RollbackAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.Select<T>(string! cypher, object? parameters = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Blob = 16 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Boolean = 2 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Date = 18 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Decimal = 14 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Double = 13 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int128 = 11 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int16 = 4 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int32 = 5 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int64 = 6 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int8 = 3 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.InternalId = 28 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Interval = 21 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.List = 22 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Map = 24 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Node = 25 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Null = 1 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Path = 27 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Rel = 26 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Single = 12 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.String = 15 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Struct = 23 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Timestamp = 19 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.TimestampTz = 20 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt16 = 8 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt32 = 9 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt64 = 10 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt8 = 7 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Unsupported = 0 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Uuid = 17 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugValue
+LadybugDb.Client.LadybugValue.AsBigDecimal() -> ExtendedNumerics.BigDecimal
+LadybugDb.Client.LadybugValue.AsBlob() -> byte[]!
+LadybugDb.Client.LadybugValue.AsBoolean() -> bool
+LadybugDb.Client.LadybugValue.AsByte() -> byte
+LadybugDb.Client.LadybugValue.AsDateOnly() -> System.DateOnly
+LadybugDb.Client.LadybugValue.AsDateTime() -> System.DateTime
+LadybugDb.Client.LadybugValue.AsDateTimeOffset() -> System.DateTimeOffset
+LadybugDb.Client.LadybugValue.AsDecimal() -> decimal
+LadybugDb.Client.LadybugValue.AsDouble() -> double
+LadybugDb.Client.LadybugValue.AsGuid() -> System.Guid
+LadybugDb.Client.LadybugValue.AsInt128() -> System.Int128
+LadybugDb.Client.LadybugValue.AsInt16() -> short
+LadybugDb.Client.LadybugValue.AsInt32() -> int
+LadybugDb.Client.LadybugValue.AsInt64() -> long
+LadybugDb.Client.LadybugValue.AsInternalId() -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugValue.AsList() -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugValue.AsMap() -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<LadybugDb.Client.LadybugValue, LadybugDb.Client.LadybugValue>>!
+LadybugDb.Client.LadybugValue.AsNode() -> LadybugDb.Client.LadybugNode!
+LadybugDb.Client.LadybugValue.AsPath() -> LadybugDb.Client.LadybugPath!
+LadybugDb.Client.LadybugValue.AsRel() -> LadybugDb.Client.LadybugRel!
+LadybugDb.Client.LadybugValue.AsSByte() -> sbyte
+LadybugDb.Client.LadybugValue.AsSingle() -> float
+LadybugDb.Client.LadybugValue.AsString() -> string!
+LadybugDb.Client.LadybugValue.AsStruct() -> System.Collections.Generic.IReadOnlyDictionary<string!, LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugValue.AsTimeSpan() -> System.TimeSpan
+LadybugDb.Client.LadybugValue.AsUInt16() -> ushort
+LadybugDb.Client.LadybugValue.AsUInt32() -> uint
+LadybugDb.Client.LadybugValue.AsUInt64() -> ulong
+LadybugDb.Client.LadybugValue.Equals(LadybugDb.Client.LadybugValue other) -> bool
+LadybugDb.Client.LadybugValue.IsNull.get -> bool
+LadybugDb.Client.LadybugValue.LadybugValue() -> void
+LadybugDb.Client.LadybugValue.Type.get -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugWriteConflictException
+LadybugDb.Client.LadybugWriteConflictException.LadybugWriteConflictException(string! message, string? statement = null) -> void
+LadybugDb.Client.Linq.GraphSteps
+LadybugDb.Client.Linq.ILadybugAsyncQueryProvider
+LadybugDb.Client.Linq.ILadybugAsyncQueryProvider.ExecuteAsync<TResult>(System.Linq.Expressions.Expression! expression, System.Threading.CancellationToken cancellationToken) -> TResult
+LadybugDb.Client.Linq.LadybugQueryProvider
+LadybugDb.Client.Linq.LadybugQueryProvider.CreateQuery(System.Linq.Expressions.Expression! expression) -> System.Linq.IQueryable!
+LadybugDb.Client.Linq.LadybugQueryProvider.CreateQuery<TElement>(System.Linq.Expressions.Expression! expression) -> System.Linq.IQueryable<TElement>!
+LadybugDb.Client.Linq.LadybugQueryProvider.Execute(System.Linq.Expressions.Expression! expression) -> object?
+LadybugDb.Client.Linq.LadybugQueryProvider.Execute<TResult>(System.Linq.Expressions.Expression! expression) -> TResult
+LadybugDb.Client.Linq.LadybugQueryProvider.ExecuteAsync<TResult>(System.Linq.Expressions.Expression! expression, System.Threading.CancellationToken cancellationToken) -> TResult
+LadybugDb.Client.Linq.LadybugQueryProvider.Schema.get -> LadybugDb.Client.Schema.LadybugSchema!
+LadybugDb.Client.Linq.LadybugQueryable<T>
+LadybugDb.Client.Linq.LadybugQueryable<T>.ElementType.get -> System.Type!
+LadybugDb.Client.Linq.LadybugQueryable<T>.Expression.get -> System.Linq.Expressions.Expression!
+LadybugDb.Client.Linq.LadybugQueryable<T>.GetEnumerator() -> System.Collections.Generic.IEnumerator<T>!
+LadybugDb.Client.Linq.LadybugQueryable<T>.Provider.get -> System.Linq.IQueryProvider!
+LadybugDb.Client.Linq.LadybugQueryableExtensions
+LadybugDb.Client.Schema.ColumnAttribute
+LadybugDb.Client.Schema.ColumnAttribute.ColumnAttribute(string! name) -> void
+LadybugDb.Client.Schema.ColumnAttribute.Name.get -> string!
+LadybugDb.Client.Schema.ColumnDefinition
+LadybugDb.Client.Schema.ColumnDefinition.<Clone>$() -> LadybugDb.Client.Schema.ColumnDefinition!
+LadybugDb.Client.Schema.ColumnDefinition.ColumnDefinition(string! Name, string! Type) -> void
+LadybugDb.Client.Schema.ColumnDefinition.Deconstruct(out string! Name, out string! Type) -> void
+LadybugDb.Client.Schema.ColumnDefinition.Equals(LadybugDb.Client.Schema.ColumnDefinition? other) -> bool
+LadybugDb.Client.Schema.ColumnDefinition.Name.get -> string!
+LadybugDb.Client.Schema.ColumnDefinition.Name.init -> void
+LadybugDb.Client.Schema.ColumnDefinition.Type.get -> string!
+LadybugDb.Client.Schema.ColumnDefinition.Type.init -> void
+LadybugDb.Client.Schema.Ddl
+LadybugDb.Client.Schema.KeyAttribute
+LadybugDb.Client.Schema.KeyAttribute.KeyAttribute() -> void
+LadybugDb.Client.Schema.LadybugSchema
+LadybugDb.Client.Schema.LadybugSchema.CreateTableStatements() -> System.Collections.Generic.IReadOnlyList<string!>!
+LadybugDb.Client.Schema.LadybugSchema.CreateTablesAsync(LadybugDb.Client.LadybugConnection! connection, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.Schema.LadybugSchema.Node(System.Type! type) -> LadybugDb.Client.Schema.NodeDescriptor!
+LadybugDb.Client.Schema.LadybugSchema.Node<T>() -> LadybugDb.Client.Schema.NodeDescriptor!
+LadybugDb.Client.Schema.LadybugSchema.Nodes.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.NodeDescriptor!>!
+LadybugDb.Client.Schema.LadybugSchema.Rel(System.Type! type) -> LadybugDb.Client.Schema.RelDescriptor!
+LadybugDb.Client.Schema.LadybugSchema.Rel<T>() -> LadybugDb.Client.Schema.RelDescriptor!
+LadybugDb.Client.Schema.LadybugSchema.Rels.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.RelDescriptor!>!
+LadybugDb.Client.Schema.LadybugSchema.TryGetNode(System.Type! type, out LadybugDb.Client.Schema.NodeDescriptor? node) -> bool
+LadybugDb.Client.Schema.LadybugSchema.TryGetRel(System.Type! type, out LadybugDb.Client.Schema.RelDescriptor? rel) -> bool
+LadybugDb.Client.Schema.LadybugSchema.ValidateAsync(LadybugDb.Client.LadybugConnection! connection, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.Schema.NodeAttribute
+LadybugDb.Client.Schema.NodeAttribute.NodeAttribute(string! table) -> void
+LadybugDb.Client.Schema.NodeAttribute.Table.get -> string!
+LadybugDb.Client.Schema.NodeDescriptor
+LadybugDb.Client.Schema.NodeDescriptor.<Clone>$() -> LadybugDb.Client.Schema.NodeDescriptor!
+LadybugDb.Client.Schema.NodeDescriptor.ClrType.get -> System.Type!
+LadybugDb.Client.Schema.NodeDescriptor.ClrType.init -> void
+LadybugDb.Client.Schema.NodeDescriptor.Deconstruct(out System.Type! ClrType, out string! Table, out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.PropertyDescriptor!>! Properties, out LadybugDb.Client.Schema.PropertyDescriptor! Key) -> void
+LadybugDb.Client.Schema.NodeDescriptor.Equals(LadybugDb.Client.Schema.NodeDescriptor? other) -> bool
+LadybugDb.Client.Schema.NodeDescriptor.FindProperty(string! clrName) -> LadybugDb.Client.Schema.PropertyDescriptor?
+LadybugDb.Client.Schema.NodeDescriptor.Key.get -> LadybugDb.Client.Schema.PropertyDescriptor!
+LadybugDb.Client.Schema.NodeDescriptor.Key.init -> void
+LadybugDb.Client.Schema.NodeDescriptor.NodeDescriptor(System.Type! ClrType, string! Table, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.PropertyDescriptor!>! Properties, LadybugDb.Client.Schema.PropertyDescriptor! Key) -> void
+LadybugDb.Client.Schema.NodeDescriptor.Properties.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.PropertyDescriptor!>!
+LadybugDb.Client.Schema.NodeDescriptor.Properties.init -> void
+LadybugDb.Client.Schema.NodeDescriptor.Table.get -> string!
+LadybugDb.Client.Schema.NodeDescriptor.Table.init -> void
+LadybugDb.Client.Schema.PropertyDescriptor
+LadybugDb.Client.Schema.PropertyDescriptor.<Clone>$() -> LadybugDb.Client.Schema.PropertyDescriptor!
+LadybugDb.Client.Schema.PropertyDescriptor.ClrName.get -> string!
+LadybugDb.Client.Schema.PropertyDescriptor.ClrName.init -> void
+LadybugDb.Client.Schema.PropertyDescriptor.ClrType.get -> System.Type!
+LadybugDb.Client.Schema.PropertyDescriptor.ClrType.init -> void
+LadybugDb.Client.Schema.PropertyDescriptor.Column.get -> string!
+LadybugDb.Client.Schema.PropertyDescriptor.Column.init -> void
+LadybugDb.Client.Schema.PropertyDescriptor.Deconstruct(out string! Column, out string! ClrName, out System.Type! ClrType, out LadybugDb.Client.LadybugType EngineType, out string! EngineTypeName) -> void
+LadybugDb.Client.Schema.PropertyDescriptor.EngineType.get -> LadybugDb.Client.LadybugType
+LadybugDb.Client.Schema.PropertyDescriptor.EngineType.init -> void
+LadybugDb.Client.Schema.PropertyDescriptor.EngineTypeName.get -> string!
+LadybugDb.Client.Schema.PropertyDescriptor.EngineTypeName.init -> void
+LadybugDb.Client.Schema.PropertyDescriptor.Equals(LadybugDb.Client.Schema.PropertyDescriptor? other) -> bool
+LadybugDb.Client.Schema.PropertyDescriptor.PropertyDescriptor(string! Column, string! ClrName, System.Type! ClrType, LadybugDb.Client.LadybugType EngineType, string! EngineTypeName) -> void
+LadybugDb.Client.Schema.RelAttribute
+LadybugDb.Client.Schema.RelAttribute.From.get -> System.Type?
+LadybugDb.Client.Schema.RelAttribute.From.set -> void
+LadybugDb.Client.Schema.RelAttribute.RelAttribute(string! table) -> void
+LadybugDb.Client.Schema.RelAttribute.RelAttribute(string! table, System.Type! from, System.Type! to) -> void
+LadybugDb.Client.Schema.RelAttribute.Table.get -> string!
+LadybugDb.Client.Schema.RelAttribute.To.get -> System.Type?
+LadybugDb.Client.Schema.RelAttribute.To.set -> void
+LadybugDb.Client.Schema.RelDescriptor
+LadybugDb.Client.Schema.RelDescriptor.<Clone>$() -> LadybugDb.Client.Schema.RelDescriptor!
+LadybugDb.Client.Schema.RelDescriptor.ClrType.get -> System.Type!
+LadybugDb.Client.Schema.RelDescriptor.ClrType.init -> void
+LadybugDb.Client.Schema.RelDescriptor.Deconstruct(out System.Type! ClrType, out string! Table, out LadybugDb.Client.Schema.NodeDescriptor! From, out LadybugDb.Client.Schema.NodeDescriptor! To, out System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.PropertyDescriptor!>! Properties) -> void
+LadybugDb.Client.Schema.RelDescriptor.Equals(LadybugDb.Client.Schema.RelDescriptor? other) -> bool
+LadybugDb.Client.Schema.RelDescriptor.FindProperty(string! clrName) -> LadybugDb.Client.Schema.PropertyDescriptor?
+LadybugDb.Client.Schema.RelDescriptor.From.get -> LadybugDb.Client.Schema.NodeDescriptor!
+LadybugDb.Client.Schema.RelDescriptor.From.init -> void
+LadybugDb.Client.Schema.RelDescriptor.Properties.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.PropertyDescriptor!>!
+LadybugDb.Client.Schema.RelDescriptor.Properties.init -> void
+LadybugDb.Client.Schema.RelDescriptor.RelDescriptor(System.Type! ClrType, string! Table, LadybugDb.Client.Schema.NodeDescriptor! From, LadybugDb.Client.Schema.NodeDescriptor! To, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.PropertyDescriptor!>! Properties) -> void
+LadybugDb.Client.Schema.RelDescriptor.Table.get -> string!
+LadybugDb.Client.Schema.RelDescriptor.Table.init -> void
+LadybugDb.Client.Schema.RelDescriptor.To.get -> LadybugDb.Client.Schema.NodeDescriptor!
+LadybugDb.Client.Schema.RelDescriptor.To.init -> void
+LadybugDb.Client.Schema.SchemaMismatchException
+LadybugDb.Client.Schema.SchemaMismatchException.Mismatches.get -> System.Collections.Generic.IReadOnlyList<string!>!
+LadybugDb.Client.Schema.SchemaMismatchException.SchemaMismatchException(System.Collections.Generic.IReadOnlyList<string!>! mismatches) -> void
+abstract LadybugDb.Client.Cypher.Clause.<Clone>$() -> LadybugDb.Client.Cypher.Clause!
+abstract LadybugDb.Client.Cypher.Expr.<Clone>$() -> LadybugDb.Client.Cypher.Expr!
+const LadybugDb.Client.Diagnostics.LadybugDiagnostics.ActivitySourceName = "LadybugDb.Client" -> string!
+const LadybugDb.Client.Diagnostics.LadybugDiagnostics.DbSystemName = "ladybugdb" -> string!
+const LadybugDb.Client.Diagnostics.LadybugDiagnostics.MeterName = "LadybugDb.Client" -> string!
+override LadybugDb.Client.Cypher.AliasExpr.<Clone>$() -> LadybugDb.Client.Cypher.AliasExpr!
+override LadybugDb.Client.Cypher.AliasExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.AliasExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.AliasExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.BinaryExpr.<Clone>$() -> LadybugDb.Client.Cypher.BinaryExpr!
+override LadybugDb.Client.Cypher.BinaryExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.BinaryExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.BinaryExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.CaseBranch.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CaseBranch.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CaseBranch.ToString() -> string!
+override LadybugDb.Client.Cypher.CaseExpr.<Clone>$() -> LadybugDb.Client.Cypher.CaseExpr!
+override LadybugDb.Client.Cypher.CaseExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CaseExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CaseExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.CastExpr.<Clone>$() -> LadybugDb.Client.Cypher.CastExpr!
+override LadybugDb.Client.Cypher.CastExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CastExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CastExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.Clause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.Clause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.Clause.ToString() -> string!
+override LadybugDb.Client.Cypher.CountExpr.<Clone>$() -> LadybugDb.Client.Cypher.CountExpr!
+override LadybugDb.Client.Cypher.CountExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CountExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CountExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.CountSubqueryExpr.<Clone>$() -> LadybugDb.Client.Cypher.CountSubqueryExpr!
+override LadybugDb.Client.Cypher.CountSubqueryExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CountSubqueryExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CountSubqueryExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.CreateClause.<Clone>$() -> LadybugDb.Client.Cypher.CreateClause!
+override LadybugDb.Client.Cypher.CreateClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CreateClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CreateClause.ToString() -> string!
+override LadybugDb.Client.Cypher.CypherText.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.CypherText.GetHashCode() -> int
+override LadybugDb.Client.Cypher.CypherText.ToString() -> string!
+override LadybugDb.Client.Cypher.DeleteClause.<Clone>$() -> LadybugDb.Client.Cypher.DeleteClause!
+override LadybugDb.Client.Cypher.DeleteClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.DeleteClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.DeleteClause.ToString() -> string!
+override LadybugDb.Client.Cypher.ExistsExpr.<Clone>$() -> LadybugDb.Client.Cypher.ExistsExpr!
+override LadybugDb.Client.Cypher.ExistsExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.ExistsExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.ExistsExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.Expr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.Expr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.Expr.ToString() -> string!
+override LadybugDb.Client.Cypher.FunctionExpr.<Clone>$() -> LadybugDb.Client.Cypher.FunctionExpr!
+override LadybugDb.Client.Cypher.FunctionExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.FunctionExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.FunctionExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.InExpr.<Clone>$() -> LadybugDb.Client.Cypher.InExpr!
+override LadybugDb.Client.Cypher.InExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.InExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.InExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.IsNullExpr.<Clone>$() -> LadybugDb.Client.Cypher.IsNullExpr!
+override LadybugDb.Client.Cypher.IsNullExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.IsNullExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.IsNullExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.LimitClause.<Clone>$() -> LadybugDb.Client.Cypher.LimitClause!
+override LadybugDb.Client.Cypher.LimitClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.LimitClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.LimitClause.ToString() -> string!
+override LadybugDb.Client.Cypher.ListExpr.<Clone>$() -> LadybugDb.Client.Cypher.ListExpr!
+override LadybugDb.Client.Cypher.ListExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.ListExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.ListExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.LiteralExpr.<Clone>$() -> LadybugDb.Client.Cypher.LiteralExpr!
+override LadybugDb.Client.Cypher.LiteralExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.LiteralExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.LiteralExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.MatchClause.<Clone>$() -> LadybugDb.Client.Cypher.MatchClause!
+override LadybugDb.Client.Cypher.MatchClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.MatchClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.MatchClause.ToString() -> string!
+override LadybugDb.Client.Cypher.MergeClause.<Clone>$() -> LadybugDb.Client.Cypher.MergeClause!
+override LadybugDb.Client.Cypher.MergeClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.MergeClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.MergeClause.ToString() -> string!
+override LadybugDb.Client.Cypher.NodePattern.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.NodePattern.GetHashCode() -> int
+override LadybugDb.Client.Cypher.NodePattern.ToString() -> string!
+override LadybugDb.Client.Cypher.OrderByClause.<Clone>$() -> LadybugDb.Client.Cypher.OrderByClause!
+override LadybugDb.Client.Cypher.OrderByClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.OrderByClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.OrderByClause.ToString() -> string!
+override LadybugDb.Client.Cypher.ParameterExpr.<Clone>$() -> LadybugDb.Client.Cypher.ParameterExpr!
+override LadybugDb.Client.Cypher.ParameterExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.ParameterExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.ParameterExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.PatternPath.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.PatternPath.GetHashCode() -> int
+override LadybugDb.Client.Cypher.PatternPath.ToString() -> string!
+override LadybugDb.Client.Cypher.PatternStep.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.PatternStep.GetHashCode() -> int
+override LadybugDb.Client.Cypher.PatternStep.ToString() -> string!
+override LadybugDb.Client.Cypher.PropertyExpr.<Clone>$() -> LadybugDb.Client.Cypher.PropertyExpr!
+override LadybugDb.Client.Cypher.PropertyExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.PropertyExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.PropertyExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.PropertyValue.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.PropertyValue.GetHashCode() -> int
+override LadybugDb.Client.Cypher.PropertyValue.ToString() -> string!
+override LadybugDb.Client.Cypher.Query.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.Query.GetHashCode() -> int
+override LadybugDb.Client.Cypher.Query.ToString() -> string!
+override LadybugDb.Client.Cypher.RawMatchClause.<Clone>$() -> LadybugDb.Client.Cypher.RawMatchClause!
+override LadybugDb.Client.Cypher.RawMatchClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.RawMatchClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.RawMatchClause.ToString() -> string!
+override LadybugDb.Client.Cypher.RelPattern.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.RelPattern.GetHashCode() -> int
+override LadybugDb.Client.Cypher.RelPattern.ToString() -> string!
+override LadybugDb.Client.Cypher.ReturnClause.<Clone>$() -> LadybugDb.Client.Cypher.ReturnClause!
+override LadybugDb.Client.Cypher.ReturnClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.ReturnClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.ReturnClause.ToString() -> string!
+override LadybugDb.Client.Cypher.SetClause.<Clone>$() -> LadybugDb.Client.Cypher.SetClause!
+override LadybugDb.Client.Cypher.SetClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.SetClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.SetClause.ToString() -> string!
+override LadybugDb.Client.Cypher.SetItem.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.SetItem.GetHashCode() -> int
+override LadybugDb.Client.Cypher.SetItem.ToString() -> string!
+override LadybugDb.Client.Cypher.SkipClause.<Clone>$() -> LadybugDb.Client.Cypher.SkipClause!
+override LadybugDb.Client.Cypher.SkipClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.SkipClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.SkipClause.ToString() -> string!
+override LadybugDb.Client.Cypher.SortKey.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.SortKey.GetHashCode() -> int
+override LadybugDb.Client.Cypher.SortKey.ToString() -> string!
+override LadybugDb.Client.Cypher.UnaryExpr.<Clone>$() -> LadybugDb.Client.Cypher.UnaryExpr!
+override LadybugDb.Client.Cypher.UnaryExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.UnaryExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.UnaryExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.UnwindClause.<Clone>$() -> LadybugDb.Client.Cypher.UnwindClause!
+override LadybugDb.Client.Cypher.UnwindClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.UnwindClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.UnwindClause.ToString() -> string!
+override LadybugDb.Client.Cypher.VariableExpr.<Clone>$() -> LadybugDb.Client.Cypher.VariableExpr!
+override LadybugDb.Client.Cypher.VariableExpr.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.VariableExpr.GetHashCode() -> int
+override LadybugDb.Client.Cypher.VariableExpr.ToString() -> string!
+override LadybugDb.Client.Cypher.WhereClause.<Clone>$() -> LadybugDb.Client.Cypher.WhereClause!
+override LadybugDb.Client.Cypher.WhereClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.WhereClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.WhereClause.ToString() -> string!
+override LadybugDb.Client.Cypher.WithClause.<Clone>$() -> LadybugDb.Client.Cypher.WithClause!
+override LadybugDb.Client.Cypher.WithClause.Equals(object? obj) -> bool
+override LadybugDb.Client.Cypher.WithClause.GetHashCode() -> int
+override LadybugDb.Client.Cypher.WithClause.ToString() -> string!
+override LadybugDb.Client.LadybugConfig.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugConfig.GetHashCode() -> int
+override LadybugDb.Client.LadybugConfig.ToString() -> string!
+override LadybugDb.Client.LadybugInternalId.GetHashCode() -> int
+override LadybugDb.Client.LadybugNode.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugNode.GetHashCode() -> int
+override LadybugDb.Client.LadybugNode.ToString() -> string!
+override LadybugDb.Client.LadybugPath.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugPath.GetHashCode() -> int
+override LadybugDb.Client.LadybugPath.ToString() -> string!
+override LadybugDb.Client.LadybugRel.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugRel.GetHashCode() -> int
+override LadybugDb.Client.LadybugRel.ToString() -> string!
+override LadybugDb.Client.LadybugRow.ToString() -> string!
+override LadybugDb.Client.LadybugValue.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugValue.GetHashCode() -> int
+override LadybugDb.Client.LadybugValue.ToString() -> string!
+override LadybugDb.Client.Linq.LadybugQueryable<T>.ToString() -> string!
+override LadybugDb.Client.Schema.ColumnDefinition.Equals(object? obj) -> bool
+override LadybugDb.Client.Schema.ColumnDefinition.GetHashCode() -> int
+override LadybugDb.Client.Schema.ColumnDefinition.ToString() -> string!
+override LadybugDb.Client.Schema.NodeDescriptor.Equals(object? obj) -> bool
+override LadybugDb.Client.Schema.NodeDescriptor.GetHashCode() -> int
+override LadybugDb.Client.Schema.NodeDescriptor.ToString() -> string!
+override LadybugDb.Client.Schema.PropertyDescriptor.Equals(object? obj) -> bool
+override LadybugDb.Client.Schema.PropertyDescriptor.GetHashCode() -> int
+override LadybugDb.Client.Schema.PropertyDescriptor.ToString() -> string!
+override LadybugDb.Client.Schema.RelDescriptor.Equals(object? obj) -> bool
+override LadybugDb.Client.Schema.RelDescriptor.GetHashCode() -> int
+override LadybugDb.Client.Schema.RelDescriptor.ToString() -> string!
+override sealed LadybugDb.Client.Cypher.AliasExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.BinaryExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.CaseExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.CastExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.CountExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.CountSubqueryExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.CreateClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.DeleteClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.ExistsExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.FunctionExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.InExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.IsNullExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.LimitClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.ListExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.LiteralExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.MatchClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.MergeClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.OrderByClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.ParameterExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.PropertyExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.RawMatchClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.ReturnClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.SetClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.SkipClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.UnaryExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.UnwindClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.VariableExpr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+override sealed LadybugDb.Client.Cypher.WhereClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+override sealed LadybugDb.Client.Cypher.WithClause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+static LadybugDb.Client.Cypher.AliasExpr.operator !=(LadybugDb.Client.Cypher.AliasExpr? left, LadybugDb.Client.Cypher.AliasExpr? right) -> bool
+static LadybugDb.Client.Cypher.AliasExpr.operator ==(LadybugDb.Client.Cypher.AliasExpr? left, LadybugDb.Client.Cypher.AliasExpr? right) -> bool
+static LadybugDb.Client.Cypher.BinaryExpr.operator !=(LadybugDb.Client.Cypher.BinaryExpr? left, LadybugDb.Client.Cypher.BinaryExpr? right) -> bool
+static LadybugDb.Client.Cypher.BinaryExpr.operator ==(LadybugDb.Client.Cypher.BinaryExpr? left, LadybugDb.Client.Cypher.BinaryExpr? right) -> bool
+static LadybugDb.Client.Cypher.CaseBranch.operator !=(LadybugDb.Client.Cypher.CaseBranch? left, LadybugDb.Client.Cypher.CaseBranch? right) -> bool
+static LadybugDb.Client.Cypher.CaseBranch.operator ==(LadybugDb.Client.Cypher.CaseBranch? left, LadybugDb.Client.Cypher.CaseBranch? right) -> bool
+static LadybugDb.Client.Cypher.CaseExpr.operator !=(LadybugDb.Client.Cypher.CaseExpr? left, LadybugDb.Client.Cypher.CaseExpr? right) -> bool
+static LadybugDb.Client.Cypher.CaseExpr.operator ==(LadybugDb.Client.Cypher.CaseExpr? left, LadybugDb.Client.Cypher.CaseExpr? right) -> bool
+static LadybugDb.Client.Cypher.CastExpr.operator !=(LadybugDb.Client.Cypher.CastExpr? left, LadybugDb.Client.Cypher.CastExpr? right) -> bool
+static LadybugDb.Client.Cypher.CastExpr.operator ==(LadybugDb.Client.Cypher.CastExpr? left, LadybugDb.Client.Cypher.CastExpr? right) -> bool
+static LadybugDb.Client.Cypher.Clause.operator !=(LadybugDb.Client.Cypher.Clause? left, LadybugDb.Client.Cypher.Clause? right) -> bool
+static LadybugDb.Client.Cypher.Clause.operator ==(LadybugDb.Client.Cypher.Clause? left, LadybugDb.Client.Cypher.Clause? right) -> bool
+static LadybugDb.Client.Cypher.CountExpr.operator !=(LadybugDb.Client.Cypher.CountExpr? left, LadybugDb.Client.Cypher.CountExpr? right) -> bool
+static LadybugDb.Client.Cypher.CountExpr.operator ==(LadybugDb.Client.Cypher.CountExpr? left, LadybugDb.Client.Cypher.CountExpr? right) -> bool
+static LadybugDb.Client.Cypher.CountSubqueryExpr.operator !=(LadybugDb.Client.Cypher.CountSubqueryExpr? left, LadybugDb.Client.Cypher.CountSubqueryExpr? right) -> bool
+static LadybugDb.Client.Cypher.CountSubqueryExpr.operator ==(LadybugDb.Client.Cypher.CountSubqueryExpr? left, LadybugDb.Client.Cypher.CountSubqueryExpr? right) -> bool
+static LadybugDb.Client.Cypher.CreateClause.operator !=(LadybugDb.Client.Cypher.CreateClause? left, LadybugDb.Client.Cypher.CreateClause? right) -> bool
+static LadybugDb.Client.Cypher.CreateClause.operator ==(LadybugDb.Client.Cypher.CreateClause? left, LadybugDb.Client.Cypher.CreateClause? right) -> bool
+static LadybugDb.Client.Cypher.CypherDsl.Case(System.Collections.Generic.IEnumerable<LadybugDb.Client.Cypher.CaseBranch!>! branches, LadybugDb.Client.Cypher.Expr? else = null) -> LadybugDb.Client.Cypher.CaseExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Cast(LadybugDb.Client.Cypher.Expr! operand, string! typeName) -> LadybugDb.Client.Cypher.CastExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Count(LadybugDb.Client.Cypher.Expr! operand, bool distinct = false) -> LadybugDb.Client.Cypher.CountExpr!
+static LadybugDb.Client.Cypher.CypherDsl.CountAll() -> LadybugDb.Client.Cypher.CountExpr!
+static LadybugDb.Client.Cypher.CypherDsl.CountSubquery(LadybugDb.Client.Cypher.Query! subquery) -> LadybugDb.Client.Cypher.CountSubqueryExpr!
+static LadybugDb.Client.Cypher.CypherDsl.CountSubquery(LadybugDb.Client.Cypher.QueryBuilder! subquery) -> LadybugDb.Client.Cypher.CountSubqueryExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Create(params LadybugDb.Client.Cypher.PatternPath![]! paths) -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.CypherDsl.Exists(LadybugDb.Client.Cypher.Query! subquery) -> LadybugDb.Client.Cypher.ExistsExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Exists(LadybugDb.Client.Cypher.QueryBuilder! subquery) -> LadybugDb.Client.Cypher.ExistsExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Func(string! name, params LadybugDb.Client.Cypher.Expr![]! arguments) -> LadybugDb.Client.Cypher.FunctionExpr!
+static LadybugDb.Client.Cypher.CypherDsl.List(params LadybugDb.Client.Cypher.Expr![]! items) -> LadybugDb.Client.Cypher.ListExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Literal(object? value) -> LadybugDb.Client.Cypher.LiteralExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Match(params LadybugDb.Client.Cypher.PatternPath![]! paths) -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.CypherDsl.MatchRaw(string! pattern, System.Collections.Generic.IReadOnlyDictionary<string!, object?>? parameters = null) -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.CypherDsl.Merge(LadybugDb.Client.Cypher.PatternPath! path) -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.CypherDsl.Node(string! label, string? alias = null) -> LadybugDb.Client.Cypher.NodePattern!
+static LadybugDb.Client.Cypher.CypherDsl.NodeRef(string! alias) -> LadybugDb.Client.Cypher.NodePattern!
+static LadybugDb.Client.Cypher.CypherDsl.OptionalMatch(params LadybugDb.Client.Cypher.PatternPath![]! paths) -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.CypherDsl.Param(string! name, object? value) -> LadybugDb.Client.Cypher.ParameterExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Prop(string! alias, string! name) -> LadybugDb.Client.Cypher.PropertyExpr!
+static LadybugDb.Client.Cypher.CypherDsl.Unwind(LadybugDb.Client.Cypher.Expr! list, string! alias) -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.CypherDsl.Variable(string! alias) -> LadybugDb.Client.Cypher.VariableExpr!
+static LadybugDb.Client.Cypher.CypherDsl.When(LadybugDb.Client.Cypher.Expr! when, LadybugDb.Client.Cypher.Expr! then) -> LadybugDb.Client.Cypher.CaseBranch!
+static LadybugDb.Client.Cypher.CypherText.operator !=(LadybugDb.Client.Cypher.CypherText? left, LadybugDb.Client.Cypher.CypherText? right) -> bool
+static LadybugDb.Client.Cypher.CypherText.operator ==(LadybugDb.Client.Cypher.CypherText? left, LadybugDb.Client.Cypher.CypherText? right) -> bool
+static LadybugDb.Client.Cypher.DeleteClause.operator !=(LadybugDb.Client.Cypher.DeleteClause? left, LadybugDb.Client.Cypher.DeleteClause? right) -> bool
+static LadybugDb.Client.Cypher.DeleteClause.operator ==(LadybugDb.Client.Cypher.DeleteClause? left, LadybugDb.Client.Cypher.DeleteClause? right) -> bool
+static LadybugDb.Client.Cypher.ExistsExpr.operator !=(LadybugDb.Client.Cypher.ExistsExpr? left, LadybugDb.Client.Cypher.ExistsExpr? right) -> bool
+static LadybugDb.Client.Cypher.ExistsExpr.operator ==(LadybugDb.Client.Cypher.ExistsExpr? left, LadybugDb.Client.Cypher.ExistsExpr? right) -> bool
+static LadybugDb.Client.Cypher.Expr.operator !=(LadybugDb.Client.Cypher.Expr? left, LadybugDb.Client.Cypher.Expr? right) -> bool
+static LadybugDb.Client.Cypher.Expr.operator ==(LadybugDb.Client.Cypher.Expr? left, LadybugDb.Client.Cypher.Expr? right) -> bool
+static LadybugDb.Client.Cypher.FunctionExpr.operator !=(LadybugDb.Client.Cypher.FunctionExpr? left, LadybugDb.Client.Cypher.FunctionExpr? right) -> bool
+static LadybugDb.Client.Cypher.FunctionExpr.operator ==(LadybugDb.Client.Cypher.FunctionExpr? left, LadybugDb.Client.Cypher.FunctionExpr? right) -> bool
+static LadybugDb.Client.Cypher.Identifier.IsPlain(string! name) -> bool
+static LadybugDb.Client.Cypher.Identifier.IsReserved(string! name) -> bool
+static LadybugDb.Client.Cypher.Identifier.Render(string! name) -> string!
+static LadybugDb.Client.Cypher.InExpr.operator !=(LadybugDb.Client.Cypher.InExpr? left, LadybugDb.Client.Cypher.InExpr? right) -> bool
+static LadybugDb.Client.Cypher.InExpr.operator ==(LadybugDb.Client.Cypher.InExpr? left, LadybugDb.Client.Cypher.InExpr? right) -> bool
+static LadybugDb.Client.Cypher.IsNullExpr.operator !=(LadybugDb.Client.Cypher.IsNullExpr? left, LadybugDb.Client.Cypher.IsNullExpr? right) -> bool
+static LadybugDb.Client.Cypher.IsNullExpr.operator ==(LadybugDb.Client.Cypher.IsNullExpr? left, LadybugDb.Client.Cypher.IsNullExpr? right) -> bool
+static LadybugDb.Client.Cypher.LimitClause.operator !=(LadybugDb.Client.Cypher.LimitClause? left, LadybugDb.Client.Cypher.LimitClause? right) -> bool
+static LadybugDb.Client.Cypher.LimitClause.operator ==(LadybugDb.Client.Cypher.LimitClause? left, LadybugDb.Client.Cypher.LimitClause? right) -> bool
+static LadybugDb.Client.Cypher.ListExpr.operator !=(LadybugDb.Client.Cypher.ListExpr? left, LadybugDb.Client.Cypher.ListExpr? right) -> bool
+static LadybugDb.Client.Cypher.ListExpr.operator ==(LadybugDb.Client.Cypher.ListExpr? left, LadybugDb.Client.Cypher.ListExpr? right) -> bool
+static LadybugDb.Client.Cypher.LiteralExpr.operator !=(LadybugDb.Client.Cypher.LiteralExpr? left, LadybugDb.Client.Cypher.LiteralExpr? right) -> bool
+static LadybugDb.Client.Cypher.LiteralExpr.operator ==(LadybugDb.Client.Cypher.LiteralExpr? left, LadybugDb.Client.Cypher.LiteralExpr? right) -> bool
+static LadybugDb.Client.Cypher.MatchClause.operator !=(LadybugDb.Client.Cypher.MatchClause? left, LadybugDb.Client.Cypher.MatchClause? right) -> bool
+static LadybugDb.Client.Cypher.MatchClause.operator ==(LadybugDb.Client.Cypher.MatchClause? left, LadybugDb.Client.Cypher.MatchClause? right) -> bool
+static LadybugDb.Client.Cypher.MergeClause.operator !=(LadybugDb.Client.Cypher.MergeClause? left, LadybugDb.Client.Cypher.MergeClause? right) -> bool
+static LadybugDb.Client.Cypher.MergeClause.operator ==(LadybugDb.Client.Cypher.MergeClause? left, LadybugDb.Client.Cypher.MergeClause? right) -> bool
+static LadybugDb.Client.Cypher.NodePattern.implicit operator LadybugDb.Client.Cypher.PatternPath!(LadybugDb.Client.Cypher.NodePattern! node) -> LadybugDb.Client.Cypher.PatternPath!
+static LadybugDb.Client.Cypher.NodePattern.operator !=(LadybugDb.Client.Cypher.NodePattern? left, LadybugDb.Client.Cypher.NodePattern? right) -> bool
+static LadybugDb.Client.Cypher.NodePattern.operator ==(LadybugDb.Client.Cypher.NodePattern? left, LadybugDb.Client.Cypher.NodePattern? right) -> bool
+static LadybugDb.Client.Cypher.OrderByClause.operator !=(LadybugDb.Client.Cypher.OrderByClause? left, LadybugDb.Client.Cypher.OrderByClause? right) -> bool
+static LadybugDb.Client.Cypher.OrderByClause.operator ==(LadybugDb.Client.Cypher.OrderByClause? left, LadybugDb.Client.Cypher.OrderByClause? right) -> bool
+static LadybugDb.Client.Cypher.ParameterExpr.operator !=(LadybugDb.Client.Cypher.ParameterExpr? left, LadybugDb.Client.Cypher.ParameterExpr? right) -> bool
+static LadybugDb.Client.Cypher.ParameterExpr.operator ==(LadybugDb.Client.Cypher.ParameterExpr? left, LadybugDb.Client.Cypher.ParameterExpr? right) -> bool
+static LadybugDb.Client.Cypher.PatternPath.FromNodePattern(LadybugDb.Client.Cypher.NodePattern! node) -> LadybugDb.Client.Cypher.PatternPath!
+static LadybugDb.Client.Cypher.PatternPath.operator !=(LadybugDb.Client.Cypher.PatternPath? left, LadybugDb.Client.Cypher.PatternPath? right) -> bool
+static LadybugDb.Client.Cypher.PatternPath.operator ==(LadybugDb.Client.Cypher.PatternPath? left, LadybugDb.Client.Cypher.PatternPath? right) -> bool
+static LadybugDb.Client.Cypher.PatternStep.operator !=(LadybugDb.Client.Cypher.PatternStep? left, LadybugDb.Client.Cypher.PatternStep? right) -> bool
+static LadybugDb.Client.Cypher.PatternStep.operator ==(LadybugDb.Client.Cypher.PatternStep? left, LadybugDb.Client.Cypher.PatternStep? right) -> bool
+static LadybugDb.Client.Cypher.PropertyExpr.operator !=(LadybugDb.Client.Cypher.PropertyExpr? left, LadybugDb.Client.Cypher.PropertyExpr? right) -> bool
+static LadybugDb.Client.Cypher.PropertyExpr.operator ==(LadybugDb.Client.Cypher.PropertyExpr? left, LadybugDb.Client.Cypher.PropertyExpr? right) -> bool
+static LadybugDb.Client.Cypher.PropertyValue.operator !=(LadybugDb.Client.Cypher.PropertyValue? left, LadybugDb.Client.Cypher.PropertyValue? right) -> bool
+static LadybugDb.Client.Cypher.PropertyValue.operator ==(LadybugDb.Client.Cypher.PropertyValue? left, LadybugDb.Client.Cypher.PropertyValue? right) -> bool
+static LadybugDb.Client.Cypher.Query.operator !=(LadybugDb.Client.Cypher.Query? left, LadybugDb.Client.Cypher.Query? right) -> bool
+static LadybugDb.Client.Cypher.Query.operator ==(LadybugDb.Client.Cypher.Query? left, LadybugDb.Client.Cypher.Query? right) -> bool
+static LadybugDb.Client.Cypher.QueryBuilder.Empty.get -> LadybugDb.Client.Cypher.QueryBuilder!
+static LadybugDb.Client.Cypher.RawMatchClause.operator !=(LadybugDb.Client.Cypher.RawMatchClause? left, LadybugDb.Client.Cypher.RawMatchClause? right) -> bool
+static LadybugDb.Client.Cypher.RawMatchClause.operator ==(LadybugDb.Client.Cypher.RawMatchClause? left, LadybugDb.Client.Cypher.RawMatchClause? right) -> bool
+static LadybugDb.Client.Cypher.RelPattern.operator !=(LadybugDb.Client.Cypher.RelPattern? left, LadybugDb.Client.Cypher.RelPattern? right) -> bool
+static LadybugDb.Client.Cypher.RelPattern.operator ==(LadybugDb.Client.Cypher.RelPattern? left, LadybugDb.Client.Cypher.RelPattern? right) -> bool
+static LadybugDb.Client.Cypher.ReturnClause.operator !=(LadybugDb.Client.Cypher.ReturnClause? left, LadybugDb.Client.Cypher.ReturnClause? right) -> bool
+static LadybugDb.Client.Cypher.ReturnClause.operator ==(LadybugDb.Client.Cypher.ReturnClause? left, LadybugDb.Client.Cypher.ReturnClause? right) -> bool
+static LadybugDb.Client.Cypher.SetClause.operator !=(LadybugDb.Client.Cypher.SetClause? left, LadybugDb.Client.Cypher.SetClause? right) -> bool
+static LadybugDb.Client.Cypher.SetClause.operator ==(LadybugDb.Client.Cypher.SetClause? left, LadybugDb.Client.Cypher.SetClause? right) -> bool
+static LadybugDb.Client.Cypher.SetItem.operator !=(LadybugDb.Client.Cypher.SetItem? left, LadybugDb.Client.Cypher.SetItem? right) -> bool
+static LadybugDb.Client.Cypher.SetItem.operator ==(LadybugDb.Client.Cypher.SetItem? left, LadybugDb.Client.Cypher.SetItem? right) -> bool
+static LadybugDb.Client.Cypher.SkipClause.operator !=(LadybugDb.Client.Cypher.SkipClause? left, LadybugDb.Client.Cypher.SkipClause? right) -> bool
+static LadybugDb.Client.Cypher.SkipClause.operator ==(LadybugDb.Client.Cypher.SkipClause? left, LadybugDb.Client.Cypher.SkipClause? right) -> bool
+static LadybugDb.Client.Cypher.SortKey.operator !=(LadybugDb.Client.Cypher.SortKey? left, LadybugDb.Client.Cypher.SortKey? right) -> bool
+static LadybugDb.Client.Cypher.SortKey.operator ==(LadybugDb.Client.Cypher.SortKey? left, LadybugDb.Client.Cypher.SortKey? right) -> bool
+static LadybugDb.Client.Cypher.TypeName.IsValid(string! type) -> bool
+static LadybugDb.Client.Cypher.UnaryExpr.operator !=(LadybugDb.Client.Cypher.UnaryExpr? left, LadybugDb.Client.Cypher.UnaryExpr? right) -> bool
+static LadybugDb.Client.Cypher.UnaryExpr.operator ==(LadybugDb.Client.Cypher.UnaryExpr? left, LadybugDb.Client.Cypher.UnaryExpr? right) -> bool
+static LadybugDb.Client.Cypher.UnwindClause.operator !=(LadybugDb.Client.Cypher.UnwindClause? left, LadybugDb.Client.Cypher.UnwindClause? right) -> bool
+static LadybugDb.Client.Cypher.UnwindClause.operator ==(LadybugDb.Client.Cypher.UnwindClause? left, LadybugDb.Client.Cypher.UnwindClause? right) -> bool
+static LadybugDb.Client.Cypher.VariableExpr.operator !=(LadybugDb.Client.Cypher.VariableExpr? left, LadybugDb.Client.Cypher.VariableExpr? right) -> bool
+static LadybugDb.Client.Cypher.VariableExpr.operator ==(LadybugDb.Client.Cypher.VariableExpr? left, LadybugDb.Client.Cypher.VariableExpr? right) -> bool
+static LadybugDb.Client.Cypher.WhereClause.operator !=(LadybugDb.Client.Cypher.WhereClause? left, LadybugDb.Client.Cypher.WhereClause? right) -> bool
+static LadybugDb.Client.Cypher.WhereClause.operator ==(LadybugDb.Client.Cypher.WhereClause? left, LadybugDb.Client.Cypher.WhereClause? right) -> bool
+static LadybugDb.Client.Cypher.WithClause.operator !=(LadybugDb.Client.Cypher.WithClause? left, LadybugDb.Client.Cypher.WithClause? right) -> bool
+static LadybugDb.Client.Cypher.WithClause.operator ==(LadybugDb.Client.Cypher.WithClause? left, LadybugDb.Client.Cypher.WithClause? right) -> bool
+static LadybugDb.Client.LadybugConfig.operator !=(LadybugDb.Client.LadybugConfig? left, LadybugDb.Client.LadybugConfig? right) -> bool
+static LadybugDb.Client.LadybugConfig.operator ==(LadybugDb.Client.LadybugConfig? left, LadybugDb.Client.LadybugConfig? right) -> bool
+static LadybugDb.Client.LadybugDatabase.EngineVersion.get -> string!
+static LadybugDb.Client.LadybugDatabase.MinimumEngineVersion.get -> string!
+static LadybugDb.Client.LadybugInternalId.operator !=(LadybugDb.Client.LadybugInternalId left, LadybugDb.Client.LadybugInternalId right) -> bool
+static LadybugDb.Client.LadybugInternalId.operator ==(LadybugDb.Client.LadybugInternalId left, LadybugDb.Client.LadybugInternalId right) -> bool
+static LadybugDb.Client.LadybugNode.operator !=(LadybugDb.Client.LadybugNode? left, LadybugDb.Client.LadybugNode? right) -> bool
+static LadybugDb.Client.LadybugNode.operator ==(LadybugDb.Client.LadybugNode? left, LadybugDb.Client.LadybugNode? right) -> bool
+static LadybugDb.Client.LadybugPath.operator !=(LadybugDb.Client.LadybugPath? left, LadybugDb.Client.LadybugPath? right) -> bool
+static LadybugDb.Client.LadybugPath.operator ==(LadybugDb.Client.LadybugPath? left, LadybugDb.Client.LadybugPath? right) -> bool
+static LadybugDb.Client.LadybugRel.operator !=(LadybugDb.Client.LadybugRel? left, LadybugDb.Client.LadybugRel? right) -> bool
+static LadybugDb.Client.LadybugRel.operator ==(LadybugDb.Client.LadybugRel? left, LadybugDb.Client.LadybugRel? right) -> bool
+static LadybugDb.Client.Linq.GraphSteps.In<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source) -> System.Linq.IQueryable<(TSource Source, TTarget Target)>!
+static LadybugDb.Client.Linq.GraphSteps.In<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source, int minHops, int maxHops) -> System.Linq.IQueryable<(TSource Source, TTarget Target)>!
+static LadybugDb.Client.Linq.GraphSteps.InWithRel<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source) -> System.Linq.IQueryable<(TSource Source, TRel Rel, TTarget Target)>!
+static LadybugDb.Client.Linq.GraphSteps.Out<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source) -> System.Linq.IQueryable<(TSource Source, TTarget Target)>!
+static LadybugDb.Client.Linq.GraphSteps.Out<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source, int minHops, int maxHops) -> System.Linq.IQueryable<(TSource Source, TTarget Target)>!
+static LadybugDb.Client.Linq.GraphSteps.OutWithRel<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source) -> System.Linq.IQueryable<(TSource Source, TRel Rel, TTarget Target)>!
+static LadybugDb.Client.Linq.GraphSteps.WhereExists<TSource, TRel, TTarget>(this System.Linq.IQueryable<TSource>! source, System.Linq.Expressions.Expression<System.Func<TTarget, bool>!>! predicate) -> System.Linq.IQueryable<TSource>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.AnyAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.AsAsyncEnumerable<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.CountAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.FirstAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.FirstOrDefaultAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.SingleAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.SingleOrDefaultAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.ToArrayAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T[]!>!
+static LadybugDb.Client.Linq.LadybugQueryableExtensions.ToListAsync<T>(this System.Linq.IQueryable<T>! source, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
+static LadybugDb.Client.Schema.ColumnDefinition.operator !=(LadybugDb.Client.Schema.ColumnDefinition? left, LadybugDb.Client.Schema.ColumnDefinition? right) -> bool
+static LadybugDb.Client.Schema.ColumnDefinition.operator ==(LadybugDb.Client.Schema.ColumnDefinition? left, LadybugDb.Client.Schema.ColumnDefinition? right) -> bool
+static LadybugDb.Client.Schema.Ddl.CreateNodeTable(string! name, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.ColumnDefinition!>! columns, string! primaryKey) -> string!
+static LadybugDb.Client.Schema.Ddl.CreateRelTable(string! name, string! from, string! to, System.Collections.Generic.IReadOnlyList<LadybugDb.Client.Schema.ColumnDefinition!>! columns) -> string!
+static LadybugDb.Client.Schema.Ddl.DropTable(string! name) -> string!
+static LadybugDb.Client.Schema.Ddl.IsTypeName(string! type) -> bool
+static LadybugDb.Client.Schema.LadybugSchema.Default.get -> LadybugDb.Client.Schema.LadybugSchema!
+static LadybugDb.Client.Schema.LadybugSchema.For(params System.Type![]! types) -> LadybugDb.Client.Schema.LadybugSchema!
+static LadybugDb.Client.Schema.LadybugSchema.FromAssembly(System.Reflection.Assembly! assembly, System.Func<System.Type!, bool>? filter = null) -> LadybugDb.Client.Schema.LadybugSchema!
+static LadybugDb.Client.Schema.NodeDescriptor.operator !=(LadybugDb.Client.Schema.NodeDescriptor? left, LadybugDb.Client.Schema.NodeDescriptor? right) -> bool
+static LadybugDb.Client.Schema.NodeDescriptor.operator ==(LadybugDb.Client.Schema.NodeDescriptor? left, LadybugDb.Client.Schema.NodeDescriptor? right) -> bool
+static LadybugDb.Client.Schema.PropertyDescriptor.operator !=(LadybugDb.Client.Schema.PropertyDescriptor? left, LadybugDb.Client.Schema.PropertyDescriptor? right) -> bool
+static LadybugDb.Client.Schema.PropertyDescriptor.operator ==(LadybugDb.Client.Schema.PropertyDescriptor? left, LadybugDb.Client.Schema.PropertyDescriptor? right) -> bool
+static LadybugDb.Client.Schema.RelDescriptor.operator !=(LadybugDb.Client.Schema.RelDescriptor? left, LadybugDb.Client.Schema.RelDescriptor? right) -> bool
+static LadybugDb.Client.Schema.RelDescriptor.operator ==(LadybugDb.Client.Schema.RelDescriptor? left, LadybugDb.Client.Schema.RelDescriptor? right) -> bool
+virtual LadybugDb.Client.Cypher.Clause.EqualityContract.get -> System.Type!
+virtual LadybugDb.Client.Cypher.Clause.Equals(LadybugDb.Client.Cypher.Clause? other) -> bool
+virtual LadybugDb.Client.Cypher.Clause.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual LadybugDb.Client.Cypher.Expr.EqualityContract.get -> System.Type!
+virtual LadybugDb.Client.Cypher.Expr.Equals(LadybugDb.Client.Cypher.Expr? other) -> bool
+virtual LadybugDb.Client.Cypher.Expr.PrintMembers(System.Text.StringBuilder! builder) -> bool
+~override LadybugDb.Client.LadybugInternalId.Equals(object obj) -> bool
+~override LadybugDb.Client.LadybugInternalId.ToString() -> string

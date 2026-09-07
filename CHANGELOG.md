@@ -1,0 +1,125 @@
+# Changelog
+
+All notable changes to `LadybugDb.Client` and `LadybugDb.Client.Extensions` (which share a
+version) are recorded here. The format follows
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and versions follow
+[SemVer 2.0.0](https://semver.org/spec/v2.0.0.html). Package versions are independent of the
+engine version; each release states the engine it was generated against. See
+[docs/RELEASING.md](docs/RELEASING.md#versioning) for the policy.
+
+Nothing has been published to nuget.org yet, so every entry below is unreleased. The first tagged
+version will rename this section and start a new `Unreleased` above it.
+
+## [Unreleased]
+
+Generated against LadybugDB engine **v0.19.1** (`third-party/liblbug.version`); an engine at
+0.19 or newer is accepted at open time.
+
+### Added
+
+- Parameter objects: `QueryAsync(cypher, parameters)` and `ExecuteAsync(cypher, parameters)` on
+  `LadybugConnection`, and `ExecuteAsync(parameters)` / `ExecuteNonQueryAsync(parameters)` on
+  `LadybugPreparedStatement`. `parameters` is an anonymous object or any string-keyed
+  dictionary; each value is dispatched to the typed `Bind` overload for its runtime type, `null`
+  binds a typed NULL, and a type with no overload is an `ArgumentException` naming the parameter
+  and the type. Values bind at their natural width; the engine range-checks the coercion.
+- `ExecuteAsync(cypher)` on `LadybugConnection` and `ExecuteNonQueryAsync()` on
+  `LadybugPreparedStatement`, for statements whose rows are not needed. They return nothing
+  because the engine reports no affected-row count.
+- `Select<T>(cypher, parameters)`: a streaming `IAsyncEnumerable<T>` that projects each row into
+  a constructor whose parameter names match the returned columns (positional records need no
+  attributes), or into a scalar for a single-column result. It owns and releases the underlying
+  result on every exit path, including `break`. Plans are cached per (`T`, ordered column names).
+- Lossless widening on read: an `INT32` column reads into a `long` target, `FLOAT` into `double`,
+  unsigned into a wider signed target; nothing that can lose a bit, a digit or a sign is accepted.
+- `LadybugDatabase.EngineVersion` (what was loaded) and `LadybugDatabase.MinimumEngineVersion`
+  (what the interop was generated from). The constructor refuses an engine older than the pinned
+  major.minor with a `LadybugException` naming the version to install, instead of an
+  `EntryPointNotFoundException` from whichever call happened to be missing.
+- `LadybugDb.Client.Benchmarks`: BenchmarkDotNet micro-benchmarks, a `--workload` mode mirroring
+  `benchmarks/workload_bench.py`, and two read-path prototypes; results under `benchmarks/`.
+- Package metadata for nuget.org: icon, tags, a release-notes link to this file, Source Link with
+  the build commit, symbols as a `.snupkg`, deterministic builds on CI, and package validation at
+  pack time.
+- `IsAotCompatible=true`; `samples/LadybugDb.Client.AotSample` is published with
+  `PublishAot=true` and executed by CI.
+- `LadybugDb.Client.Extensions`, a second package for `Microsoft.Extensions.DependencyInjection`
+  hosts: `AddLadybugDb(path, configure)` and `AddLadybugDb(IConfiguration section)` register a
+  singleton `LadybugDatabase` (opened on first resolve), a scoped `LadybugConnection` and
+  `IOptions<LadybugDbOptions>`, validating `DatabasePath` at registration; `LadybugDbHealthCheck`
+  (`RETURN 1` on a fresh connection, 5-second timeout) is registered as `ladybugdb` unless
+  `DisableHealthChecks`. Ships at the core's version and depends on it exactly.
+- Documentation: the production-readiness review (`docs/2026-09-06-production-readiness.md`),
+  three research appendices under `docs/research/`, the API-ergonomics and LINQ design specs.
+- `IDisposable` on `LadybugConnection`, `LadybugQueryResult`, `LadybugPreparedStatement` and
+  `LadybugTransaction`, alongside `IAsyncDisposable`; the two are equivalent because every
+  operation completes synchronously.
+- `LadybugConfig.AutoCheckpoint`, `CheckpointThreshold`, `EnableChecksums` and
+  `ThrowOnWalReplayFailure`, mapping to the engine settings of the same names.
+- A per-connection prepared-statement cache behind `QueryAsync(cypher, parameters)`,
+  `ExecuteAsync(cypher, parameters)` and `Select<T>`, keyed by statement text, least recently used,
+  bounded by `LadybugConfig.StatementCacheSize` (default 128, `0` disables). A key lookup through
+  those overloads went from about 122 µs to about 65 µs. Entries are checked out to one caller at
+  a time; a statement whose execution fails is dropped; a call whose parameter names differ from
+  the statement's first use is refused, because the engine keeps previously bound values.
+- Cancellation that interrupts the running query: a `CancellationToken` passed to any query
+  method is wired to `lbug_connection_interrupt` while the native call runs, and the call throws
+  `OperationCanceledException` carrying the token. The interrupt is re-sent until the call returns,
+  because the engine clears its flag when execution starts.
+- `LadybugDiagnostics`: an `ActivitySource` and a `Meter`, both named `LadybugDb.Client`, emitting
+  one client span per statement and a `db.client.operation.duration` histogram with the
+  OpenTelemetry database attributes (`db.system.name`, `db.namespace`, `db.operation.name`,
+  `db.query.text`, `error.type`). No dependency added; nothing is allocated without a listener.
+- `LadybugDatabase.Config` and `LadybugDatabase.Path`.
+- A LINQ query surface (`LadybugDb.Client.Linq`, `.Schema`, `.Cypher`): `[Node]`/`[Rel]`
+  descriptors with catalog validation and DDL (`LadybugSchema`); `connection.Nodes<T>()` and
+  `Match<T>(pattern)` returning an `IQueryable<T>` whose `Where`, `Select`, `OrderBy`, `Skip`,
+  `Take`, `Distinct`, `GroupBy` aggregates and the `First`/`Single`/`Count`/`Any` terminals
+  translate to Cypher through a published whitelist (anything else throws naming the
+  sub-expression; nothing is evaluated on the client); typed graph steps (`Out`, `In`,
+  `OutWithRel`, `InWithRel`, `WhereExists`, with hop ranges); async terminals
+  (`AsAsyncEnumerable`, `ToListAsync`, `FirstOrDefaultAsync`, `CountAsync`, `AnyAsync`, ...);
+  and an immutable Cypher AST with a renderer that emits only parameterized text, usable on its
+  own as a fluent DSL. The LINQ layer is annotated for trimming and AOT; the row and `Select<T>`
+  paths remain the trim-safe ones.
+- Public-API tracking: `Microsoft.CodeAnalysis.PublicApiAnalyzers` with `PublicAPI.Shipped.txt`
+  and `PublicAPI.Unshipped.txt` in both packable projects, so a surface change is a reviewed diff
+  and the release step is a documented file move.
+
+### Changed
+
+- Rows are read through stack-allocated borrows of the engine's reused flat tuple, with column
+  types read once per result instead of once per cell. Measured on 10,000 three-column rows:
+  typed accessors 8.85 ms and 4.4 MB down to 3.23 ms and 1.6 MB; `Select<T>` 9.0 ms down to 2.65 ms.
+  No API change.
+- The engine binaries come from upstream's `LadybugDB.Native` packages, chosen by the consumer.
+  `LadybugDb.Client.Native`, `scripts/fetch-liblbug.sh` and the SHA256 lockfile are retired;
+  `LadybugDb.Client` declares no native dependency and ships no `runtimes/` folder.
+- The header pin moved to `third-party/liblbug.version` (v0.19.1) and the interop was
+  regenerated; one new entry point, `lbug_connection_get_pushed_sql`.
+- `AnalysisMode=Recommended` on the shipping library (zero findings), not on the test projects.
+- README positions the client against the official `LadybugDB` binding and Knaackee's `Ladybug`.
+- `docs/USAGE.md` documents parameter objects, `Select<T>`, the widening rule, and replaces the
+  "zero conflicts under `EnableMultiWrites`" claim with the measured table.
+
+### Fixed
+
+- A nested `BEGIN TRANSACTION` is refused. The engine tears down the transaction already in
+  flight on a nested `BEGIN`, so the writes inside it vanished with no error; the guard now also
+  tracks a transaction opened by handing `BEGIN TRANSACTION` to `QueryAsync`.
+- `LadybugTransaction` follows the engine when a raw `COMMIT` or `ROLLBACK` closes the
+  transaction it opened, instead of later committing nothing or rolling back a transaction that
+  no longer exists.
+- A contended transaction gate deadlocked when the caller blocked on a single-threaded
+  `SynchronizationContext` (WPF, WinForms, legacy ASP.NET). `ConfigureAwait(false)` on every
+  genuine suspension point.
+- `PrepareAsync` of a write statement classifies the single-writer refusal as
+  `LadybugWriteConflictException` instead of throwing it raw, and the multi-writes wording
+  "Write-write conflict of updating the same row" is classified as a write conflict too.
+- `Select<T>` matches an unaliased column such as `o.dbref` to a constructor parameter by the
+  text after its last dot; exact aliases still win.
+- `TransactionStatement.Classify` no longer allocates for ordinary statements.
+- The native resolver's `Assembly.Location` read is annotated for single-file and AOT apps, where
+  it is empty and only `AppContext.BaseDirectory` is probed.
+
+[Unreleased]: https://github.com/HarryCordewener/ladybugdb-dotnet-client/compare/27a3e1c...HEAD

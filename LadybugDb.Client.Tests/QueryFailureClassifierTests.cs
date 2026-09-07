@@ -67,6 +67,15 @@ public class QueryFailureClassifierTests
     }
 
     [Test]
+    public async Task InterruptedMessage_IsRecognised_AndIsNotAWriteConflict()
+    {
+        await Assert.That(QueryFailureClassifier.IsInterrupted("Interrupted.")).IsTrue();
+        await Assert.That(QueryFailureClassifier.IsInterrupted("Binder exception: Table X does not exist.")).IsFalse();
+        await Assert.That(QueryFailureClassifier.IsInterrupted(null)).IsFalse();
+        await Assert.That(QueryFailureClassifier.Classify("Interrupted.", "RETURN 1")).IsTypeOf<LadybugException>();
+    }
+
+    [Test]
     public async Task UnrelatedErrorMessage_ClassifiesAsPlainLadybugException()
     {
         var ex = QueryFailureClassifier.Classify(

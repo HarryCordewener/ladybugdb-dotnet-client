@@ -1,6 +1,6 @@
 # LINQ query surface for LadybugDb.Client — design
 
-Date: 2026-09-06. Status: proposed, not implemented. Research behind every claim here is in
+Date: 2026-09-06. Status: Phases A and B implemented (2026-09-07); Phase C (source generator) not started. Research behind every claim here is in
 [`docs/research/2026-09-06-linq-over-graph-databases.md`](../../research/2026-09-06-linq-over-graph-databases.md).
 
 ## Why
@@ -162,7 +162,7 @@ text):
 | C# | Cypher |
 |---|---|
 | `==`, `!=`, `<`, `<=`, `>`, `>=` between a member and a constant, closure, or another member | the same operator |
-| `&&`, `||`, `!` on translatable sub-expressions | `AND`, `OR`, `NOT` |
+| `&&`, `\|\|`, `!` on translatable sub-expressions | `AND`, `OR`, `NOT` |
 | `x.Prop == null`, `!= null` | `IS NULL`, `IS NOT NULL` |
 | `x.S.StartsWith(c)`, `.EndsWith(c)`, `.Contains(c)` (ordinal only) | `STARTS WITH`, `ENDS WITH`, `CONTAINS` |
 | `collection.Contains(x.Prop)` where collection is a closure | `x.prop IN $p` |

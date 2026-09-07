@@ -71,8 +71,16 @@ public sealed class LadybugDatabase : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         Client.EngineVersion.EnsureCompatible();
-        _handle = LbugDatabaseHandle.Open(path, BuildConfig(config ?? new LadybugConfig()));
+        Config = config ?? new LadybugConfig();
+        Path = path;
+        _handle = LbugDatabaseHandle.Open(path, BuildConfig(Config));
     }
+
+    /// <summary>The configuration this database was opened with (the defaults, if none was given).</summary>
+    public LadybugConfig Config { get; }
+
+    /// <summary>The path this database was opened at, exactly as given to the constructor.</summary>
+    public string Path { get; }
 
     /// <summary>
     /// The version of the <c>liblbug</c> engine actually loaded into this process, as the engine
@@ -115,6 +123,10 @@ public sealed class LadybugDatabase : IDisposable
         native.enable_compression = ToNativeBool(config.EnableCompression);
         native.read_only = ToNativeBool(config.ReadOnly);
         native.enable_multi_writes = ToNativeBool(config.EnableMultiWrites);
+        native.auto_checkpoint = ToNativeBool(config.AutoCheckpoint);
+        if (config.CheckpointThreshold != 0) native.checkpoint_threshold = config.CheckpointThreshold;
+        native.enable_checksums = ToNativeBool(config.EnableChecksums);
+        native.throw_on_wal_replay_failure = ToNativeBool(config.ThrowOnWalReplayFailure);
         return native;
     }
 

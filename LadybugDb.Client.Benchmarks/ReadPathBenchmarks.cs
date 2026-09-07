@@ -72,7 +72,9 @@ public class ReadPathBenchmarks
         await using var r = await _conn.QueryAsync(Scan);
         var list = await r.ToListAsync();
         long sum = 0;
-        foreach (var row in list) sum += row.GetInt64(0);
+        // The same three columns the other read benchmarks consume, so the comparison is of the
+        // enumeration path and not of how much of each row the loop happens to touch.
+        foreach (var row in list) sum += row.GetInt64(0) + row.GetString(1).Length + row.GetInt64(2);
         return sum;
     }
 

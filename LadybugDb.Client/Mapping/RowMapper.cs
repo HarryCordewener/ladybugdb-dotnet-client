@@ -27,6 +27,14 @@ namespace LadybugDb.Client.Mapping;
 /// }
 /// </code>
 /// <para>
+/// <b>What resolving early does and does not catch.</b> Everything about the column <em>shape</em>:
+/// an unmatched constructor, an ambiguous one, a scalar target against more than one column. Not a
+/// type mismatch - conversion is per value, so a target whose name matches a column it cannot read
+/// from raises on the first row and, for an empty result, never. Predicting that from the column
+/// metadata would take a second table of engine-type to CLR-type reachability maintained beside
+/// <see cref="Converters"/> and free to drift from the conversions it claims to describe.
+/// </para>
+/// <para>
 /// <b>Resolve from the <em>result</em>'s column shape, not from the first row</b> - which is what
 /// <see cref="LadybugConnection.Select{T}"/> does. The two are equivalent for every result that has a
 /// first row; they differ for one that has none. Resolving from a row means a query returning
@@ -318,13 +326,9 @@ internal static class RowMapper
         {
             columnIndexes.TryAdd(columnNames[i], i);
         }
-        // Second pass, so an exact name always wins: an unaliased projection is named by the engine
-        // after its expression - `RETURN o.dbref, o.name` yields columns 'o.dbref' and 'o.name' -
-        // and a record parameter called Dbref should match that without every query needing an AS
-        // per column. Only the text after the LAST dot counts, and only for names that contain one,
-        // so 'o.dbref' matches Dbref while a genuine alias never changes meaning. Two unaliased
-        // columns with the same property name ('o.name', 'r.name') resolve leftmost, the same rule
-        // duplicate aliases already follow.
+        // Second pass, so an exact name always wins: the engine names an unaliased projection after
+        // its expression ('o.dbref'), and a parameter called Dbref should match that without an AS
+        // per column. Only the text after the last dot counts; duplicates resolve leftmost as above.
         for (var i = 0; i < columnNames.Count; i++)
         {
             var dot = columnNames[i].LastIndexOf('.');
@@ -513,7 +517,7 @@ internal static class RowMapper
     /// (<see cref="ParameterBinder"/> has its own renderer, which speaks a different vocabulary - CLR
     /// type names, and "an anonymous type" for the shapes a parameters object comes in.)
     /// </summary>
-    private static string Describe(Type type)
+    internal static string Describe(Type type)
     {
         if (Nullable.GetUnderlyingType(type) is { } underlying) return $"{Describe(underlying)}?";
         if (type.IsArray) return $"{Describe(type.GetElementType()!)}[]";

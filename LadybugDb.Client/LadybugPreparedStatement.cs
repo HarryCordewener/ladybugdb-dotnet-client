@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ExtendedNumerics;
+using LadybugDb.Client.Diagnostics;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
@@ -45,7 +46,7 @@ namespace LadybugDb.Client;
 /// question for the CALLER to avoid by not doing that, not a memory-safety one.
 /// </para>
 /// </remarks>
-public sealed class LadybugPreparedStatement : IAsyncDisposable
+public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
 {
     private static readonly DateOnly Epoch = new(1970, 1, 1);
 
@@ -53,6 +54,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     private readonly LbugConnectionHandle _connection;
     private readonly LbugPreparedStatementHandle _handle;
     private readonly string _cypher;
+    private readonly string _databasePath;
 
     /// <summary>
     /// Serializes every <c>Bind*</c>/<see cref="BindNull"/> call on this instance against every
@@ -66,8 +68,10 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// checks <c>lbug_query_result_is_success</c> after a plain query.
     /// </summary>
     internal static unsafe LadybugPreparedStatement Prepare(
-        LbugDatabaseHandle database, LbugConnectionHandle connection, string cypher)
+        LadybugDatabase owner, LbugConnectionHandle connection, string cypher)
     {
+        var database = owner.Handle;
+        var databasePath = owner.Path;
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try
         {
@@ -89,15 +93,13 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                // Classified, not thrown raw: preparing a write statement contends for the engine's
-                // single writer slot exactly as executing one does, so it can fail with the same
-                // write-conflict message - and a retry loop that only catches
-                // LadybugWriteConflictException must see it as one. Pinned by
-                // DatabaseLifecycleTests.ConcurrentPrepareOfWriteStatement_ThrowsLadybugWriteConflictException.
+                // Classified: preparing a write statement contends for the writer slot like
+                // executing one, so it can fail with the retryable conflict.
                 throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
-            return new LadybugPreparedStatement(database, connection, handle, cypher);
+            Interlocked.Increment(ref _preparedCount);
+            return new LadybugPreparedStatement(database, connection, handle, cypher, databasePath);
         }
         finally
         {
@@ -106,12 +108,14 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     }
 
     private LadybugPreparedStatement(
-        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle handle, string cypher)
+        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle handle,
+        string cypher, string databasePath)
     {
         _database = database;
         _connection = connection;
         _handle = handle;
         _cypher = cypher;
+        _databasePath = databasePath;
     }
 
     /// <summary>Binds a boolean parameter.</summary>
@@ -575,7 +579,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     public ValueTask<LadybugQueryResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Execute());
+        return ValueTask.FromResult(Execute(cancellationToken));
     }
 
     /// <summary>
@@ -628,7 +632,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         ParameterBinder.BindAll(this, parameters);
-        return ValueTask.FromResult(Execute());
+        return ValueTask.FromResult(Execute(cancellationToken));
     }
 
     /// <summary>
@@ -731,9 +735,40 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         }
     }
 
-    private unsafe LadybugQueryResult Execute()
+    /// <summary>Backing field for <see cref="PreparedCount"/>.</summary>
+    private static long _preparedCount;
+
+    /// <summary>Statements prepared process-wide; the tests' evidence that the cache reused one. See <see cref="LadybugQueryResult.LiveCount"/>.</summary>
+    internal static long PreparedCount => Interlocked.Read(ref _preparedCount);
+
+    /// <summary>Executes with whatever is bound; for <see cref="LadybugConnection"/>'s cache path.</summary>
+    internal LadybugQueryResult ExecuteBound(CancellationToken cancellationToken) => Execute(cancellationToken);
+
+    /// <remarks>Mirrors <c>LadybugConnection.Execute</c>; cancellation via <see cref="QueryInterrupt"/>.</remarks>
+    private LadybugQueryResult Execute(CancellationToken cancellationToken)
     {
-        var handle = LbugQueryResultHandle.ExecutePrepared(_database, _connection, _handle, out var state);
+        var scope = LadybugDiagnostics.Start(_cypher, _databasePath);
+        try
+        {
+            var result = ExecuteCore(cancellationToken);
+            scope.Succeed();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            scope.Fail(ex);
+            throw;
+        }
+    }
+
+    private unsafe LadybugQueryResult ExecuteCore(CancellationToken cancellationToken)
+    {
+        LbugQueryResultHandle handle;
+        lbug_state state;
+        using (QueryInterrupt.Register(_connection, cancellationToken))
+        {
+            handle = LbugQueryResultHandle.ExecutePrepared(_database, _connection, _handle, out state);
+        }
 
         // Non-null only on failure - see LadybugConnection.Execute.
         string? failureMessage = null;
@@ -748,7 +783,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         if (failureMessage is not null)
         {
             handle.Dispose();
-            throw QueryFailureClassifier.Classify(failureMessage, _cypher);
+            throw (Exception?)QueryInterrupt.AsCancellation(failureMessage, cancellationToken)
+                ?? QueryFailureClassifier.Classify(failureMessage, _cypher);
         }
 
         return LadybugQueryResult.Create(_database, handle);
@@ -819,7 +855,10 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// <summary>Destroys this prepared statement. Safe to call even if the parent connection or database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {
-        _handle.Dispose();
+        Dispose();
         return ValueTask.CompletedTask;
     }
+
+    /// <summary>Releases the statement. Equivalent to <see cref="DisposeAsync"/>; results it produced stay usable.</summary>
+    public void Dispose() => _handle.Dispose();
 }

@@ -10,7 +10,31 @@
     <PackageProjectUrl>https://github.com/HarryCordewener/ladybugdb-dotnet-client</PackageProjectUrl>
     <RepositoryUrl>https://github.com/HarryCordewener/ladybugdb-dotnet-client</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!--
+      Shared by every packable project (LadybugDb.Client and LadybugDb.Client.Extensions). The icon
+      file itself is packed by each csproj's <None Include=... Pack="true" /> item, since the path
+      to it is relative to the project. A project appends its own tags with
+      <PackageTags>$(PackageTags);more</PackageTags>.
+    -->
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>ladybugdb;ladybug;graph;graph-database;cypher;embedded;database</PackageTags>
+    <PackageReleaseNotes>https://github.com/HarryCordewener/ladybugdb-dotnet-client/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <!--
+      Source Link. The .NET SDK includes the GitHub provider, so no Microsoft.SourceLink.GitHub
+      reference is needed; PublishRepositoryUrl is what writes the repository url and commit into
+      the nuspec, and EmbedUntrackedSources embeds generated files (LbugNative.g.cs is tracked, but
+      the compiler's own generated sources are not) into the PDB so a debugger can show them.
+    -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- Symbols ship as a separate .snupkg, which nuget.org serves to debuggers on demand. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!--
+      Deterministic, source-mapped builds on CI only: on a developer machine the PDB should keep
+      the local paths a debugger can actually open. GITHUB_ACTIONS is set by the runner on every job.
+    -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     <!--
       Milestone 2's functional surface (typed parameter binds, transactions, IAsyncEnumerable
       result reading, prepared statements) is complete, but the public API is still pre-1.0 and

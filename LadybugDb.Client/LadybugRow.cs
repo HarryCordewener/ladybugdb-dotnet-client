@@ -106,7 +106,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as bool, via <see cref="LadybugValue.AsBoolean"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as bool.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>BOOL</c> this accessor can read - see <see cref="LadybugValue.AsBoolean"/>.</exception>
     public bool GetBoolean(string columnName) => this[columnName].AsBoolean();
 
@@ -120,7 +120,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as long, via <see cref="LadybugValue.AsInt64"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as long.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>INT64</c> this accessor can read - see <see cref="LadybugValue.AsInt64"/>.</exception>
     public long GetInt64(string columnName) => this[columnName].AsInt64();
 
@@ -134,7 +134,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as int, via <see cref="LadybugValue.AsInt32"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as int.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>INT32</c> this accessor can read - see <see cref="LadybugValue.AsInt32"/>.</exception>
     public int GetInt32(string columnName) => this[columnName].AsInt32();
 
@@ -148,7 +148,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as short, via <see cref="LadybugValue.AsInt16"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as short.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>INT16</c> this accessor can read - see <see cref="LadybugValue.AsInt16"/>.</exception>
     public short GetInt16(string columnName) => this[columnName].AsInt16();
 
@@ -162,7 +162,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as sbyte, via <see cref="LadybugValue.AsSByte"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as sbyte.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>INT8</c> this accessor can read - see <see cref="LadybugValue.AsSByte"/>.</exception>
     public sbyte GetSByte(string columnName) => this[columnName].AsSByte();
 
@@ -176,7 +176,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as ulong, via <see cref="LadybugValue.AsUInt64"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as ulong.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>UINT64</c> this accessor can read - see <see cref="LadybugValue.AsUInt64"/>.</exception>
     public ulong GetUInt64(string columnName) => this[columnName].AsUInt64();
 
@@ -190,7 +190,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as uint, via <see cref="LadybugValue.AsUInt32"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as uint.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>UINT32</c> this accessor can read - see <see cref="LadybugValue.AsUInt32"/>.</exception>
     public uint GetUInt32(string columnName) => this[columnName].AsUInt32();
 
@@ -204,7 +204,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as ushort, via <see cref="LadybugValue.AsUInt16"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as ushort.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>UINT16</c> this accessor can read - see <see cref="LadybugValue.AsUInt16"/>.</exception>
     public ushort GetUInt16(string columnName) => this[columnName].AsUInt16();
 
@@ -218,7 +218,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as byte, via <see cref="LadybugValue.AsByte"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as byte.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>UINT8</c> this accessor can read - see <see cref="LadybugValue.AsByte"/>.</exception>
     public byte GetByte(string columnName) => this[columnName].AsByte();
 
@@ -232,7 +232,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as Int128, via <see cref="LadybugValue.AsInt128"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as Int128.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>INT128</c> this accessor can read - see <see cref="LadybugValue.AsInt128"/>.</exception>
     public Int128 GetInt128(string columnName) => this[columnName].AsInt128();
 
@@ -246,7 +246,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as float, via <see cref="LadybugValue.AsSingle"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as float.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>FLOAT</c> this accessor can read - see <see cref="LadybugValue.AsSingle"/>.</exception>
     public float GetSingle(string columnName) => this[columnName].AsSingle();
 
@@ -260,7 +260,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as double, via <see cref="LadybugValue.AsDouble"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as double.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>DOUBLE</c> this accessor can read - see <see cref="LadybugValue.AsDouble"/>.</exception>
     public double GetDouble(string columnName) => this[columnName].AsDouble();
 
@@ -274,7 +274,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as decimal, via <see cref="LadybugValue.AsDecimal"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as decimal.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>DECIMAL</c> this accessor can read - see <see cref="LadybugValue.AsDecimal"/>.</exception>
     public decimal GetDecimal(string columnName) => this[columnName].AsDecimal();
 
@@ -288,7 +288,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as BigDecimal, via <see cref="LadybugValue.AsBigDecimal"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as BigDecimal.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>DECIMAL</c> this accessor can read - see <see cref="LadybugValue.AsBigDecimal"/>.</exception>
     public BigDecimal GetBigDecimal(string columnName) => this[columnName].AsBigDecimal();
 
@@ -302,7 +302,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as string, via <see cref="LadybugValue.AsString"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as string.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>STRING</c> this accessor can read - see <see cref="LadybugValue.AsString"/>.</exception>
     public string GetString(string columnName) => this[columnName].AsString();
 
@@ -316,7 +316,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as DateOnly, via <see cref="LadybugValue.AsDateOnly"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as DateOnly.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>DATE</c> this accessor can read - see <see cref="LadybugValue.AsDateOnly"/>.</exception>
     public DateOnly GetDateOnly(string columnName) => this[columnName].AsDateOnly();
 
@@ -330,7 +330,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as DateTime, via <see cref="LadybugValue.AsDateTime"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as DateTime.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>TIMESTAMP</c> this accessor can read - see <see cref="LadybugValue.AsDateTime"/>.</exception>
     public DateTime GetDateTime(string columnName) => this[columnName].AsDateTime();
 
@@ -344,7 +344,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as DateTimeOffset, via <see cref="LadybugValue.AsDateTimeOffset"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as DateTimeOffset.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>TIMESTAMP_TZ</c> this accessor can read - see <see cref="LadybugValue.AsDateTimeOffset"/>.</exception>
     public DateTimeOffset GetDateTimeOffset(string columnName) => this[columnName].AsDateTimeOffset();
 
@@ -358,7 +358,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as TimeSpan, via <see cref="LadybugValue.AsTimeSpan"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as TimeSpan.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>INTERVAL</c> this accessor can read - see <see cref="LadybugValue.AsTimeSpan"/>.</exception>
     public TimeSpan GetTimeSpan(string columnName) => this[columnName].AsTimeSpan();
 
@@ -372,7 +372,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as byte[], via <see cref="LadybugValue.AsBlob"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as byte[].</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not a <c>BLOB</c> this accessor can read - see <see cref="LadybugValue.AsBlob"/>.</exception>
     public byte[] GetBlob(string columnName) => this[columnName].AsBlob();
 
@@ -386,7 +386,7 @@ public readonly struct LadybugRow
     /// <summary>Reads column <paramref name="columnName"/> as Guid, via <see cref="LadybugValue.AsGuid"/>.</summary>
     /// <param name="columnName">The column name, as returned by the query.</param>
     /// <returns>The column's value as Guid.</returns>
-    /// <exception cref="KeyNotFoundException">No column is named <paramref name="columnName"/>.</exception>
+    /// <exception cref="ArgumentException">No column is named <paramref name="columnName"/> - see <see cref="this[string]"/>.</exception>
     /// <exception cref="LadybugException">The column is not an <c>UUID</c> this accessor can read - see <see cref="LadybugValue.AsGuid"/>.</exception>
     public Guid GetGuid(string columnName) => this[columnName].AsGuid();
 }

@@ -1,7 +1,9 @@
 # Releasing
 
-How a version of `LadybugDb.Client` gets from a commit on `main` to a package on nuget.org. (The
-engine binaries are upstream's `LadybugDB.Native` packages; this repository publishes none.)
+How a version of `LadybugDb.Client` and `LadybugDb.Client.Extensions` gets from a commit on `main`
+to nuget.org. The two packages always ship together at one version; the Extensions package depends
+on the core at exactly that version. (The engine binaries are upstream's `LadybugDB.Native`
+packages; this repository publishes none.)
 
 - [How a release ships](#how-a-release-ships)
 - [What the workflow actually does](#what-the-workflow-actually-does)
@@ -14,7 +16,9 @@ engine binaries are upstream's `LadybugDB.Native` packages; this repository publ
 
 1. Make sure `main` is in the state you want to ship.
 2. Decide the version, e.g. `0.2.0` or `0.2.0-beta.1` (see [Versioning](#versioning)).
-3. Tag it and push the tag:
+3. In `CHANGELOG.md`, rename `Unreleased` to `[0.2.0] - YYYY-MM-DD`, add its compare link at the
+   bottom, and open a fresh empty `Unreleased` above it. Commit that to `main`.
+4. Tag it and push the tag:
 
    ```console
    git tag v0.2.0
@@ -23,7 +27,7 @@ engine binaries are upstream's `LadybugDB.Native` packages; this repository publ
 
    Pushing a tag matching `v[0-9]+.[0-9]+.[0-9]+*` triggers
    [`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds, tests, packs,
-   and publishes the package.
+   and publishes both packages.
 
    Alternatively, run the workflow manually from the Actions tab (`workflow_dispatch`) and supply a
    `version` input — useful for re-publishing after a transient failure without cutting a new tag,
@@ -37,20 +41,62 @@ In order, on `ubuntu-latest`:
    SemVer.
 2. `dotnet restore` (which also brings in the `LadybugDB.Native` package the test projects
    reference), `dotnet build -c Release -p:Version=<version>`.
-3. `dotnet test` for both `LadybugDb.Client.Tests` and `LadybugDb.Client.IntegrationTests`, against
-   the just-built `Release` binaries. **A publish never happens from artifacts that weren't
-   tested** — if either test project fails, the job stops before packing or pushing anything.
-4. `dotnet pack -c Release -p:Version=<version>` — produces exactly one package
-   (`LadybugDb.Client`; every other project is `IsPackable=false`).
+3. `dotnet test` for `LadybugDb.Client.Tests`, `LadybugDb.Client.IntegrationTests` and
+   `LadybugDb.Client.Extensions.Tests`, against the just-built `Release` binaries. **A publish never
+   happens from artifacts that weren't tested** — if any test project fails, the job stops before
+   packing or pushing anything.
+4. `dotnet pack -c Release -p:Version=<version>` — produces exactly two packages,
+   `LadybugDb.Client` and `LadybugDb.Client.Extensions`, at the same version (every other project
+   is `IsPackable=false`). The Extensions nuspec depends on `LadybugDb.Client` with the exact range
+   `[<version>]`, which `PackagingTests` checks.
 5. `NuGet/login@v1` exchanges this job's GitHub OIDC token for a nuget.org API key good for one
    hour. This step runs right before the push steps, not earlier in the job, since the key is
    short-lived.
-6. `dotnet nuget push`, with `--skip-duplicate` so re-running the workflow (e.g.
-   after a flaky push) isn't fatal if a package version already exists on nuget.org.
+6. `dotnet nuget push` for the core and then for the Extensions package (in that order, so a
+   consumer restoring between the two finds the dependency already there), with `--skip-duplicate`
+   so re-running the workflow (e.g. after a flaky push) isn't fatal if a package version already
+   exists on nuget.org.
 
 No long-lived nuget.org API key is stored anywhere in this repo or its secrets — this is
 [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), backed
 by GitHub OIDC.
+
+## Package validation and the API baseline
+
+`LadybugDb.Client.csproj` has `EnablePackageValidation=true`, so every `dotnet pack` checks the
+package against itself (compatible frameworks and runtimes). The check that matters for consumers,
+"did this version break the previous one's public API", needs a published version to compare
+against, and starts on the release after the first publish:
+
+1. After the first version (say `0.2.0`) is live on nuget.org, add to both
+   `LadybugDb.Client/LadybugDb.Client.csproj` and
+   `LadybugDb.Client.Extensions/LadybugDb.Client.Extensions.csproj`:
+
+   ```xml
+   <PackageValidationBaselineVersion>0.2.0</PackageValidationBaselineVersion>
+   ```
+
+2. From then on `dotnet pack` downloads that version and fails on a removed or changed public
+   member. Bump the property to the newest published version with each release.
+3. A deliberate break (pre-1.0 this is allowed; after 1.0 it means a major bump) is recorded by
+   adding the reported suppression to `CompatibilitySuppressions.xml` next to the csproj, and by
+   a `Changed`/`Removed` entry in `CHANGELOG.md`.
+
+### The public API files
+
+Both packable projects carry `Microsoft.CodeAnalysis.PublicApiAnalyzers` with
+`PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` next to the csproj. Every public member must
+appear in one of them or the build fails (RS0016), and a member that disappears from the code but
+not from the files fails too (RS0017), so any change to the surface is a reviewed line in the diff.
+
+- **While developing:** after adding or changing public API, rebuild; each RS0016 error's message
+  is the exact line to add to `PublicAPI.Unshipped.txt`. An IDE with the analyzer's code fix adds
+  it for you. Removed members get a `*REMOVED*` prefix line in `Unshipped`.
+- **At release:** move every line of `Unshipped` (except the `#nullable enable` header) into
+  `Shipped`, sorted, in the release commit. `Shipped` is the contract the version promises; the
+  next `Unshipped` starts empty.
+- RS0026 and RS0027 (overloads differing only by optional parameters) are disabled on purpose in
+  both csproj files; the comment there says why.
 
 ## Versioning
 
@@ -69,6 +115,35 @@ local/CI builds that never publish). This means:
   treats these as ordinary SemVer 2.0 pre-release/stable semantics — nothing release-specific to
   configure for that.
 
+### What the version means
+
+- **Package versions are SemVer and independent of the engine version.** The official
+  `LadybugDB` binding uses the engine version as its own; this client does not, because its
+  public API (typed values, `Select<T>`, transactions) changes on its own schedule. Pre-1.0, a
+  minor bump may break the API; from 1.0, only a major bump may, and the package-validation
+  baseline (above) enforces it.
+- **Every release names the engine it was generated against.** That is
+  `third-party/liblbug.version`, embedded as `LadybugDatabase.MinimumEngineVersion` and stated
+  in the README's installation section and in the release's `CHANGELOG.md` entry. A consumer
+  picks any `LadybugDB.Native` version at or above it.
+- **A release bumps the engine pin only when upstream has published a `LadybugDB.Native`
+  package for the new engine** (upstream publishes them a little after each engine release).
+  The weekly `upstream-check` workflow opens an issue when a newer native package appears.
+  Bumping the pin follows [docs/BUILDING.md](BUILDING.md#how-the-engine-version-is-pinned) and is
+  a `Changed` entry in the changelog; if the regenerated interop adds entry points the client
+  calls, the minimum engine moves too, which is a breaking change for consumers on the older
+  engine and is called out as one.
+
+### Changelog and release notes
+
+`CHANGELOG.md` is hand-maintained (Keep a Changelog): every consumer-visible change gets a line
+under `Unreleased` in its PR, and cutting a release renames that section to the version and
+date. The GitHub release itself uses generated notes, sorted into the same sections by PR label
+([`.github/release.yml`](../.github/release.yml)); create it after the workflow has published,
+with `gh release create v0.2.0 --generate-notes` or the "Generate release notes" button. The
+workflow does not create the GitHub release itself, since that would need `contents: write` on
+the job that holds the nuget.org publishing token.
+
 ## One-time setup the repo owner must do
 
 There is exactly one step, and it requires the owner's nuget.org account — it cannot be done from
@@ -86,7 +161,8 @@ this repository.
      key to `release.yml`, in which case both must be changed together.
 
    If nuget.org requires the target package IDs to already exist or be reserved before a Trusted
-   Publishing policy can be scoped to them, reserve `LadybugDb.Client` first. If this is a private/new nuget.org policy, it starts temporarily active for **7 days**
+   Publishing policy can be scoped to them, reserve `LadybugDb.Client` and
+   `LadybugDb.Client.Extensions` first. If this is a private/new nuget.org policy, it starts temporarily active for **7 days**
    and locks to this repo's owner/repository IDs on the first successful publish — expect that
    window, and don't be alarmed if the policy shows as "pending" until the first tag ships.
 
@@ -110,16 +186,19 @@ step (empty/wrong `user`, or no matching Trusted Publishing policy) or the `dotn
 
 ## Verifying a publish succeeded
 
-- **In the workflow run:** the `Push LadybugDb.Client` step should complete without error. A `--skip-duplicate` push of a version that's already live prints
-  a message and still exits 0 — that's expected on a re-run, not a sign anything is wrong.
+- **In the workflow run:** the `Push LadybugDb.Client` and `Push LadybugDb.Client.Extensions`
+  steps should complete without error. A `--skip-duplicate` push of a version that's already live
+  prints a message and still exits 0 — that's expected on a re-run, not a sign anything is wrong.
 - **On nuget.org:** check
-  [nuget.org/packages/LadybugDb.Client](https://www.nuget.org/packages/LadybugDb.Client)
+  [nuget.org/packages/LadybugDb.Client](https://www.nuget.org/packages/LadybugDb.Client) and
+  [nuget.org/packages/LadybugDb.Client.Extensions](https://www.nuget.org/packages/LadybugDb.Client.Extensions)
   for the new version. New versions can take a few minutes to appear while nuget.org finishes
   indexing.
 - **From a consuming project:**
 
   ```console
   dotnet add package LadybugDb.Client --version 0.2.0
+  dotnet add package LadybugDb.Client.Extensions --version 0.2.0   # DI hosts only
   dotnet add package LadybugDB.Native --version 0.19.1
   ```
 

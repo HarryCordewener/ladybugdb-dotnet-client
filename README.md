@@ -24,9 +24,11 @@ cd ladybugdb-dotnet-client
 dotnet pack -c Release
 ```
 
-That produces one package, `LadybugDb.Client`, under `LadybugDb.Client/bin/Release`. It is the
-managed client only. The engine binaries come from upstream's own native packages, which you add
-alongside it:
+That produces two packages: `LadybugDb.Client` under `LadybugDb.Client/bin/Release`, and
+`LadybugDb.Client.Extensions` (dependency injection, options and a health check for ASP.NET Core
+and other `Microsoft.Extensions` hosts; see [ASP.NET Core and dependency injection](#aspnet-core-and-dependency-injection))
+under `LadybugDb.Client.Extensions/bin/Release`. Both are managed only. The engine binaries come
+from upstream's own native packages, which you add alongside:
 
 ```console
 dotnet add package LadybugDB.Native            # every platform, or:
@@ -75,6 +77,7 @@ await foreach (var o in conn.Select<Room>(
 record Room(long Dbref, string Name);
 ```
 
+[docs/GUIDE.md](docs/GUIDE.md) walks through the library from install to production settings;
 [docs/USAGE.md](docs/USAGE.md) documents every public member with worked examples.
 
 ## Current features
@@ -110,6 +113,29 @@ Nothing is materialized, and the underlying result is owned and released by the 
 including when you `break` out early. Columns convert to their target type with lossless widening
 (an `INT32` column reads into a `long`) but never narrowing, and a mismatch is a typed error naming
 the column, its engine type, and the target — reported even for a query that returns no rows.
+
+**LINQ**
+`conn.Nodes<T>()` is an `IQueryable<T>` over a `[Node]`-annotated record. `Where`, `Select`,
+`OrderBy`, `Skip`/`Take`, `Distinct`, `GroupBy` aggregates, typed graph steps over `[Rel]` types and
+the `...Async` terminals translate to one parameterized Cypher statement; nothing is evaluated on
+the client, and an expression outside the whitelist throws at translation naming it:
+
+```csharp
+[Node("Object")] record Obj([property: Key] long Dbref, string Name, long? Loc);
+[Node("Attr")]   record Attr([property: Key] string Akey, string Aname, string Aval);
+[Rel("Has", From = typeof(Obj), To = typeof(Attr))] record Has;
+
+var desc = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == dbref)
+    .Out<Obj, Has, Attr>()
+    .Where(p => p.Target.Aname == "DESC")
+    .Select(p => p.Target.Aval)
+    .FirstOrDefaultAsync();
+// MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.aname = $p1 RETURN n1.aval AS Aval LIMIT $p2
+```
+
+`conn.Match<T>(pattern, parameters)` is the escape hatch: your `MATCH`, the same typed chain after
+it. See [docs/USAGE.md](docs/USAGE.md#linq).
 
 **Type coverage**
 Every value type the engine returns marshals to a typed `LadybugValue`:
@@ -156,7 +182,35 @@ last dependent releases. Disposal order does not crash the process.
 
 **Thread safety**
 `LadybugConnection` is safe for concurrent use. `Bind` calls on a single `LadybugPreparedStatement`
-are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency) for the full contract.
+are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the full contract.
+
+### ASP.NET Core and dependency injection
+
+`LadybugDb.Client.Extensions` adds `AddLadybugDb` for `Microsoft.Extensions.DependencyInjection`
+hosts. The core package has no `Microsoft.Extensions.*` dependency; only this one does.
+
+```csharp
+using LadybugDb.Client;
+using LadybugDb.Client.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddLadybugDb(builder.Configuration.GetSection("LadybugDb"));
+// or: builder.Services.AddLadybugDb("./data/graph", o => o.Config = o.Config with { MaxThreads = 4 });
+
+var app = builder.Build();
+app.MapHealthChecks("/health");
+app.MapGet("/objects/{dbref:long}", async (long dbref, LadybugConnection conn) =>
+    await conn.Select<string>(
+        "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.name", new { dbref }).FirstOrDefaultAsync());
+app.Run();
+```
+
+`AddLadybugDb` registers `LadybugDatabase` as a singleton (opened on first resolve, disposed with
+the container), `LadybugConnection` as scoped (one per request, disposed with it),
+`IOptions<LadybugDbOptions>` bound from the section (`DatabasePath`, `Config`, `DisableHealthChecks`),
+and a health check named `ladybugdb` that runs `RETURN 1` on a fresh connection. A missing
+`DatabasePath` fails at registration. See
+[docs/USAGE.md](docs/USAGE.md#extensions-dependency-injection-and-health-checks).
 
 ## Known limitations
 
@@ -194,13 +248,13 @@ that abstraction.
 
 The platforms are whatever upstream's `LadybugDB.Native.<rid>` packages cover:
 
-| RID | OS | Verified in this repository's CI |
+| RID | OS | This repository's CI |
 |---|---|---|
-| `linux-x64` | Linux x64 | Yes |
-| `win-x64` | Windows x64 | Yes |
-| `linux-arm64` | Linux ARM64 | No |
-| `osx-x64` | macOS x64 | No |
-| `osx-arm64` | macOS ARM64 | No |
+| `linux-x64` | Linux x64 | Unit and integration tests, required |
+| `win-x64` | Windows x64 | Unit tests, required |
+| `linux-arm64` | Linux ARM64 | Integration tests on `ubuntu-24.04-arm`, advisory until its first green run |
+| `osx-arm64` | macOS ARM64 | Unit and integration tests on `macos-latest`, advisory until its first green run |
+| `osx-x64` | macOS x64 | Not run (no GitHub-hosted Intel macOS runner) |
 
 Upstream publishes a `win-arm64` engine build but no native package for it yet; on that platform,
 place `lbug_shared.dll` from the upstream release next to the application (the resolver probes
@@ -210,11 +264,13 @@ place `lbug_shared.dll` from the upstream release next to the application (the r
 
 | Document | Contents |
 |---|---|
-| [docs/USAGE.md](docs/USAGE.md) | Complete API guide — every public member, with examples |
+| [docs/GUIDE.md](docs/GUIDE.md) | Getting started — a walkthrough from install to production settings, every sample executed |
+| [docs/USAGE.md](docs/USAGE.md) | Complete API reference — every public member of both packages, with examples; the LINQ chapter is [here](docs/USAGE.md#linq) |
 | [docs/2026-09-06-production-readiness.md](docs/2026-09-06-production-readiness.md) | Readiness review, benchmark analysis, and the LINQ direction |
 | [benchmarks/](benchmarks/README.md) | Workload and micro-benchmark harnesses and their results |
 | [docs/BUILDING.md](docs/BUILDING.md) | Building and testing from source |
-| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process |
+| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process, versioning policy |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 

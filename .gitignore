@@ -428,3 +428,6 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
+
+# Native AOT sample output (docs/BUILDING.md and the aot-publish CI job publish to it).
+aot-out/

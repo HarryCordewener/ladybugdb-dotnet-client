@@ -4,13 +4,31 @@ on:
     branches: [main]
   pull_request:
 
+# Every dotnet command names LadybugDb.Client.slnx (or one project) explicitly. With a solution
+# file at the root that is what the bare command would pick anyway, but it stops a stray
+# .sln/.slnx or a second project file from silently changing what CI builds.
+
+# These jobs restore and execute package, project and test code; none of them writes to the
+# repository, so the token they run with should not be able to either, whatever the repository
+# default is. The release workflow declares its own (it needs id-token for Trusted Publishing).
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # macos-latest is Apple silicon (osx-arm64); it and the arm64 Linux leg are advisory until
+    # their first green run, per the plan: a leg turns required only once it has passed.
+    continue-on-error: ${{ matrix.advisory }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        advisory: [false]
+        include:
+          - os: macos-latest
+            advisory: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -19,20 +37,34 @@ jobs:
       # No native fetch step: the engine binaries come from upstream's LadybugDB.Native package,
       # restored like any other package reference by the test and benchmark projects.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore LadybugDb.Client.slnx
       - name: Build
-        run: dotnet build --no-restore -c Release
+        run: dotnet build LadybugDb.Client.slnx --no-restore -c Release
       - name: Pack
         # PackagingTests (LadybugDb.Client.Tests) inspects the built .nupkg
         # contents, so it needs real packages on disk - `dotnet build` alone
         # never produces them (GeneratePackageOnBuild is intentionally not
         # set, so dev builds stay fast).
-        run: dotnet pack --no-build -c Release
+        run: dotnet pack LadybugDb.Client.slnx --no-build -c Release
       - name: Unit tests
         run: dotnet test LadybugDb.Client.Tests --no-build -c Release
 
   integration:
-    runs-on: ubuntu-latest
+    name: integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.advisory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        advisory: [false]
+        include:
+          # osx-arm64: Apple silicon runner.
+          - os: macos-latest
+            advisory: true
+          # linux-arm64: GitHub-hosted arm64 runner (free for public repositories).
+          - os: ubuntu-24.04-arm
+            advisory: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -40,6 +72,26 @@ jobs:
           global-json-file: global.json
       - name: Integration tests
         run: dotnet test LadybugDb.Client.IntegrationTests -c Release
+      - name: Extensions tests
+        # Against the real engine too (a registered database is opened and queried), hence here
+        # rather than in the build job's unit-test step.
+        run: dotnet test LadybugDb.Client.Extensions.Tests -c Release
+
+  aot-publish:
+    # The evidence behind LadybugDb.Client's IsAotCompatible flag: the sample is compiled
+    # ahead-of-time (ILC re-runs the trim/AOT analysis, so an unannotated reflective path fails
+    # here even if the Roslyn analyzers let it through) and then executed against the real
+    # engine. ubuntu-latest has the clang the ILCompiler toolchain needs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Publish the AOT sample
+        run: dotnet publish samples/LadybugDb.Client.AotSample -c Release -r linux-x64 -o aot-out
+      - name: Run the native binary
+        run: ./aot-out/LadybugDb.Client.AotSample
 
   interop-drift:
     runs-on: ubuntu-latest
