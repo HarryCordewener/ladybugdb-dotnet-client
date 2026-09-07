@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>LadybugDb.Client.Extensions</PackageId>
+    <Description>Dependency injection, options binding and a health check for LadybugDb.Client, the .NET client for the LadybugDB embedded graph database. AddLadybugDb registers a singleton LadybugDatabase and a scoped LadybugConnection.</Description>
+    <PackageTags>$(PackageTags);dependency-injection;options;health-check;aspnetcore</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- Same bar as the core: see LadybugDb.Client.csproj for why this is not repo-wide. -->
+    <AnalysisMode>Recommended</AnalysisMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="../LadybugDb.Client/icon.png" Pack="true" PackagePath="" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LadybugDb.Client/LadybugDb.Client.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Abstractions where an abstraction is enough: registration needs only IServiceCollection.
+      Options (not .Abstractions) for OptionsBuilder; ConfigurationExtensions for binding a
+      section into it.
+    -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+  </ItemGroup>
+</Project>

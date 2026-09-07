@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- Never packed, so no XML doc sidecar is produced from here; its public test classes are test scaffolding, not shipped API. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="TUnit" Version="1.62.0" />
+    <!-- The container and the in-memory configuration provider the registrations are exercised through. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
+    <!--
+      Upstream's own native packages carry liblbug (runtimes/<rid>/native); this repository ships
+      no binaries of its own. LadybugDB.Native is the meta package for every RID, which is what a
+      test project that runs on both Linux and Windows CI needs. Its version is the engine version.
+    -->
+    <PackageReference Include="LadybugDB.Native" Version="0.19.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LadybugDb.Client.Extensions\LadybugDb.Client.Extensions.csproj" />
+  </ItemGroup>
+</Project>
