@@ -289,34 +289,42 @@ internal static class ParameterBinder
                 paramName);
         }
 
-        var properties = type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
-            .ToArray();
+        // The reflection and both checks are per type, not per call: the same anonymous type is
+        // reused by every execution of a loop that binds one, which the statement cache makes the
+        // ordinary hot path. A rejected type caches its complaint too, so a repeated mistake costs
+        // the same as a repeated success. Bounded like MappingCache and for the same reason.
+        if (PropertyBags.Count >= PropertyBagCapacity) PropertyBags.Clear();
 
-        if (properties.Length == 0)
+        var properties = PropertyBags.GetOrAdd(type, static t =>
         {
-            throw new ArgumentException(
-                $"{Describe(type)} exposes no readable public properties, so it names no " +
-                $"parameters.",
-                paramName);
-        }
+            var readable = t
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
+                .ToArray();
 
-        // A `new`-shadowed property appears twice. Picking one silently would be the same class of
-        // mistake as the Dictionary<string, long> hole above, so say so instead.
-        var duplicate = properties
-            .GroupBy(p => p.Name, StringComparer.Ordinal)
-            .FirstOrDefault(g => g.Count() > 1);
-        if (duplicate is not null)
-        {
-            throw new ArgumentException(
-                $"{Describe(type)} declares more than one property named '{duplicate.Key}', so the " +
-                $"parameter it names is ambiguous.",
-                paramName);
-        }
+            if (readable.Length == 0)
+            {
+                return new PropertyBag(null,
+                    $"{Describe(t)} exposes no readable public properties, so it names no parameters.");
+            }
 
-        var pairs = new List<KeyValuePair<string, object?>>(properties.Length);
-        foreach (var property in properties)
+            // A `new`-shadowed property appears twice. Picking one silently would be the same class
+            // of mistake as the Dictionary<string, long> hole above, so say so instead.
+            var duplicate = readable
+                .GroupBy(p => p.Name, StringComparer.Ordinal)
+                .FirstOrDefault(g => g.Count() > 1);
+            return duplicate is not null
+                ? new PropertyBag(null,
+                    $"{Describe(t)} declares more than one property named '{duplicate.Key}', so the " +
+                    $"parameter it names is ambiguous.")
+                : new PropertyBag(readable, null);
+        });
+
+        if (properties.Rejection is not null) throw new ArgumentException(properties.Rejection, paramName);
+
+        var readableProperties = properties.Properties!;
+        var pairs = new List<KeyValuePair<string, object?>>(readableProperties.Length);
+        foreach (var property in readableProperties)
         {
             pairs.Add(new KeyValuePair<string, object?>(property.Name, property.GetValue(parameters)));
         }
@@ -360,6 +368,22 @@ internal static class ParameterBinder
         var args = string.Join(", ", type.GetGenericArguments().Select(Describe));
         return $"{name}<{args}>";
     }
+
+    /// <summary>
+    /// A type's readable public properties, or the reason it names no usable parameters. One
+    /// instance per parameters type, cached below.
+    /// </summary>
+    private sealed record PropertyBag(PropertyInfo[]? Properties, string? Rejection);
+
+    /// <summary>
+    /// Per-type property bags. Bounded and cleared on reaching the limit for the reason
+    /// <see cref="MappingCache.Capacity"/> gives: the key is a runtime type, and a program that
+    /// emits types (a scripting host, a serializer) would otherwise grow this for its lifetime.
+    /// </summary>
+    private static readonly ConcurrentDictionary<Type, PropertyBag> PropertyBags = new();
+
+    /// <summary>See <see cref="PropertyBags"/>.</summary>
+    private const int PropertyBagCapacity = 1024;
 
     /// <summary>
     /// Reads any <c>IEnumerable&lt;KeyValuePair&lt;string, TValue&gt;&gt;</c> - which every
