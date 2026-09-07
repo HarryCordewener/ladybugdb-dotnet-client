@@ -77,6 +77,7 @@ await foreach (var o in conn.Select<Room>(
 record Room(long Dbref, string Name);
 ```
 
+[docs/GUIDE.md](docs/GUIDE.md) walks through the library from install to production settings;
 [docs/USAGE.md](docs/USAGE.md) documents every public member with worked examples.
 
 ## Current features
@@ -240,7 +241,8 @@ place `lbug_shared.dll` from the upstream release next to the application (the r
 
 | Document | Contents |
 |---|---|
-| [docs/USAGE.md](docs/USAGE.md) | Complete API guide — every public member of both packages, with examples |
+| [docs/GUIDE.md](docs/GUIDE.md) | Getting started — a walkthrough from install to production settings, every sample executed |
+| [docs/USAGE.md](docs/USAGE.md) | Complete API reference — every public member of both packages, with examples |
 | [docs/2026-09-06-production-readiness.md](docs/2026-09-06-production-readiness.md) | Readiness review, benchmark analysis, and the LINQ direction |
 | [benchmarks/](benchmarks/README.md) | Workload and micro-benchmark harnesses and their results |
 | [docs/BUILDING.md](docs/BUILDING.md) | Building and testing from source |
