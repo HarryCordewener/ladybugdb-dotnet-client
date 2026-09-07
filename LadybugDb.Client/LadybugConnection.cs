@@ -87,12 +87,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     /// </summary>
     private readonly SemaphoreSlim _transactionGate = new(1, 1);
 
-    /// <summary>
-    /// Prepared statements the parameter-object overloads reuse, keyed by statement text. See
-    /// <see cref="StatementCache{T}"/> for the check-out semantics that keep this safe under this
-    /// type's concurrent-use contract, and <see cref="LadybugConfig.StatementCacheSize"/> for the
-    /// bound.
-    /// </summary>
+    /// <summary>Statements the parameter-object overloads reuse; see <see cref="StatementCache{T}"/>.</summary>
     private readonly StatementCache<LadybugPreparedStatement> _statements;
 
     internal LadybugConnection(LadybugDatabase database, LbugConnectionHandle handle)
@@ -289,11 +284,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         return ValueTask.FromResult(Execute(cypher, cancellationToken));
     }
 
-    /// <summary>
-    /// The synchronous twin of <see cref="QueryUncheckedAsync"/>, for the disposal paths that
-    /// must roll back without an <see langword="await"/>. Same contract: no transaction
-    /// classification, not for direct use.
-    /// </summary>
+    /// <summary>The synchronous twin of <see cref="QueryUncheckedAsync"/>, for the disposal paths. Not for direct use.</summary>
     internal LadybugQueryResult QueryUnchecked(string cypher) => Execute(cypher, default);
 
     /// <summary>
@@ -351,9 +342,8 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(parameters);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Enumerated once, up front: the names decide whether a cached statement may be reused
-        // (see StatementCache<T>.Entry.ParameterNames), and the binder takes the same list so the
-        // parameters object is reflected over exactly once per call.
+        // Enumerated once: the names gate reuse (StatementCache<T>.Entry.ParameterNames) and the
+        // binder takes the same list, so the parameters object is reflected over once per call.
         var pairs = ParameterBinder.Enumerate(parameters);
         var names = new string[pairs.Count];
         for (var i = 0; i < names.Length; i++) names[i] = pairs[i].Key;
@@ -362,7 +352,6 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         var entry = _statements.TryCheckOut(cypher);
         if (entry is not null && !entry.ParameterNames.AsSpan().SequenceEqual(names))
         {
-            // Put it back untouched: the mismatch is this call's problem, not the cached statement's.
             _statements.Return(entry);
             throw new ArgumentException(
                 $"This statement was first run with parameters [{string.Join(", ", entry.ParameterNames)}] " +
@@ -378,15 +367,14 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         {
             ParameterBinder.BindAll(statement, pairs);
             var result = statement.ExecuteBound(cancellationToken);
-            // The result does not depend on the statement staying alive (see this method's remarks),
-            // so the statement goes back into the cache - or is disposed if the cache declines it.
+            // The result never depends on the statement (see the remarks), so it goes back in.
             _statements.Return(entry);
             return ValueTask.FromResult(result);
         }
         catch
         {
-            // A statement whose bind or execute failed is not returned: a schema change behind a
-            // cached plan is one of the ways it fails, and the next call should prepare afresh.
+            // Not returned: a schema change behind a cached plan is one way this fails, and the next
+            // call should prepare afresh.
             statement.Dispose();
             throw;
         }
@@ -524,12 +512,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database, _handle, cypher));
     }
 
-    /// <remarks>
-    /// <paramref name="cancellationToken"/> is checked before the call and, while the native call
-    /// runs, is wired to <c>lbug_connection_interrupt</c> - see <see cref="QueryInterrupt"/>. A query
-    /// the engine reports as interrupted after the token fired surfaces as
-    /// <see cref="OperationCanceledException"/>; every other failure is classified as before.
-    /// </remarks>
+    /// <remarks>Cancellation is wired to the engine's interrupt for the native call's duration - see <see cref="QueryInterrupt"/>.</remarks>
     private LadybugQueryResult Execute(string cypher, CancellationToken cancellationToken)
     {
         var scope = LadybugDiagnostics.Start(cypher, _database.Path);
@@ -726,13 +709,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    /// <summary>
-    /// Closes the connection synchronously. Identical to <see cref="DisposeAsync"/> - every
-    /// operation on this type completes synchronously, so there is nothing for the asynchronous
-    /// form to wait for - and offered so a caller without an <see langword="await"/> context
-    /// (a test fixture, a console tool, a <c>using</c> block) does not have to block on a
-    /// <see cref="ValueTask"/>. Safe to call even if the parent database was disposed first.
-    /// </summary>
+    /// <summary>Closes the connection. Equivalent to <see cref="DisposeAsync"/>: every operation completes synchronously. Safe after the database was disposed.</summary>
     public void Dispose()
     {
         EnsureNoOpenTransactionForDispose();

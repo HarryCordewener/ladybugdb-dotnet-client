@@ -61,9 +61,7 @@ public sealed record LadybugConfig
 
     /// <summary>
     /// The write-ahead log size, in bytes, past which an automatic checkpoint runs. Maps to
-    /// <c>checkpoint_threshold</c>; <c>0</c> keeps the engine default (16 MiB). The readiness
-    /// review measured a 100,000-object database growing from 102 MB to 434 MB across 250,000
-    /// mutations, which is the kind of growth this threshold governs.
+    /// <c>checkpoint_threshold</c>; <c>0</c> keeps the engine default (16 MiB).
     /// </summary>
     public ulong CheckpointThreshold { get; init; }
 
@@ -83,11 +81,9 @@ public sealed record LadybugConfig
     /// <summary>
     /// How many prepared statements each connection keeps for the parameter-object overloads
     /// (<see cref="LadybugConnection.QueryAsync(string, object, CancellationToken)"/>,
-    /// <see cref="LadybugConnection.ExecuteAsync(string, object, CancellationToken)"/> and
-    /// <see cref="LadybugConnection.Select{T}"/>), keyed by statement text and evicted least
-    /// recently used. <c>0</c> disables the cache and prepares on every call. Measured: a key
-    /// lookup through those overloads costs about 122 µs when prepared per call and about 60 µs
-    /// when the statement is reused, so the default keeps the common case cheap.
+    /// <see cref="LadybugConnection.ExecuteAsync(string, object, CancellationToken)"/>,
+    /// <see cref="LadybugConnection.Select{T}"/>), keyed by statement text, least recently used.
+    /// <c>0</c> prepares on every call - about twice the cost of a reused statement for a key lookup.
     /// </summary>
     public int StatementCacheSize { get; init; } = 128;
 }

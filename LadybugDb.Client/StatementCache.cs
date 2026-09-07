@@ -1,27 +1,24 @@
 namespace LadybugDb.Client;
 
 /// <summary>
-/// A bounded, least-recently-used cache of prepared statements keyed by their Cypher text, with
-/// check-out semantics: a hit <em>removes</em> the entry and hands it to exactly one caller, who
-/// returns it when done. That is what makes it safe under <see cref="LadybugConnection"/>'s
-/// concurrent-use contract - two callers of the same statement never interleave one caller's
-/// <c>Bind</c> with the other's execute, which a shared entry would allow no matter how each
-/// individual call is locked. A concurrent second caller simply misses and prepares its own.
+/// A bounded, least-recently-used cache of prepared statements keyed by statement text, with
+/// check-out semantics: a hit removes the entry and hands it to one caller, who returns it when
+/// done. A shared entry could not be made safe under <see cref="LadybugConnection"/>'s
+/// concurrent-use contract - two callers would interleave one's <c>Bind</c> with the other's
+/// execute however each call was locked - so a concurrent second caller misses and prepares its own.
 /// </summary>
-/// <typeparam name="T">The cached statement type; generic so the policy is testable without an engine.</typeparam>
+/// <typeparam name="T">The statement type; generic so the policy is testable without an engine.</typeparam>
 internal sealed class StatementCache<T> : IDisposable where T : class, IDisposable
 {
-    /// <summary>What a checked-out entry carries back: the statement and the parameter names it was first bound with.</summary>
+    /// <summary>
+    /// A checked-out statement with the parameter names it was first bound with (sorted, ordinal).
+    /// The engine keeps a statement's previous bound values, so a later call binding a different set
+    /// of names would silently run with stale values for the names it left out.
+    /// </summary>
     internal sealed class Entry(string key, T statement, string[] parameterNames)
     {
         internal string Key { get; } = key;
         internal T Statement { get; } = statement;
-
-        /// <summary>
-        /// Sorted, ordinal. A cached statement keeps its last bound values on the engine side, so a
-        /// later call that binds a different set of names would silently run with stale values for
-        /// the names it left out. Recording the shape at first use lets the connection refuse that.
-        /// </summary>
         internal string[] ParameterNames { get; } = parameterNames;
     }
 
@@ -39,7 +36,6 @@ internal sealed class StatementCache<T> : IDisposable where T : class, IDisposab
 
     internal int Count { get { lock (_gate) return _byKey.Count; } }
 
-    /// <summary>Removes and returns the entry for <paramref name="key"/>, or <see langword="null"/>.</summary>
     internal Entry? TryCheckOut(string key)
     {
         lock (_gate)
@@ -51,23 +47,16 @@ internal sealed class StatementCache<T> : IDisposable where T : class, IDisposab
     }
 
     /// <summary>
-    /// Puts an entry (back) in as most recently used, evicting the least recently used one if the
-    /// cache is full. If an entry for the same key arrived meanwhile (a concurrent miss that
-    /// prepared its own), the incoming one is disposed and the resident one kept - either is as
-    /// good, and keeping one bounds the number of live native statements per key. Returns
-    /// whatever was disposed so callers can assert on it; disposes the entry outright if the cache
-    /// itself is disposed or its capacity is zero.
+    /// Puts an entry (back) in as most recently used, evicting and disposing the least recently
+    /// used one when full. Disposes the incoming statement instead when the cache is disposed, has
+    /// no capacity, or already holds one for the same key (a concurrent miss prepared its own).
     /// </summary>
     internal void Return(Entry entry)
     {
         T? toDispose = null;
         lock (_gate)
         {
-            if (_disposed || _capacity == 0)
-            {
-                toDispose = entry.Statement;
-            }
-            else if (_byKey.ContainsKey(entry.Key))
+            if (_disposed || _capacity == 0 || _byKey.ContainsKey(entry.Key))
             {
                 toDispose = entry.Statement;
             }
@@ -86,7 +75,6 @@ internal sealed class StatementCache<T> : IDisposable where T : class, IDisposab
         toDispose?.Dispose();
     }
 
-    /// <summary>Disposes every resident statement. Entries checked out at this moment are disposed when returned.</summary>
     public void Dispose()
     {
         List<Entry> resident;

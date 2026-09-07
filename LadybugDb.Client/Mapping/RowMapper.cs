@@ -318,13 +318,9 @@ internal static class RowMapper
         {
             columnIndexes.TryAdd(columnNames[i], i);
         }
-        // Second pass, so an exact name always wins: an unaliased projection is named by the engine
-        // after its expression - `RETURN o.dbref, o.name` yields columns 'o.dbref' and 'o.name' -
-        // and a record parameter called Dbref should match that without every query needing an AS
-        // per column. Only the text after the LAST dot counts, and only for names that contain one,
-        // so 'o.dbref' matches Dbref while a genuine alias never changes meaning. Two unaliased
-        // columns with the same property name ('o.name', 'r.name') resolve leftmost, the same rule
-        // duplicate aliases already follow.
+        // Second pass, so an exact name always wins: the engine names an unaliased projection after
+        // its expression ('o.dbref'), and a parameter called Dbref should match that without an AS
+        // per column. Only the text after the last dot counts; duplicates resolve leftmost as above.
         for (var i = 0; i < columnNames.Count; i++)
         {
             var dot = columnNames[i].LastIndexOf('.');

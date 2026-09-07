@@ -93,11 +93,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                // Classified, not thrown raw: preparing a write statement contends for the engine's
-                // single writer slot exactly as executing one does, so it can fail with the same
-                // write-conflict message - and a retry loop that only catches
-                // LadybugWriteConflictException must see it as one. Pinned by
-                // DatabaseLifecycleTests.ConcurrentPrepareOfWriteStatement_ThrowsLadybugWriteConflictException.
+                // Classified: preparing a write statement contends for the writer slot like
+                // executing one, so it can fail with the retryable conflict.
                 throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
@@ -741,21 +738,13 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     /// <summary>Backing field for <see cref="PreparedCount"/>.</summary>
     private static long _preparedCount;
 
-    /// <summary>
-    /// How many statements have been prepared, process-wide. Exists for the tests, like
-    /// <see cref="LadybugQueryResult.LiveCount"/>: it is the deterministic evidence that the
-    /// per-connection statement cache reused a statement instead of preparing another.
-    /// </summary>
+    /// <summary>Statements prepared process-wide; the tests' evidence that the cache reused one. See <see cref="LadybugQueryResult.LiveCount"/>.</summary>
     internal static long PreparedCount => Interlocked.Read(ref _preparedCount);
 
-    /// <summary>Executes with whatever is bound. For <see cref="LadybugConnection"/>'s cache path.</summary>
+    /// <summary>Executes with whatever is bound; for <see cref="LadybugConnection"/>'s cache path.</summary>
     internal LadybugQueryResult ExecuteBound(CancellationToken cancellationToken) => Execute(cancellationToken);
 
-    /// <remarks>
-    /// <paramref name="cancellationToken"/> is wired to <c>lbug_connection_interrupt</c> for the
-    /// duration of the native call - see <see cref="QueryInterrupt"/> and
-    /// <c>LadybugConnection.Execute</c>, which this mirrors.
-    /// </remarks>
+    /// <remarks>Mirrors <c>LadybugConnection.Execute</c>; cancellation via <see cref="QueryInterrupt"/>.</remarks>
     private LadybugQueryResult Execute(CancellationToken cancellationToken)
     {
         var scope = LadybugDiagnostics.Start(_cypher, _databasePath);
@@ -870,10 +859,6 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    /// <summary>
-    /// Releases the statement synchronously. Identical to <see cref="DisposeAsync"/> (every
-    /// operation on this type completes synchronously). Results already produced by this
-    /// statement stay usable - they never depend on it.
-    /// </summary>
+    /// <summary>Releases the statement. Equivalent to <see cref="DisposeAsync"/>; results it produced stay usable.</summary>
     public void Dispose() => _handle.Dispose();
 }

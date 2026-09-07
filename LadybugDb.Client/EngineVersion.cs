@@ -6,23 +6,19 @@ using LadybugDb.Client.Native;
 namespace LadybugDb.Client;
 
 /// <summary>
-/// Reconciles the engine this client was generated against with the engine actually loaded. The
-/// binaries come from upstream's <c>LadybugDB.Native</c> packages, chosen by the consumer, so the two
-/// can diverge; an older engine lacks entry points this client calls and would fail with an
-/// <see cref="EntryPointNotFoundException"/> from whichever call happened to be missing, which is
-/// why the check runs once, up front, in <see cref="LadybugDatabase"/>'s constructor.
+/// The engine version this client's interop was generated against versus the one actually loaded.
+/// The binaries come from upstream's <c>LadybugDB.Native</c> packages, chosen by the consumer, so
+/// they can diverge; an older engine lacks entry points this client calls and would fail with an
+/// <see cref="EntryPointNotFoundException"/> from whichever call happened to be missing.
 /// </summary>
 internal static class EngineVersion
 {
-    /// <summary>
-    /// The pinned version (from <c>third-party/liblbug.version</c>, embedded at build time as
-    /// assembly metadata), without its leading <c>v</c>.
-    /// </summary>
+    /// <summary>From <c>third-party/liblbug.version</c>, embedded as assembly metadata at build; no leading <c>v</c>.</summary>
     internal static string Pinned { get; } = ReadPinned();
 
     private static readonly Lazy<string> LoadedLazy = new(ReadLoaded, LazyThreadSafetyMode.ExecutionAndPublication);
 
-    /// <summary>The version string the loaded library reports through <c>lbug_get_version</c>.</summary>
+    /// <summary>What <c>lbug_get_version</c> reports for the loaded library.</summary>
     internal static string Loaded => LoadedLazy.Value;
 
     private static string ReadPinned()
@@ -37,11 +33,7 @@ internal static class EngineVersion
 
     private static unsafe string ReadLoaded() => NativeString.TakeOwnership(LbugNative.lbug_get_version());
 
-    /// <summary>
-    /// Throws <see cref="LadybugException"/> if the loaded engine is older than <see cref="Pinned"/>.
-    /// Compares major and minor only: patch releases have never changed the C API, and refusing a
-    /// consumer's <c>0.19.0</c> against a <c>0.19.1</c> pin would be pedantry with no ABI behind it.
-    /// </summary>
+    /// <summary>Throws <see cref="LadybugException"/> if the loaded engine's major.minor is older than the pin.</summary>
     internal static void EnsureCompatible()
     {
         var loaded = Loaded;
@@ -55,10 +47,9 @@ internal static class EngineVersion
     }
 
     /// <summary>
-    /// <see langword="true"/> if <paramref name="loaded"/>'s major.minor is at least
-    /// <paramref name="pinned"/>'s. A version that cannot be parsed is treated as compatible: the
-    /// check exists to explain a predictable failure early, not to invent a new one when the engine
-    /// reports something unexpected.
+    /// Major.minor comparison only: patch releases have not changed the C API. An unparseable
+    /// version counts as compatible - the check explains a predictable failure early; it must not
+    /// invent one.
     /// </summary>
     internal static bool IsCompatible(string loaded, string pinned)
     {

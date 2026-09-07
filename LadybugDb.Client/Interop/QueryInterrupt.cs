@@ -3,31 +3,17 @@ using LadybugDb.Client.Native;
 namespace LadybugDb.Client.Interop;
 
 /// <summary>
-/// Turns a <see cref="CancellationToken"/> into <c>lbug_connection_interrupt</c> for the duration
-/// of one native query call.
+/// Wires a <see cref="CancellationToken"/> to <c>lbug_connection_interrupt</c> for the duration of
+/// one native query call.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The engine checks its interrupt flag before every operator invocation
-/// (<c>PhysicalOperator::getNextTuple</c>) and fails the query with "Interrupted."; interrupting is
-/// an atomic store, safe from any thread, which is what lets the token's callback run on whichever
-/// thread cancels while the calling thread is still inside the native call.
-/// </para>
-/// <para>
-/// <b>Why the callback keeps re-sending the interrupt until the call returns.</b> The engine clears
-/// the flag when a query <em>starts executing</em> (<c>ActiveQuery::reset</c>, after parsing,
-/// binding and planning). An interrupt that lands in that window - measured: a two-<c>UNWIND</c>
-/// query planned for longer than a 30 ms token - is wiped before execution ever looks at it, and
-/// the query runs to completion. So on cancellation the scope sends the interrupt immediately and
-/// then again every few milliseconds from the thread pool until the native call has returned; the
-/// repeats cost one atomic store each and stop the moment the scope is disposed. The same clearing
-/// is what guarantees a token cancelled after a query finished cannot poison the next one.
-/// </para>
-/// <para>
-/// A query the engine reports as interrupted surfaces as <see cref="OperationCanceledException"/>;
-/// a query that completed before the interrupt reached it returns its result. Throwing on a
-/// completed query would tell a caller their <c>CREATE</c> did not happen when it did.
-/// </para>
+/// The engine polls its interrupt flag before each operator call and fails the query with
+/// "Interrupted."; setting the flag is an atomic store, safe from the cancelling thread. It also
+/// clears the flag when execution starts, after parse/bind/plan, so an interrupt that lands during
+/// planning is lost - measured: a 30 ms token fired before a two-UNWIND query finished planning and
+/// the query ran to completion. The callback therefore re-sends the interrupt every few
+/// milliseconds until the native call returns. A query that completed before the interrupt reached
+/// it returns its result: throwing would report a write that did happen as not having happened.
 /// </remarks>
 internal sealed class QueryInterrupt : IDisposable
 {
@@ -37,11 +23,7 @@ internal sealed class QueryInterrupt : IDisposable
 
     private QueryInterrupt(LbugConnectionHandle connection) => _connection = connection;
 
-    /// <summary>
-    /// Registers the interrupt on <paramref name="cancellationToken"/> if it can be cancelled at
-    /// all; <see langword="null"/> otherwise, so the common uncancellable call pays one branch and
-    /// no allocation (a <c>using</c> on <see langword="null"/> is a no-op).
-    /// </summary>
+    /// <summary>Throws if already cancelled; returns <see langword="null"/> (a no-op for <c>using</c>) for a token that cannot be cancelled.</summary>
     internal static QueryInterrupt? Register(LbugConnectionHandle connection, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -67,10 +49,6 @@ internal sealed class QueryInterrupt : IDisposable
         }
     }
 
-    /// <summary>
-    /// Sends the interrupt. Never throws: a callback runs on the cancelling thread, and a
-    /// connection disposed between registration and cancellation has nothing left to interrupt.
-    /// </summary>
     private unsafe void TryInterrupt()
     {
         try
@@ -80,11 +58,10 @@ internal sealed class QueryInterrupt : IDisposable
         }
         catch (ObjectDisposedException)
         {
-            // Closed for new work; the query it would have interrupted is gone with it.
+            // The connection closed under the query; there is nothing left to interrupt.
         }
     }
 
-    /// <summary>The native call has returned: stop re-sending and drop the registration.</summary>
     public void Dispose()
     {
         _done = true;
@@ -92,14 +69,11 @@ internal sealed class QueryInterrupt : IDisposable
     }
 
     /// <summary>
-    /// The exception a failed query turns into when <paramref name="cancellationToken"/> was
-    /// cancelled and the engine reports the interruption: an <see cref="OperationCanceledException"/>
-    /// carrying the token, which is what every awaiting caller expects from a cancelled operation.
-    /// <see langword="null"/> when the failure is unrelated to cancellation.
+    /// An <see cref="OperationCanceledException"/> for a failure the engine attributes to the
+    /// interrupt while <paramref name="cancellationToken"/> is cancelled; <see langword="null"/> otherwise.
     /// </summary>
     internal static OperationCanceledException? AsCancellation(string? failureMessage, CancellationToken cancellationToken) =>
         cancellationToken.IsCancellationRequested && QueryFailureClassifier.IsInterrupted(failureMessage)
-            ? new OperationCanceledException(
-                "The query was cancelled: the engine reported it interrupted. " + failureMessage, cancellationToken)
+            ? new OperationCanceledException("The query was cancelled. " + failureMessage, cancellationToken)
             : null;
 }

@@ -60,13 +60,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEn
     /// </summary>
     private readonly string[] _columnNames;
 
-    /// <summary>
-    /// Every column's engine type id, read once here for the same reason as
-    /// <see cref="_columnNames"/>: a column's type cannot change between rows, and looking it up
-    /// per cell (<c>lbug_value_get_data_type</c>) allocates on the C++ side and cost this client a
-    /// native block, a <see cref="Interop.LbugLogicalTypeHandle"/> and a lease per cell. See
-    /// <see cref="ReadRow"/>.
-    /// </summary>
+    /// <summary>Every column's type id, read once: a column's type cannot change between rows, and <c>lbug_value_get_data_type</c> allocates per call.</summary>
     private readonly lbug_data_type_id[] _columnTypes;
 
     /// <summary><see langword="true"/> once <see cref="GetAsyncEnumerator"/> has been called - see its remarks.</summary>
@@ -204,11 +198,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEn
         return ValueTask.CompletedTask;
     }
 
-    /// <summary>
-    /// Closes the result synchronously. Identical to <see cref="DisposeAsync"/> (every operation
-    /// on this type completes synchronously); safe to call even if the parent database was
-    /// disposed first, and idempotent, in any combination with <see cref="DisposeAsync"/>.
-    /// </summary>
+    /// <summary>Closes the result. Equivalent to <see cref="DisposeAsync"/>; idempotent in any combination with it.</summary>
     public void Dispose()
     {
         // Once, however many times this is called - see LiveCount and _disposed.
@@ -324,31 +314,14 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEn
     }
 
     /// <remarks>
-    /// <para>
-    /// Leases <see cref="_database"/>, <see cref="_root"/> and this result's own handle for the
-    /// entire read - see <see cref="HasNext"/> for why the first two - since none of it can run
-    /// safely once the database or the owning result is gone, and one lease taken once is the
-    /// same guarantee as a lease taken around every native call.
-    /// </para>
-    /// <para>
-    /// <b>No <see cref="System.Runtime.InteropServices.SafeHandle"/> and no destroy call for the
-    /// tuple or the cells, on purpose.</b> Both are borrows the engine owns: upstream's
-    /// <c>lbug_query_result_get_next</c> stores the result's single, reused <c>FlatTuple</c> with
-    /// <c>_is_owned_by_cpp = true</c>, and <c>lbug_flat_tuple_get_value</c> stores a pointer into
-    /// that tuple the same way (<c>src/c_api/query_result.cpp</c>, <c>src/c_api/flat_tuple.cpp</c>);
-    /// their destroy functions are no-ops on such wrappers (<c>src/c_api/flat_tuple.cpp</c>,
-    /// <c>src/c_api/value.cpp</c>). So the 16-byte wrapper structs live on this frame, and the
-    /// tuple's contents are consumed before the next <c>get_next</c> overwrites them - which is
-    /// the reuse contract the header documents. The column types come from
-    /// <see cref="_columnTypes"/>, read once per result. Measured before this shape (BenchmarkDotNet,
-    /// 10,000 three-column rows): 858 ns and about 440 B per row, of which roughly 520 ns and 250 B
-    /// were the per-cell handles, native blocks, leases and type lookups this removes.
-    /// </para>
-    /// <para>
-    /// Container elements, node and relationship properties and the like are a different case:
-    /// their getters hand back caller-owned values, and <see cref="ValueReader"/> still wraps
-    /// each in a <see cref="LbugValueHandle"/> and destroys it.
-    /// </para>
+    /// The tuple and the cells are borrows the engine owns - <c>lbug_query_result_get_next</c> and
+    /// <c>lbug_flat_tuple_get_value</c> both store C++-owned pointers (<c>_is_owned_by_cpp = true</c>)
+    /// whose destroy calls are no-ops (upstream <c>src/c_api/flat_tuple.cpp</c>, <c>value.cpp</c>) - so
+    /// the wrapper structs live on this frame, with no <see cref="System.Runtime.InteropServices.SafeHandle"/>
+    /// and no destroy. The result lease held for the whole read is the same guarantee the per-call
+    /// leases used to give. Container elements and node/rel properties are caller-owned and still
+    /// go through <see cref="LbugValueHandle"/> in <see cref="ValueReader"/>. Measured on 10,000
+    /// three-column rows: 858 ns/row before, 323 ns/row after.
     /// </remarks>
     private unsafe LadybugRow? ReadRow()
     {
@@ -377,12 +350,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEn
         return new LadybugRow(values, _columnNames);
     }
 
-    /// <remarks>
-    /// Runs once, from the constructor, like <see cref="ReadColumnNames"/>.
-    /// <c>lbug_query_result_get_column_data_type</c> fills a caller-owned <c>lbug_logical_type</c>
-    /// (a C++ <c>LogicalType</c> allocation) that <c>lbug_data_type_destroy</c> must release; only
-    /// the id is kept.
-    /// </remarks>
+    /// <summary>Once, from the constructor; the <c>lbug_logical_type</c> each call fills is caller-owned and destroyed here.</summary>
     private unsafe lbug_data_type_id[] ReadColumnTypes()
     {
         using var dbLease = _database.Acquire();

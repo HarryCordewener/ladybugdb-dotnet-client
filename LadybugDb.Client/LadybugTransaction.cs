@@ -281,13 +281,7 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    /// <summary>
-    /// Rolls back if the transaction is still open, synchronously. Identical to
-    /// <see cref="DisposeAsync"/> - the <c>ROLLBACK</c> completes synchronously - and it is the
-    /// same close-out <see cref="LadybugConnection"/> and <see cref="LadybugDatabase"/> perform
-    /// when they are disposed with this transaction still open. Never throws; a rollback that
-    /// fails is swallowed for the reasons <see cref="DisposeAsync"/>'s remarks give.
-    /// </summary>
+    /// <summary>Rolls back if still open. Equivalent to <see cref="DisposeAsync"/>; never throws.</summary>
     public void Dispose() => EnsureClosedForDispose();
 
     /// <summary>
@@ -390,10 +384,8 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
         }
         catch
         {
-            // Swallowed - see remarks above (and DisposeAsync's, which this now also backs; unlike
-            // CommitAsync/RollbackAsync, the claim is NOT given back on failure here: disposal must
-            // not leave this transaction in a state where something could still try to commit or
-            // roll it back again): called from a Dispose path that must not throw,
+            // Swallowed - see remarks above. The claim is not given back on failure: disposal must
+            // not leave anything able to commit or roll back again. Called from a Dispose path that must not throw,
             // and there is nothing a caller could usefully do differently even if this
             // surfaced. If this failed because the database is already gone, there is nothing
             // left for the native auto-rollback to conflict with either - the transaction was
