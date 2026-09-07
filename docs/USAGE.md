@@ -22,6 +22,15 @@ real engine while this guide was written.
   - [How a row maps to T](#how-a-row-maps-to-t)
   - [Conversion: lossless widening only](#conversion-lossless-widening-only)
   - [Errors Select&lt;T&gt; reports](#errors-selectt-reports)
+- [LINQ](#linq)
+  - [Schema descriptors](#schema-descriptors)
+  - [Entry points](#entry-points)
+  - [Operators and the predicate whitelist](#operators-and-the-predicate-whitelist)
+  - [Graph steps](#graph-steps)
+  - [Aggregates](#aggregates)
+  - [Terminals and the async boundary](#terminals-and-the-async-boundary)
+  - [Refusals](#refusals)
+  - [The escape hatch: Match&lt;T&gt;](#the-escape-hatch-matcht)
 - [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
@@ -1015,6 +1024,350 @@ and the parameter left unmatched.
 A mismatched `T` is reported even when the query returns **no rows**. The projection is resolved from
 the result's column shape before the first row is read, precisely so that an empty result cannot
 silently "succeed" against a `T` that could never have mapped its columns.
+
+## LINQ
+
+`Select<T>` takes the Cypher you wrote. The LINQ surface writes it for you from a typed schema:
+`conn.Nodes<T>()` is an `IQueryable<T>` over one node table, and `Where`, `Select`, `OrderBy`,
+`Skip`, `Take`, `Distinct`, `GroupBy`, the graph steps and the terminals below translate to **one
+Cypher statement** when the query runs. Nothing is evaluated on the client, and every value in
+the expression becomes a bound `$p<n>` parameter — never interpolated. Every sample in this chapter
+is run against the real engine by `LadybugDb.Client.IntegrationTests/Linq/UsageSamplesTests.cs`.
+
+- [Schema descriptors](#schema-descriptors)
+- [Entry points](#entry-points)
+- [Operators and the predicate whitelist](#operators-and-the-predicate-whitelist)
+- [Graph steps](#graph-steps)
+- [Aggregates](#aggregates)
+- [Terminals and the async boundary](#terminals-and-the-async-boundary)
+- [Refusals](#refusals)
+- [The escape hatch: Match&lt;T&gt;](#the-escape-hatch-matcht)
+
+### Schema descriptors
+
+The engine has one table per node type and one per relationship type, so a C# type maps to exactly
+one table. Say which with `[Node]`, `[Rel]` and `[Key]` (`[Column("name")]` overrides one column
+name); every public readable property is a column, named after the property case-insensitively:
+
+```csharp
+using LadybugDb.Client.Linq;
+using LadybugDb.Client.Schema;
+
+[Node("Object")]
+public sealed record Obj([property: Key] long Dbref, string Name, long? Loc);
+
+[Node("Attr")]
+public sealed record Attr([property: Key] string Akey, string Aname, string Aval);
+
+[Rel("Has", From = typeof(Obj), To = typeof(Attr))]
+public sealed record Has(long Since);
+
+[Rel("Located", From = typeof(Obj), To = typeof(Obj))]
+public sealed record Located;
+```
+
+A `[Node]` record is a positional record like any `Select<T>` target, so the same constructor rule
+and the same widening rule apply. `LadybugSchema` turns the types into descriptors once; it can
+create the tables on a fresh database and check an existing one against them:
+
+```csharp
+var schema = LadybugSchema.For(typeof(Obj), typeof(Attr), typeof(Has), typeof(Located));
+await schema.CreateTablesAsync(conn);   // CREATE NODE TABLE Object(dbref INT64, name STRING, loc INT64, PRIMARY KEY(dbref)), ...
+await schema.ValidateAsync(conn);       // throws SchemaMismatchException listing every mismatch, or returns
+```
+
+`ValidateAsync` reads the catalog (`CALL show_tables()`, `table_info()`, `show_connection()`) and
+reports every missing table, missing column, and column whose engine type the property cannot read
+under [the widening rule](#conversion-lossless-widening-only), in one `SchemaMismatchException`
+whose `Mismatches` lists them all. Both are opt-in: the queries below only need the attributes.
+`Nodes<T>()` without a schema argument uses `LadybugSchema.Default`, which describes any annotated
+type the first time it is asked for.
+
+### Entry points
+
+```csharp
+IQueryable<T> Nodes<T>(LadybugSchema? schema = null)                                              // MATCH (n:Table)
+IQueryable<T> Match<T>(string pattern, object? parameters = null, string variable = "n", ...)     // MATCH <your pattern>, T bound to `variable`
+```
+
+Both are on `LadybugConnection`. The query runs when it is enumerated — through `foreach`, or
+through one of the `...Async` terminals — and is translated then, so closures are read at that
+point and an expression the whitelist does not cover throws then. `ToString()` on any query renders
+its Cypher, for logging or a test:
+
+```csharp
+var dbref = 7L;
+var found = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == dbref)
+    .Select(o => new { o.Name, o.Loc })
+    .FirstOrDefaultAsync();
+// MATCH (o:Object) WHERE o.dbref = $p0 RETURN o.name AS Name, o.loc AS Loc LIMIT $p1
+
+Console.WriteLine(conn.Nodes<Obj>().Where(o => o.Dbref == dbref).Select(o => o.Name));
+// MATCH (o:Object) WHERE o.dbref = $p0 RETURN o.name AS Name
+```
+
+The root variable is named after your lambda parameter, and every projected column is aliased to
+the member it feeds, so the row maps to the anonymous type, record or tuple by name and the
+`Select<T>` suffix rule is never needed. Without a `Select`, the whole node comes back as the
+`[Node]` record:
+
+```csharp
+var page = await conn.Nodes<Obj>().OrderBy(o => o.Name).Skip(2).Take(3).ToListAsync();   // List<Obj>
+// MATCH (o:Object) RETURN o ORDER BY o.name SKIP $p0 LIMIT $p1
+
+foreach (var o in conn.Nodes<Obj>().Where(o => o.Loc == 3))   // synchronous: the engine is in-process, see below
+{
+    Console.WriteLine(o);
+}
+```
+
+### Operators and the predicate whitelist
+
+The translator is a whitelist, not a general expression compiler. This is the entire list; anything
+else throws `NotSupportedException` at translation, naming the sub-expression ([Refusals](#refusals)).
+
+| LINQ | Cypher |
+|---|---|
+| `Where(pred)` | `WHERE` (whitelist below) |
+| `Select(proj)` | `RETURN` with one alias per projected member; anonymous types, records, tuples, scalars |
+| `OrderBy/ThenBy/Descending` | `ORDER BY` |
+| `Skip(n)` / `Take(n)` | `SKIP $p` / `LIMIT $p` |
+| `Distinct()` | `RETURN DISTINCT` |
+| `Count()`, `Any()`, `First()`, `FirstOrDefault()`, `Single()`, `SingleOrDefault()` | `RETURN count(*)`, `LIMIT 1`, `LIMIT 2` |
+| `GroupBy(key).Select(g => new { g.Key, n = g.Count() })` | implicit grouping in `RETURN` |
+| everything else | `NotSupportedException` naming the operator |
+
+Predicate whitelist (the entire list; anything else throws at translation with the sub-expression
+text):
+
+| C# | Cypher |
+|---|---|
+| `==`, `!=`, `<`, `<=`, `>`, `>=` between a member and a constant, closure, or another member | the same operator |
+| `&&`, `\|\|`, `!` on translatable sub-expressions | `AND`, `OR`, `NOT` |
+| `x.Prop == null`, `!= null` | `IS NULL`, `IS NOT NULL` |
+| `x.S.StartsWith(c)`, `.EndsWith(c)`, `.Contains(c)` (ordinal only) | `STARTS WITH`, `ENDS WITH`, `CONTAINS` |
+| `collection.Contains(x.Prop)` where collection is a closure | `x.prop IN $p` |
+| `x.S.Length`, `x.S.ToUpper()`, `.ToLower()` | `size()`, `upper()`, `lower()` |
+| a bare boolean member `x.Flag` | **rejected**; write `x.Flag == true` (Cypher's three-valued NULL makes the bare form ambiguous, the same rule Neo4jClient adopted) |
+| closure variables, constants | `$p<n>` parameters, bound with the typed `Bind` overloads (never interpolated) |
+
+```csharp
+var names = new[] { "obj1", "obj2" };
+var some = await conn.Nodes<Obj>()
+    .Where(o => (o.Name.StartsWith("obj1") && o.Name.Length == 5) || names.Contains(o.Name) || o.Loc == null)
+    .OrderBy(o => o.Dbref)
+    .Select(o => o.Dbref)
+    .ToListAsync();
+// MATCH (o:Object) WHERE o.name STARTS WITH $p0 AND size(o.name) = $p1 OR o.name IN [$p2, $p3] OR o.loc IS NULL
+// RETURN o.dbref AS Dbref ORDER BY o.dbref
+```
+
+Operators are applied in Cypher's clause order, which is stricter than LINQ's: `Where` after
+`Take`, a second `Select`, or `Count()` after `Select` would need a `WITH` stage and are refused
+rather than silently reordered. Filter and sort first, project, then page.
+
+### Graph steps
+
+The `MATCH` pattern has no C# analogue, so it is built by typed steps over the `[Rel]` types. Each
+step appends one pattern segment and yields a pair — `(Source, Target)`, or `(Source, Rel, Target)`
+when you ask for the relationship — so the next `Where` or `Select` can name either end:
+
+```csharp
+q.Out<TSource, TRel, TTarget>()            // (source)-[:TRel]->(target:TTarget)
+q.In<TSource, TRel, TTarget>()             // (source)<-[:TRel]-(target:TTarget)
+q.OutWithRel<...>(), q.InWithRel<...>()    // ... yielding (Source, Rel, Target)
+q.Out<...>(minHops, maxHops)               // [:TRel*min..max]; the engine requires the upper bound
+q.WhereExists<TSource, TRel, TTarget>(pred) // WHERE EXISTS { MATCH (source)-[:TRel]->(x:TTarget) WHERE ... }, element unchanged
+```
+
+`TRel`'s `[Rel]` must connect the current table to `TTarget`'s in the direction asked; a mismatch
+throws `InvalidOperationException` naming both tables at translation, since the engine would
+otherwise match nothing, silently. The pattern's nodes are named `n0`, `n1`, ... left to right.
+
+```csharp
+// one attribute of one object
+var value = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 5)
+    .Out<Obj, Has, Attr>()
+    .Where(p => p.Target.Aname == "A3")
+    .Select(p => p.Target.Aval)
+    .FirstOrDefaultAsync();
+// MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.aname = $p1 RETURN n1.aval AS Aval LIMIT $p2
+
+// contents of a room: the objects whose Located points at it
+var contents = await conn.Nodes<Obj>()
+    .Where(room => room.Dbref == 3)
+    .In<Obj, Located, Obj>()
+    .OrderBy(p => p.Target.Dbref)
+    .Select(p => p.Target.Name)
+    .ToListAsync();
+// MATCH (n0:Object)<-[:Located]-(n1:Object) WHERE n0.dbref = $p0 RETURN n1.name AS Name ORDER BY n1.dbref
+
+// the relationship's own properties
+var recent = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 5)
+    .OutWithRel<Obj, Has, Attr>()
+    .Where(p => p.Rel.Since > 8)
+    .Select(p => new { p.Target.Aname, p.Rel.Since })
+    .ToListAsync();
+// MATCH (n0:Object)-[r0:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND r0.since > $p1 RETURN n1.aname AS Aname, r0.since AS Since
+
+// variable length: everything one or two Located hops away
+var nearby = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 1)
+    .Out<Obj, Located, Obj>(1, 2)
+    .Select(p => p.Target.Dbref)
+    .ToListAsync();
+// MATCH (n0:Object)-[:Located*1..2]->(n1:Object) WHERE n0.dbref = $p0 RETURN n1.dbref AS Dbref
+
+// keep the objects that have an attribute named A10, without projecting it
+var described = await conn.Nodes<Obj>()
+    .WhereExists<Obj, Has, Attr>(a => a.Aname == "A10")
+    .CountAsync();
+// MATCH (n:Object) WHERE EXISTS { MATCH (n)-[:Has]->(a:Attr) WHERE a.aname = $p0 } RETURN count(*) AS Count
+
+// no Select: the tuple itself, each item materialized from its NODE or REL value
+var pairs = await conn.Nodes<Obj>().Where(o => o.Dbref == 5).In<Obj, Located, Obj>().ToListAsync();   // List<(Obj Source, Obj Target)>
+```
+
+Steps chain: after `Out<Obj, Located, Obj>()` the element is `(Obj, Obj)`, so a second hop is
+`.Out<(Obj Source, Obj Target), Located, Obj>()` and its `Source` is the previous pair. Steps come
+before `Select`, since a projection fixes the pattern.
+
+### Aggregates
+
+Cypher has no `GROUP BY`: a `RETURN` that mixes aggregates with plain expressions groups by the
+plain ones. `GroupBy(key)` followed by a `Select` over the group renders exactly that, with
+`g.Count()`, `g.LongCount()`, `g.Sum(x => ...)`, `g.Min`, `g.Max` and `g.Average` as `count(*)`,
+`sum`, `min`, `max` and `avg`:
+
+```csharp
+var perRoom = await conn.Nodes<Obj>()
+    .GroupBy(o => o.Loc)
+    .Select(g => new { Room = g.Key, N = g.Count(), Highest = g.Max(x => x.Dbref) })
+    .OrderByDescending(x => x.N).ThenBy(x => x.Room)
+    .ToListAsync();
+// MATCH (o:Object) RETURN o.loc AS Room, cast(count(*), 'INT32') AS N, max(o.dbref) AS Highest ORDER BY N DESC, Room
+```
+
+The projection must include `g.Key` and at least one aggregate — without the key the aggregate
+would run over every row, without an aggregate the key would repeat once per row — and nothing
+but that `Select` may follow `GroupBy` directly; sort and page after it. A filter after it would be
+a `HAVING`, which needs a `WITH` stage: filter before grouping, or write the Cypher. `count(*)` and
+`sum()` are `cast` to the width the C# declares (`int` for `Count()`, the property's type for
+`Sum`), since the engine returns them wider than the row mapping will narrow.
+
+### Terminals and the async boundary
+
+The queryable is a plain `IQueryable<T>` — deliberately not `IAsyncEnumerable<T>`, which on .NET 10
+would make `Where` and `Select` ambiguous with the in-box `System.Linq.AsyncEnumerable` operators.
+Cross into async with one of these, all extension methods in `LadybugDb.Client.Linq`:
+
+```csharp
+IAsyncEnumerable<T> AsAsyncEnumerable<T>(this IQueryable<T> source, CancellationToken ct = default)
+Task<List<T>> ToListAsync<T>(...)        Task<T[]> ToArrayAsync<T>(...)
+Task<T> FirstAsync<T>(...)               Task<T?> FirstOrDefaultAsync<T>(...)
+Task<T> SingleAsync<T>(...)              Task<T?> SingleOrDefaultAsync<T>(...)
+Task<long> CountAsync<T>(...)            Task<bool> AnyAsync<T>(...)
+```
+
+```csharp
+var total = await conn.Nodes<Obj>().CountAsync();                                  // RETURN count(*)
+var hasAttributes = await conn.Nodes<Attr>().AnyAsync();
+var first = await conn.Nodes<Obj>().Where(o => o.Dbref == 1).SingleAsync();        // LIMIT 2, then checked
+
+await foreach (var o in conn.Nodes<Obj>().OrderBy(o => o.Dbref).AsAsyncEnumerable())
+{
+    if (o.Dbref == 2) break;   // the underlying result is released here, as Select<T> releases its own
+}
+```
+
+**The boundary is the method name.** Everything before `AsAsyncEnumerable()` (or a terminal)
+translates to Cypher; everything after it is the in-box `System.Linq.AsyncEnumerable` running on
+the client over the streamed rows. That is the place for what the whitelist refuses, when the row
+count makes it acceptable:
+
+```csharp
+var endingInZero = await conn.Nodes<Obj>().AsAsyncEnumerable()
+    .Where(o => o.Name.EndsWith('0'))    // client-side: a Func, not an Expression
+    .CountAsync();
+```
+
+Synchronous enumeration (`foreach`, `ToList()`, `Count()`, `First()`) is honest here: the engine is
+in-process and every operation this client wraps completes synchronously, so the sync path neither
+blocks a thread on a pending task nor spins one up. A `CancellationToken` passed to a terminal is
+checked before the statement runs and between rows, as `QueryAsync`'s is.
+
+The `...Async` methods throw `InvalidOperationException` for a queryable from any other provider.
+
+### Refusals
+
+Every refusal is a `NotSupportedException` raised at translation — not partway through a result —
+whose message names the offending sub-expression, the reason, and the escape hatch:
+
+```csharp
+try
+{
+    await conn.Nodes<Obj>().Where(o => o.Name.Trim() == "x").ToListAsync();
+}
+catch (NotSupportedException ex)
+{
+    Console.WriteLine(ex.Message);
+}
+```
+
+```
+Expression 'o.Name.Trim()' cannot be translated to Cypher: not a translatable value. Only the
+whitelist in docs/USAGE.md (LINQ) translates, and nothing is evaluated on the client. For anything
+else, write the Cypher yourself with LadybugConnection.Match<T>(pattern, parameters), which keeps
+the typed result.
+```
+
+The reasons you will meet:
+
+| Expression | Reason |
+|---|---|
+| `o => o.IsRoom` | `a bare boolean is ambiguous under Cypher's three-valued NULL logic; write it as a comparison, 'o.IsRoom == true' or 'o.IsRoom == false'` |
+| `.Take(5).Where(...)` | `Where after Take would apply to the rows Take already cut, which Cypher's clause order cannot express; put Where first` |
+| `.Select(...).Count()` | `Count after Select would need a WITH stage; count before projecting, or write the Cypher` |
+| `.Select(o => new { Node = o })` | `a whole node inside a projection has no column to map to; project its properties, or return the node alone` |
+| `.GroupBy(...).Select(g => g.LongCount())` | `a projection after GroupBy must include g.Key, or the aggregate would run over every row rather than per group` |
+| `.Out<Attr, Has, Obj>()` on `Nodes<Attr>()` | `InvalidOperationException`: `Has connects 'Object' to 'Attr', but Out<Attr, Has, Obj> needs a relationship from 'Attr' to 'Object'. The direction is reversed: use In instead.` |
+
+Nothing is ever evaluated on the client, so a query that translates is the whole query: no silent
+table scan with a filter applied afterwards.
+
+### The escape hatch: `Match<T>`
+
+For any shape the whitelist refuses — several patterns, inline property constraints, an undirected
+or untyped relationship — write the `MATCH` yourself. `T` is bound to `variable` (`n` by default),
+and the rest of the chain applies as after `Nodes<T>()`, graph steps included:
+
+```csharp
+var room = 3L;
+var exits = await conn.Match<Obj>("(r:Object {dbref: $room})<-[:Located]-(n:Object)", new { room })
+    .OrderBy(n => n.Dbref)
+    .Select(n => new { n.Dbref, n.Name })
+    .ToListAsync();
+// MATCH (r:Object {dbref: $room})<-[:Located]-(n:Object) RETURN n.dbref AS Dbref, n.name AS Name ORDER BY n.dbref
+
+var late = await conn.Match<Obj>("(o:Object {dbref: $d})", new { d = 5L }, variable: "o")
+    .OutWithRel<Obj, Has, Attr>()
+    .Where(p => p.Rel.Since == 10)
+    .Select(p => p.Target.Aname)
+    .SingleAsync();
+// MATCH (o:Object {dbref: $d}) MATCH (o)-[r0:Has]->(n1:Attr) WHERE r0.since = $p0 RETURN n1.aname AS Aname LIMIT $p1
+```
+
+The pattern is rendered verbatim and its `$name` placeholders bind from the parameters object (the
+same shapes [`QueryAsync`](#parameter-objects) accepts); a parse error is the engine's, reported when
+the query runs. Names of the form `p<digits>` are reserved for the values the translator binds
+itself, and a step after `Match<T>` picks aliases the pattern does not already use. A `variable`
+the pattern does not bind is an `ArgumentException` before anything runs.
+
+`Nodes<T>`, `Match<T>` and the terminals are annotated `[RequiresUnreferencedCode]` like
+`Select<T>`: descriptors and projected constructors are resolved by reflection.
 
 ## Transactions
 
