@@ -51,9 +51,33 @@ Generated against LadybugDB engine **v0.19.1** (`third-party/liblbug.version`); 
   `DisableHealthChecks`. Ships at the core's version and depends on it exactly.
 - Documentation: the production-readiness review (`docs/2026-09-06-production-readiness.md`),
   three research appendices under `docs/research/`, the API-ergonomics and LINQ design specs.
+- `IDisposable` on `LadybugConnection`, `LadybugQueryResult`, `LadybugPreparedStatement` and
+  `LadybugTransaction`, alongside `IAsyncDisposable`; the two are equivalent because every
+  operation completes synchronously.
+- `LadybugConfig.AutoCheckpoint`, `CheckpointThreshold`, `EnableChecksums` and
+  `ThrowOnWalReplayFailure`, mapping to the engine settings of the same names.
+- A per-connection prepared-statement cache behind `QueryAsync(cypher, parameters)`,
+  `ExecuteAsync(cypher, parameters)` and `Select<T>`, keyed by statement text, least recently used,
+  bounded by `LadybugConfig.StatementCacheSize` (default 128, `0` disables). A key lookup through
+  those overloads went from about 122 µs to about 65 µs. Entries are checked out to one caller at
+  a time; a statement whose execution fails is dropped; a call whose parameter names differ from
+  the statement's first use is refused, because the engine keeps previously bound values.
+- Cancellation that interrupts the running query: a `CancellationToken` passed to any query
+  method is wired to `lbug_connection_interrupt` while the native call runs, and the call throws
+  `OperationCanceledException` carrying the token. The interrupt is re-sent until the call returns,
+  because the engine clears its flag when execution starts.
+- `LadybugDiagnostics`: an `ActivitySource` and a `Meter`, both named `LadybugDb.Client`, emitting
+  one client span per statement and a `db.client.operation.duration` histogram with the
+  OpenTelemetry database attributes (`db.system.name`, `db.namespace`, `db.operation.name`,
+  `db.query.text`, `error.type`). No dependency added; nothing is allocated without a listener.
+- `LadybugDatabase.Config` and `LadybugDatabase.Path`.
 
 ### Changed
 
+- Rows are read through stack-allocated borrows of the engine's reused flat tuple, with column
+  types read once per result instead of once per cell. Measured on 10,000 three-column rows:
+  typed accessors 8.85 ms and 4.4 MB down to 3.23 ms and 1.6 MB; `Select<T>` 9.0 ms down to 2.65 ms.
+  No API change.
 - The engine binaries come from upstream's `LadybugDB.Native` packages, chosen by the consumer.
   `LadybugDb.Client.Native`, `scripts/fetch-liblbug.sh` and the SHA256 lockfile are retired;
   `LadybugDb.Client` declares no native dependency and ships no `runtimes/` folder.
