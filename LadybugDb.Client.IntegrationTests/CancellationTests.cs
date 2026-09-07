@@ -62,8 +62,11 @@ public class CancellationTests
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1));
             var sw = Stopwatch.StartNew();
+            // The throw is the proof the interrupt landed: a query that ran to completion returns
+            // its result. The time bound only guards against a hang - a shared CI runner has taken
+            // 1.4 s here where this host takes milliseconds.
             await Assert.ThrowsAsync<OperationCanceledException>(async () => await conn.QueryAsync(SlowQuery, cts.Token));
-            await Assert.That(sw.Elapsed).IsLessThan(TimeSpan.FromSeconds(1));
+            await Assert.That(sw.Elapsed).IsLessThan(TimeSpan.FromSeconds(5));
         }
         finally { TestDatabase.Cleanup(path); }
     }
