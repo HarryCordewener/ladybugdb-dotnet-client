@@ -71,6 +71,17 @@ Generated against LadybugDB engine **v0.19.1** (`third-party/liblbug.version`); 
   OpenTelemetry database attributes (`db.system.name`, `db.namespace`, `db.operation.name`,
   `db.query.text`, `error.type`). No dependency added; nothing is allocated without a listener.
 - `LadybugDatabase.Config` and `LadybugDatabase.Path`.
+- A LINQ query surface (`LadybugDb.Client.Linq`, `.Schema`, `.Cypher`): `[Node]`/`[Rel]`
+  descriptors with catalog validation and DDL (`LadybugSchema`); `connection.Nodes<T>()` and
+  `Match<T>(pattern)` returning an `IQueryable<T>` whose `Where`, `Select`, `OrderBy`, `Skip`,
+  `Take`, `Distinct`, `GroupBy` aggregates and the `First`/`Single`/`Count`/`Any` terminals
+  translate to Cypher through a published whitelist (anything else throws naming the
+  sub-expression; nothing is evaluated on the client); typed graph steps (`Out`, `In`,
+  `OutWithRel`, `InWithRel`, `WhereExists`, with hop ranges); async terminals
+  (`AsAsyncEnumerable`, `ToListAsync`, `FirstOrDefaultAsync`, `CountAsync`, `AnyAsync`, ...);
+  and an immutable Cypher AST with a renderer that emits only parameterized text, usable on its
+  own as a fluent DSL. The LINQ layer is annotated for trimming and AOT; the row and `Select<T>`
+  paths remain the trim-safe ones.
 - Public-API tracking: `Microsoft.CodeAnalysis.PublicApiAnalyzers` with `PublicAPI.Shipped.txt`
   and `PublicAPI.Unshipped.txt` in both packable projects, so a surface change is a reviewed diff
   and the release step is a documented file move.

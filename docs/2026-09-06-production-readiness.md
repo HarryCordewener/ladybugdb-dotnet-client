@@ -403,7 +403,9 @@ From the research appendix, marked against this repository today.
 
 ## LINQ direction
 
-The design is in the spec linked above. The short version: a small immutable Cypher AST and
+**Implemented the same day** as designed (Phases A and B; the source-generator phase C remains
+future work): see the LINQ chapter of `docs/USAGE.md` and section 5b of `docs/GUIDE.md`. The
+design is in the spec linked above. The short version: a small immutable Cypher AST and
 renderer as the substrate (usable on its own as a fluent DSL and as the never-interpolate guarantee
 SharpMUSH wants), `[Node]`/`[Rel]` descriptors validated against `CALL show_tables()`/`table_info()`
 at start-up, and an `IQueryable<T>` front end whose translator is a published whitelist that throws

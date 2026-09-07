@@ -1,6 +1,6 @@
 # LINQ query surface for LadybugDb.Client — design
 
-Date: 2026-09-06. Status: proposed, not implemented. Research behind every claim here is in
+Date: 2026-09-06. Status: Phases A and B implemented (2026-09-07); Phase C (source generator) not started. Research behind every claim here is in
 [`docs/research/2026-09-06-linq-over-graph-databases.md`](../../research/2026-09-06-linq-over-graph-databases.md).
 
 ## Why
