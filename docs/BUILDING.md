@@ -32,7 +32,7 @@ README's installation section for why the consumer makes that choice.
 
 ## Running tests
 
-Two test projects, and they need different commands:
+Three test projects, run one at a time:
 
 ```console
 # Unit tests — no real engine involved.
@@ -40,13 +40,16 @@ dotnet test LadybugDb.Client.Tests -c Release
 
 # Integration tests — run against the real liblbug from the LadybugDB.Native package.
 dotnet test LadybugDb.Client.IntegrationTests -c Release
+
+# The Extensions package (DI, options, health check) — also against the real engine.
+dotnet test LadybugDb.Client.Extensions.Tests -c Release
 ```
 
 `LadybugDb.Client.Tests` also includes `PackagingTests`, which inspects the built `.nupkg` directly,
 so it needs a real package on disk first:
 
 ```console
-dotnet pack -c Release
+dotnet pack -c Release   # both packages: LadybugDb.Client and LadybugDb.Client.Extensions
 dotnet test LadybugDb.Client.Tests -c Release
 ```
 

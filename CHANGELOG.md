@@ -1,6 +1,7 @@
 # Changelog
 
-All notable changes to `LadybugDb.Client` are recorded here. The format follows
+All notable changes to `LadybugDb.Client` and `LadybugDb.Client.Extensions` (which share a
+version) are recorded here. The format follows
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and versions follow
 [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html). Package versions are independent of the
 engine version; each release states the engine it was generated against. See
@@ -42,6 +43,12 @@ Generated against LadybugDB engine **v0.19.1** (`third-party/liblbug.version`); 
   pack time.
 - `IsAotCompatible=true`; `samples/LadybugDb.Client.AotSample` is published with
   `PublishAot=true` and executed by CI.
+- `LadybugDb.Client.Extensions`, a second package for `Microsoft.Extensions.DependencyInjection`
+  hosts: `AddLadybugDb(path, configure)` and `AddLadybugDb(IConfiguration section)` register a
+  singleton `LadybugDatabase` (opened on first resolve), a scoped `LadybugConnection` and
+  `IOptions<LadybugDbOptions>`, validating `DatabasePath` at registration; `LadybugDbHealthCheck`
+  (`RETURN 1` on a fresh connection, 5-second timeout) is registered as `ladybugdb` unless
+  `DisableHealthChecks`. Ships at the core's version and depends on it exactly.
 - Documentation: the production-readiness review (`docs/2026-09-06-production-readiness.md`),
   three research appendices under `docs/research/`, the API-ergonomics and LINQ design specs.
 

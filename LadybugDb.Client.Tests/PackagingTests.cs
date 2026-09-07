@@ -118,6 +118,47 @@ public class PackagingTests
         await Assert.That(value).IsEqualTo("True");
     }
 
+    /// <summary>
+    /// The two packages ship together at one version (release.yml packs both from the same
+    /// <c>-p:Version</c>), and the Extensions package is compiled against exactly that core. A
+    /// project reference packs as a <c>&gt;= version</c> dependency by default, which would let
+    /// NuGet pair this package with any newer core, including one whose public API it was not
+    /// built against; the exact range <c>[version]</c> closes that.
+    /// </summary>
+    [Test]
+    public async Task ExtensionsPackage_DependsOnTheCoreAtExactlyItsOwnVersion()
+    {
+        var core = FindPackage("LadybugDb.Client");
+        var extensions = FindPackage("LadybugDb.Client.Extensions");
+        await Assert.That(core).IsNotNull();
+        await Assert.That(extensions).IsNotNull();
+
+        var coreVersion = MetadataElement(await ReadNuspecAsync(core!), "version")?.Value;
+        var nuspec = await ReadNuspecAsync(extensions!);
+        await Assert.That(MetadataElement(nuspec, "version")?.Value).IsEqualTo(coreVersion);
+
+        var dependency = nuspec.Descendants()
+            .Single(e => e.Name.LocalName == "dependency" && (string?)e.Attribute("id") == "LadybugDb.Client");
+        await Assert.That((string?)dependency.Attribute("version")).IsEqualTo($"[{coreVersion}]");
+    }
+
+    /// <summary>Same gallery presence as the core: the icon and README are declared and packed.</summary>
+    [Test]
+    public async Task ExtensionsPackage_ShipsIconAndReadme()
+    {
+        var pkg = FindPackage("LadybugDb.Client.Extensions");
+        await Assert.That(pkg).IsNotNull();
+
+        var nuspec = await ReadNuspecAsync(pkg!);
+        await Assert.That(MetadataElement(nuspec, "icon")?.Value).IsEqualTo("icon.png");
+        await Assert.That(MetadataElement(nuspec, "readme")?.Value).IsEqualTo("README.md");
+
+        using var zip = ZipFile.OpenRead(pkg!);
+        var entries = zip.Entries.Select(e => e.FullName).ToList();
+        await Assert.That(entries).Contains("icon.png");
+        await Assert.That(entries).Contains("README.md");
+    }
+
     [Test]
     public async Task ManagedPackage_ShipsNoNativeBinaries()
     {

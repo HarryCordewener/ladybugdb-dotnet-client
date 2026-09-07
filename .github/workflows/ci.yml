@@ -65,6 +65,10 @@ jobs:
           global-json-file: global.json
       - name: Integration tests
         run: dotnet test LadybugDb.Client.IntegrationTests -c Release
+      - name: Extensions tests
+        # Against the real engine too (a registered database is opened and queried), hence here
+        # rather than in the build job's unit-test step.
+        run: dotnet test LadybugDb.Client.Extensions.Tests -c Release
 
   aot-publish:
     # The evidence behind LadybugDb.Client's IsAotCompatible flag: the sample is compiled

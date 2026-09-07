@@ -1,8 +1,8 @@
 # Usage guide
 
-This is the full guide to `LadybugDb.Client`. It assumes you've read the
-[README](../README.md)'s quick start. Every code sample below was compiled and run against the
-real engine while this guide was written.
+This is the full guide to `LadybugDb.Client` and its `LadybugDb.Client.Extensions` package. It
+assumes you've read the [README](../README.md)'s quick start. Every code sample below was compiled
+and run against the real engine while this guide was written.
 
 - [Opening and configuring a database](#opening-and-configuring-a-database)
 - [Connections](#connections)
@@ -26,6 +26,9 @@ real engine while this guide was written.
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
 - [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)
+- [Extensions: dependency injection and health checks](#extensions-dependency-injection-and-health-checks)
+  - [AddLadybugDb](#addladybugdb)
+  - [The health check](#the-health-check)
 - [Schema guidance](#schema-guidance)
 - [What's deferred](#whats-deferred)
 
@@ -1354,6 +1357,146 @@ still the expected approach; the client makes no attempt to serialize writers fo
 
 If you need a single logical write to span more than one statement, see
 [Transactions](#transactions).
+
+## Extensions: dependency injection and health checks
+
+`LadybugDb.Client.Extensions` is a second package for hosts built on
+`Microsoft.Extensions.DependencyInjection`: ASP.NET Core, the generic host, workers. It adds one
+registration call, an options type bound from configuration, and a health check. The core package
+stays free of `Microsoft.Extensions.*` so a console program pays for none of it.
+
+```console
+dotnet add package LadybugDb.Client.Extensions   # brings LadybugDb.Client at the same version
+dotnet add package LadybugDB.Native              # the engine, as for the core package
+```
+
+The samples in this chapter run in
+[`LadybugDb.Client.Extensions.Tests/UsageGuideSamples.cs`](../LadybugDb.Client.Extensions.Tests/UsageGuideSamples.cs),
+with a plain `ServiceCollection` standing in for the host's.
+
+### `AddLadybugDb`
+
+```csharp
+using LadybugDb.Client;
+using LadybugDb.Client.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddLadybugDb(builder.Configuration.GetSection("LadybugDb"));
+
+var app = builder.Build();
+app.MapHealthChecks("/health");
+app.MapGet("/objects/{dbref:long}", async (long dbref, LadybugConnection conn) =>
+    await conn.Select<string>(
+        "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.name", new { dbref }).FirstOrDefaultAsync());
+app.Run();
+```
+
+```json
+{
+  "LadybugDb": {
+    "DatabasePath": "./data/graph",
+    "Config": { "MaxThreads": 4, "EnableCompression": true }
+  }
+}
+```
+
+The section binds to `LadybugDbOptions`; `Config` is a `LadybugConfig`, so every engine setting
+from [Opening and configuring a database](#opening-and-configuring-a-database) is available under
+it by name. The other overload takes the path directly, with a callback for the rest:
+
+```csharp
+builder.Services.AddLadybugDb("./data/graph", o => o.Config = o.Config with { MaxThreads = 4 });
+```
+
+Either way, `AddLadybugDb` registers:
+
+| Service | Lifetime | Notes |
+|---|---|---|
+| `LadybugDatabase` | Singleton | Opened on first resolve, not at registration, so the container can be built before the data directory exists. Disposed with the container. |
+| `LadybugConnection` | Scoped | One per scope (per request in ASP.NET Core), disposed with the scope. `LadybugConnection` is `IAsyncDisposable` only, so a scope you create yourself must be disposed asynchronously: `CreateAsyncScope()` and `await using`. A synchronous `Dispose()` of such a scope throws `InvalidOperationException`; ASP.NET Core's request scope is already asynchronous. |
+| `IOptions<LadybugDbOptions>` | Singleton | Reports exactly what the database was opened with. |
+| `ladybugdb` health check | — | See [The health check](#the-health-check). Skipped when `DisableHealthChecks` is set. |
+
+```csharp
+await using var scope = provider.CreateAsyncScope();
+var conn = scope.ServiceProvider.GetRequiredService<LadybugConnection>();
+await conn.ExecuteAsync("CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+```
+
+Options are resolved and validated once, at registration, the way Aspire's client integrations do
+it: a missing `DatabasePath` fails the `AddLadybugDb` call itself with `OptionsValidationException`,
+not the first request. (A singleton database could not follow a configuration reload anyway.)
+
+```csharp
+// "LadybugDb": { "Config": { "MaxThreads": 4 } } - no DatabasePath
+try { services.AddLadybugDb(configuration.GetSection("LadybugDb")); }
+catch (OptionsValidationException ex) { Console.WriteLine(ex.Message); }
+// DatabasePath must be set to the database file's path.
+```
+
+`LadybugDbOptions` member reference:
+
+| Member | Description |
+|---|---|
+| `DatabasePath` | The database file's path, passed to `new LadybugDatabase(path, config)`. Required. |
+| `Config` | The `LadybugConfig` for the open. Defaults to the engine's defaults. |
+| `DisableHealthChecks` | `true` to skip registering the health check. Default `false`. |
+
+Calling `AddLadybugDb` twice is not an error: the second call is a no-op, the first registration
+wins (as with `TryAdd`), and there is still exactly one database and one health check.
+
+### The health check
+
+`LadybugDbHealthCheck` opens a fresh connection to the registered `LadybugDatabase`, runs
+`RETURN 1`, and reports `Healthy` when the engine answers within five seconds. It is registered
+under the name `ladybugdb` with the tags `db` and `ladybugdb`, so `MapHealthChecks("/ready",
+new HealthCheckOptions { Predicate = r => r.Tags.Contains("db") })` selects it. A fresh connection,
+rather than the request's scoped one, so the check never contends with a transaction the request
+holds, and so it works from a health endpoint that has no scope of its own.
+
+```csharp
+var report = await provider.GetRequiredService<HealthCheckService>().CheckHealthAsync();
+var entry = report.Entries["ladybugdb"];
+Console.WriteLine($"{entry.Status}: {entry.Description}");
+// Healthy: LadybugDB 0.19.1 answered.
+```
+
+When the check fails, the entry carries the registration's failure status (`Unhealthy` unless you
+registered it otherwise), a description, the exception in `entry.Exception`, and the exception's
+type name under `entry.Data["exception"]`, since health endpoints commonly serialize `Data` and
+drop `Exception`. The failure an in-process engine can actually produce is the database having been
+disposed underneath the container:
+
+```csharp
+provider.GetRequiredService<LadybugDatabase>().Dispose();
+
+var report = await provider.GetRequiredService<HealthCheckService>().CheckHealthAsync();
+var entry = report.Entries["ladybugdb"];
+Console.WriteLine($"{entry.Status}: {entry.Exception?.GetType().Name} - {entry.Data["exception"]}");
+// Unhealthy: ObjectDisposedException - System.ObjectDisposedException
+```
+
+The five-second timeout is applied before the engine is entered, which is where cancellation
+currently takes effect (see [Connections](#connections)); since `RETURN 1` touches no data, a slow
+answer means the process is starved rather than the database.
+
+The check is an ordinary `IHealthCheck` and can be constructed directly against any
+`LadybugDatabase`, registered or not:
+
+```csharp
+using var db = new LadybugDatabase("./mydb");
+var check = new LadybugDbHealthCheck(db);
+var context = new HealthCheckContext
+{
+    Registration = new HealthCheckRegistration("ladybugdb", check, failureStatus: null, tags: null),
+};
+var result = await check.CheckHealthAsync(context);
+Console.WriteLine(result.Status); // Healthy
+```
+
+`HealthCheckService` itself needs logging in the container (`AddLogging()`); every host registers
+that before anything else, so it only comes up when building a bare `ServiceCollection` by hand,
+as the samples here do.
 
 ## Schema guidance
 

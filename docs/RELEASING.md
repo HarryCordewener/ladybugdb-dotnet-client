@@ -1,7 +1,9 @@
 # Releasing
 
-How a version of `LadybugDb.Client` gets from a commit on `main` to a package on nuget.org. (The
-engine binaries are upstream's `LadybugDB.Native` packages; this repository publishes none.)
+How a version of `LadybugDb.Client` and `LadybugDb.Client.Extensions` gets from a commit on `main`
+to nuget.org. The two packages always ship together at one version; the Extensions package depends
+on the core at exactly that version. (The engine binaries are upstream's `LadybugDB.Native`
+packages; this repository publishes none.)
 
 - [How a release ships](#how-a-release-ships)
 - [What the workflow actually does](#what-the-workflow-actually-does)
@@ -25,7 +27,7 @@ engine binaries are upstream's `LadybugDB.Native` packages; this repository publ
 
    Pushing a tag matching `v[0-9]+.[0-9]+.[0-9]+*` triggers
    [`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds, tests, packs,
-   and publishes the package.
+   and publishes both packages.
 
    Alternatively, run the workflow manually from the Actions tab (`workflow_dispatch`) and supply a
    `version` input — useful for re-publishing after a transient failure without cutting a new tag,
@@ -39,16 +41,21 @@ In order, on `ubuntu-latest`:
    SemVer.
 2. `dotnet restore` (which also brings in the `LadybugDB.Native` package the test projects
    reference), `dotnet build -c Release -p:Version=<version>`.
-3. `dotnet test` for both `LadybugDb.Client.Tests` and `LadybugDb.Client.IntegrationTests`, against
-   the just-built `Release` binaries. **A publish never happens from artifacts that weren't
-   tested** — if either test project fails, the job stops before packing or pushing anything.
-4. `dotnet pack -c Release -p:Version=<version>` — produces exactly one package
-   (`LadybugDb.Client`; every other project is `IsPackable=false`).
+3. `dotnet test` for `LadybugDb.Client.Tests`, `LadybugDb.Client.IntegrationTests` and
+   `LadybugDb.Client.Extensions.Tests`, against the just-built `Release` binaries. **A publish never
+   happens from artifacts that weren't tested** — if any test project fails, the job stops before
+   packing or pushing anything.
+4. `dotnet pack -c Release -p:Version=<version>` — produces exactly two packages,
+   `LadybugDb.Client` and `LadybugDb.Client.Extensions`, at the same version (every other project
+   is `IsPackable=false`). The Extensions nuspec depends on `LadybugDb.Client` with the exact range
+   `[<version>]`, which `PackagingTests` checks.
 5. `NuGet/login@v1` exchanges this job's GitHub OIDC token for a nuget.org API key good for one
    hour. This step runs right before the push steps, not earlier in the job, since the key is
    short-lived.
-6. `dotnet nuget push`, with `--skip-duplicate` so re-running the workflow (e.g.
-   after a flaky push) isn't fatal if a package version already exists on nuget.org.
+6. `dotnet nuget push` for the core and then for the Extensions package (in that order, so a
+   consumer restoring between the two finds the dependency already there), with `--skip-duplicate`
+   so re-running the workflow (e.g. after a flaky push) isn't fatal if a package version already
+   exists on nuget.org.
 
 No long-lived nuget.org API key is stored anywhere in this repo or its secrets — this is
 [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), backed
@@ -61,9 +68,9 @@ package against itself (compatible frameworks and runtimes). The check that matt
 "did this version break the previous one's public API", needs a published version to compare
 against, and starts on the release after the first publish:
 
-1. After the first version (say `0.2.0`) is live on nuget.org, add to
-   `LadybugDb.Client/LadybugDb.Client.csproj` (and, once it ships, to
-   `LadybugDb.Client.Extensions/LadybugDb.Client.Extensions.csproj`):
+1. After the first version (say `0.2.0`) is live on nuget.org, add to both
+   `LadybugDb.Client/LadybugDb.Client.csproj` and
+   `LadybugDb.Client.Extensions/LadybugDb.Client.Extensions.csproj`:
 
    ```xml
    <PackageValidationBaselineVersion>0.2.0</PackageValidationBaselineVersion>
@@ -138,7 +145,8 @@ this repository.
      key to `release.yml`, in which case both must be changed together.
 
    If nuget.org requires the target package IDs to already exist or be reserved before a Trusted
-   Publishing policy can be scoped to them, reserve `LadybugDb.Client` first. If this is a private/new nuget.org policy, it starts temporarily active for **7 days**
+   Publishing policy can be scoped to them, reserve `LadybugDb.Client` and
+   `LadybugDb.Client.Extensions` first. If this is a private/new nuget.org policy, it starts temporarily active for **7 days**
    and locks to this repo's owner/repository IDs on the first successful publish — expect that
    window, and don't be alarmed if the policy shows as "pending" until the first tag ships.
 
@@ -162,16 +170,19 @@ step (empty/wrong `user`, or no matching Trusted Publishing policy) or the `dotn
 
 ## Verifying a publish succeeded
 
-- **In the workflow run:** the `Push LadybugDb.Client` step should complete without error. A `--skip-duplicate` push of a version that's already live prints
-  a message and still exits 0 — that's expected on a re-run, not a sign anything is wrong.
+- **In the workflow run:** the `Push LadybugDb.Client` and `Push LadybugDb.Client.Extensions`
+  steps should complete without error. A `--skip-duplicate` push of a version that's already live
+  prints a message and still exits 0 — that's expected on a re-run, not a sign anything is wrong.
 - **On nuget.org:** check
-  [nuget.org/packages/LadybugDb.Client](https://www.nuget.org/packages/LadybugDb.Client)
+  [nuget.org/packages/LadybugDb.Client](https://www.nuget.org/packages/LadybugDb.Client) and
+  [nuget.org/packages/LadybugDb.Client.Extensions](https://www.nuget.org/packages/LadybugDb.Client.Extensions)
   for the new version. New versions can take a few minutes to appear while nuget.org finishes
   indexing.
 - **From a consuming project:**
 
   ```console
   dotnet add package LadybugDb.Client --version 0.2.0
+  dotnet add package LadybugDb.Client.Extensions --version 0.2.0   # DI hosts only
   dotnet add package LadybugDB.Native --version 0.19.1
   ```
 
