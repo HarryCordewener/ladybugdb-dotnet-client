@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using LadybugDb.Client.Diagnostics;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
@@ -371,7 +372,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
                 "or use a different statement text.", nameof(parameters));
         }
 
-        var statement = entry?.Statement ?? LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher);
+        var statement = entry?.Statement ?? LadybugPreparedStatement.Prepare(_database, _handle, cypher);
         entry ??= new StatementCache<LadybugPreparedStatement>.Entry(cypher, statement, names);
         try
         {
@@ -520,7 +521,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher));
+        return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database, _handle, cypher));
     }
 
     /// <remarks>
@@ -529,7 +530,23 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     /// the engine reports as interrupted after the token fired surfaces as
     /// <see cref="OperationCanceledException"/>; every other failure is classified as before.
     /// </remarks>
-    private unsafe LadybugQueryResult Execute(string cypher, CancellationToken cancellationToken)
+    private LadybugQueryResult Execute(string cypher, CancellationToken cancellationToken)
+    {
+        var scope = LadybugDiagnostics.Start(cypher, _database.Path);
+        try
+        {
+            var result = ExecuteCore(cypher, cancellationToken);
+            scope.Succeed();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            scope.Fail(ex);
+            throw;
+        }
+    }
+
+    private unsafe LadybugQueryResult ExecuteCore(string cypher, CancellationToken cancellationToken)
     {
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try

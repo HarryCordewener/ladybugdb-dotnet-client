@@ -1329,6 +1329,29 @@ interrupted when it yields, not mid-way.
 Cancellation and the transaction guard compose: a cancelled statement inside a
 `LadybugTransaction` leaves the transaction open, and disposing it rolls back as usual.
 
+## Observability
+
+The client emits one span per statement through a `System.Diagnostics.ActivitySource` named
+`LadybugDb.Client`, and one histogram, `db.client.operation.duration` (seconds), through a
+`System.Diagnostics.Metrics.Meter` of the same name. Both follow the OpenTelemetry database semantic
+conventions (stable since 1.33): `db.system.name` is `ladybugdb`, `db.namespace` is the database
+path, `db.operation.name` is the statement's first keyword (`MATCH`, `CREATE`, `BEGIN`, ...),
+`db.query.text` is the statement as written (with `$name` placeholders, never bound values), and
+`error.type` is the exception's full type name when the statement fails. The span's name is the
+operation name.
+
+```csharp
+// OpenTelemetry
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t.AddSource(LadybugDiagnostics.ActivitySourceName))
+    .WithMetrics(m => m.AddMeter(LadybugDiagnostics.MeterName));
+```
+
+With nobody listening, a statement pays one `HasListeners` check and one `Instrument.Enabled` check
+and allocates nothing. Every statement is covered: `QueryAsync`, `ExecuteAsync`, `Select<T>`,
+prepared statements, and the transaction control statements `BeginTransactionAsync`, `CommitAsync`
+and `RollbackAsync` issue.
+
 ## Concurrency and the single-writer constraint
 
 By default, LadybugDB permits exactly one write transaction at a time and **rejects** a second

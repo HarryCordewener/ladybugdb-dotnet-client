@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ExtendedNumerics;
+using LadybugDb.Client.Diagnostics;
 using LadybugDb.Client.Interop;
 using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
@@ -53,6 +54,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     private readonly LbugConnectionHandle _connection;
     private readonly LbugPreparedStatementHandle _handle;
     private readonly string _cypher;
+    private readonly string _databasePath;
 
     /// <summary>
     /// Serializes every <c>Bind*</c>/<see cref="BindNull"/> call on this instance against every
@@ -66,8 +68,10 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     /// checks <c>lbug_query_result_is_success</c> after a plain query.
     /// </summary>
     internal static unsafe LadybugPreparedStatement Prepare(
-        LbugDatabaseHandle database, LbugConnectionHandle connection, string cypher)
+        LadybugDatabase owner, LbugConnectionHandle connection, string cypher)
     {
+        var database = owner.Handle;
+        var databasePath = owner.Path;
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try
         {
@@ -98,7 +102,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
             }
 
             Interlocked.Increment(ref _preparedCount);
-            return new LadybugPreparedStatement(database, connection, handle, cypher);
+            return new LadybugPreparedStatement(database, connection, handle, cypher, databasePath);
         }
         finally
         {
@@ -107,12 +111,14 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     }
 
     private LadybugPreparedStatement(
-        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle handle, string cypher)
+        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle handle,
+        string cypher, string databasePath)
     {
         _database = database;
         _connection = connection;
         _handle = handle;
         _cypher = cypher;
+        _databasePath = databasePath;
     }
 
     /// <summary>Binds a boolean parameter.</summary>
@@ -750,7 +756,23 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     /// duration of the native call - see <see cref="QueryInterrupt"/> and
     /// <c>LadybugConnection.Execute</c>, which this mirrors.
     /// </remarks>
-    private unsafe LadybugQueryResult Execute(CancellationToken cancellationToken)
+    private LadybugQueryResult Execute(CancellationToken cancellationToken)
+    {
+        var scope = LadybugDiagnostics.Start(_cypher, _databasePath);
+        try
+        {
+            var result = ExecuteCore(cancellationToken);
+            scope.Succeed();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            scope.Fail(ex);
+            throw;
+        }
+    }
+
+    private unsafe LadybugQueryResult ExecuteCore(CancellationToken cancellationToken)
     {
         LbugQueryResultHandle handle;
         lbug_state state;
