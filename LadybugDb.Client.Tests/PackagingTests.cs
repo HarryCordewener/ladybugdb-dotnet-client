@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using TUnit.Assertions;
 using TUnit.Assertions.Extensions;
 using TUnit.Core;
@@ -29,6 +30,79 @@ public class PackagingTests
             .FirstOrDefault();
     }
 
+    /// <summary>Loads the package's nuspec. Element names are compared by local name: the nuspec has a default namespace.</summary>
+    private static async Task<XDocument> ReadNuspecAsync(string pkg)
+    {
+        using var zip = ZipFile.OpenRead(pkg);
+        var nuspec = zip.Entries.Single(e => e.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
+        using var stream = nuspec.Open();
+        return await XDocument.LoadAsync(stream, LoadOptions.None, CancellationToken.None);
+    }
+
+    private static XElement? MetadataElement(XDocument nuspec, string localName) =>
+        nuspec.Descendants().FirstOrDefault(e => e.Name.LocalName == localName);
+
+    /// <summary>
+    /// nuget.org renders <c>&lt;icon&gt;</c> from a file inside the package; a dangling reference
+    /// (declared but not packed) is a silent blank on the gallery page, so both halves are checked.
+    /// </summary>
+    [Test]
+    public async Task ManagedPackage_ShipsAndDeclaresIcon()
+    {
+        var pkg = FindPackage("LadybugDb.Client");
+        await Assert.That(pkg).IsNotNull();
+
+        var nuspec = await ReadNuspecAsync(pkg!);
+        await Assert.That(MetadataElement(nuspec, "icon")?.Value).IsEqualTo("icon.png");
+
+        using var zip = ZipFile.OpenRead(pkg!);
+        await Assert.That(zip.Entries.Select(e => e.FullName)).Contains("icon.png");
+    }
+
+    [Test]
+    public async Task ManagedPackage_HasSearchTags()
+    {
+        var pkg = FindPackage("LadybugDb.Client");
+        await Assert.That(pkg).IsNotNull();
+
+        var nuspec = await ReadNuspecAsync(pkg!);
+        var tags = (MetadataElement(nuspec, "tags")?.Value ?? string.Empty)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var expected in new[] { "ladybugdb", "graph", "cypher", "embedded" })
+            await Assert.That(tags).Contains(expected);
+    }
+
+    /// <summary>
+    /// Source Link's <c>commit</c> attribute is what lets a debugger fetch the exact sources a
+    /// package was built from; it is only emitted when <c>PublishRepositoryUrl</c> is on and the
+    /// build ran inside a git checkout.
+    /// </summary>
+    [Test]
+    public async Task ManagedPackage_RecordsSourceCommit()
+    {
+        var pkg = FindPackage("LadybugDb.Client");
+        await Assert.That(pkg).IsNotNull();
+
+        var nuspec = await ReadNuspecAsync(pkg!);
+        var repository = MetadataElement(nuspec, "repository");
+        await Assert.That(repository).IsNotNull();
+        await Assert.That((string?)repository!.Attribute("url")).IsEqualTo("https://github.com/HarryCordewener/ladybugdb-dotnet-client");
+        await Assert.That((string?)repository.Attribute("commit") ?? string.Empty).Matches("^[0-9a-f]{40}$");
+    }
+
+    [Test]
+    public async Task ManagedPackage_HasSymbolPackageBesideIt()
+    {
+        var pkg = FindPackage("LadybugDb.Client");
+        await Assert.That(pkg).IsNotNull();
+
+        var snupkg = Path.ChangeExtension(pkg!, ".snupkg");
+        await Assert.That(File.Exists(snupkg)).IsTrue();
+
+        using var zip = ZipFile.OpenRead(snupkg);
+        await Assert.That(zip.Entries.Select(e => e.FullName)).Contains("lib/net10.0/LadybugDb.Client.pdb");
+    }
+
     [Test]
     public async Task ManagedPackage_ShipsNoNativeBinaries()
     {
@@ -54,7 +128,7 @@ public class PackagingTests
         using var zip = ZipFile.OpenRead(pkg!);
         var nuspec = zip.Entries.Single(e => e.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
         using var stream = nuspec.Open();
-        var doc = await System.Xml.Linq.XDocument.LoadAsync(stream, System.Xml.Linq.LoadOptions.None, CancellationToken.None);
+        var doc = await XDocument.LoadAsync(stream, LoadOptions.None, CancellationToken.None);
         // The package description names LadybugDB.Native on purpose (it tells the consumer what to
         // add), so only the declared <dependency> ids are inspected, not the whole nuspec text.
         var dependencyIds = doc.Descendants()

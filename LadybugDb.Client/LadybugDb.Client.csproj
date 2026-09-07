@@ -33,6 +33,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="" />
+    <!-- 128x128 PNG, drawn for this repository (no third-party artwork); PackageIcon names it in Directory.Build.props. -->
+    <None Include="icon.png" Pack="true" PackagePath="" />
   </ItemGroup>
   <PropertyGroup>
     <!--
