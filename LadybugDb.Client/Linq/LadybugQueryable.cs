@@ -11,6 +11,13 @@ internal abstract record QueryRoot(Type ElementType);
 /// <param name="ElementType">The <c>[Node]</c> type.</param>
 internal sealed record NodesRoot(Type ElementType) : QueryRoot(ElementType);
 
+/// <summary><c>MATCH pattern</c> written by the caller, with <paramref name="ElementType"/> bound to <paramref name="Variable"/> - <c>LadybugConnection.Match&lt;T&gt;()</c>.</summary>
+/// <param name="ElementType">The <c>[Node]</c> type.</param>
+/// <param name="Pattern">The text after <c>MATCH</c>, verbatim.</param>
+/// <param name="Parameters">The values of the pattern's <c>$name</c> placeholders.</param>
+/// <param name="Variable">The pattern variable <paramref name="ElementType"/> stands for.</param>
+internal sealed record MatchRoot(Type ElementType, string Pattern, IReadOnlyDictionary<string, object?> Parameters, string Variable) : QueryRoot(ElementType);
+
 /// <summary>Non-generic access to a <see cref="LadybugQueryable{T}"/>'s root, for the translator.</summary>
 internal interface IQueryRoot
 {

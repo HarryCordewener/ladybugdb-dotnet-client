@@ -24,6 +24,8 @@ public sealed record Located;
 
 public sealed record Dto(long Id, string Label);
 
+public sealed record Counted(long? Loc, int N);
+
 /// <summary>
 /// Expression tree in, exact Cypher and parameters out - one test per whitelist row and one per
 /// refusal. No engine: <c>QueryableTests</c> in the integration suite runs every shape here
@@ -33,6 +35,9 @@ public sealed record Dto(long Id, string Label);
 public class TranslatorTests
 {
     private static IQueryable<T> NodesOf<T>() => new LadybugQueryable<T>(new LadybugQueryProvider(connection: null, LadybugSchema.Default), new NodesRoot(typeof(T)));
+
+    private static IQueryable<T> MatchOf<T>(string pattern, Dictionary<string, object?>? parameters = null, string variable = "n") =>
+        new LadybugQueryable<T>(new LadybugQueryProvider(connection: null, LadybugSchema.Default), new MatchRoot(typeof(T), pattern, parameters ?? [], variable));
 
     private static TranslatedQuery Translate<T>(IQueryable<T> query) => QueryTranslator.Translate(query.Expression, LadybugSchema.Default);
 
@@ -419,6 +424,92 @@ public class TranslatorTests
     {
         var ex = Refused(() => NodesOf<Obj>().Select(o => o.Name).Out<string, Has, Attr>());
         await Assert.That(ex.Message).Contains("Out");
+    }
+
+    // ---------------------------------------------------------------------------- Match<T>
+
+    [Test]
+    public async Task MatchPattern_IsRenderedVerbatim_WithItsParameters()
+    {
+        var q = Translate(MatchOf<Obj>("(r:Object {dbref: $room})-[:Located]->(n:Object)", new() { ["room"] = 5L }).Select(e => e.Name));
+        await Assert.That(q.Text.Cypher).IsEqualTo("MATCH (r:Object {dbref: $room})-[:Located]->(n:Object) RETURN n.name AS Name");
+        await Assert.That(q.Text.Parameters["room"]).IsEqualTo(5L);
+    }
+
+    [Test]
+    public async Task MatchPattern_BindsTheNamedVariable_AndTheChainApplies()
+    {
+        var q = Translate(MatchOf<Obj>("(x:Object)-[:Located]->(r:Object {dbref: $room})", new() { ["room"] = 3L }, "x")
+            .Where(x => x.Name != "y").OrderBy(x => x.Dbref).Take(2));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (x:Object)-[:Located]->(r:Object {dbref: $room}) WHERE x.name <> $p0 RETURN x ORDER BY x.dbref LIMIT $p1");
+        await Assert.That(q.Shape).IsTypeOf<NodeShape>();
+        await Assert.That(q.Text.Parameters["room"]).IsEqualTo(3L);
+        await Assert.That(q.Text.Parameters["p1"]).IsEqualTo(2L);
+    }
+
+    [Test]
+    public async Task MatchPattern_StepsContinueInASecondMatch_AvoidingTheCallersVariables()
+    {
+        var q = Translate(MatchOf<Obj>("(n:Object {dbref: $d})-[:Located]->(n1:Object)", new() { ["d"] = 1L })
+            .Out<Obj, Has, Attr>().Select(p => p.Target.Aname));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (n:Object {dbref: $d})-[:Located]->(n1:Object) MATCH (n)-[:Has]->(n2:Attr) RETURN n2.aname AS Aname");
+    }
+
+    [Test]
+    public async Task MatchPattern_ReservedParameterName_IsRefused()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => Translate(MatchOf<Obj>("(n:Object {dbref: $p0})", new() { ["p0"] = 1L })));
+        await Assert.That(ex!.Message).Contains("p0");
+    }
+
+    // ------------------------------------------------------------------------------ GroupBy
+
+    [Test]
+    public async Task GroupBy_KeyAndCount_RenderImplicitGrouping()
+    {
+        var q = Translate(NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => new { g.Key, N = g.LongCount() }).OrderBy(x => x.Key));
+        await Assert.That(q.Text.Cypher).IsEqualTo("MATCH (o:Object) RETURN o.loc AS Key, count(*) AS N ORDER BY Key");
+        await Assert.That(q.Shape).IsTypeOf<RowShape>();
+    }
+
+    [Test]
+    public async Task GroupBy_IntCount_IsCastToInt32()
+    {
+        var q = Translate(NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => new Counted(g.Key, g.Count())));
+        await Assert.That(q.Text.Cypher).IsEqualTo("MATCH (o:Object) RETURN o.loc AS Loc, cast(count(*), 'INT32') AS N");
+    }
+
+    [Test]
+    public async Task GroupBy_SumMinMaxAverage_RenderTheirFunctions()
+    {
+        var q = Translate(NodesOf<Obj>().Where(o => o.Dbref > 1).GroupBy(o => o.Loc)
+            .Select(g => new { g.Key, Total = g.Sum(x => x.Dbref), Lo = g.Min(x => x.Dbref), Hi = g.Max(x => x.Dbref), Mean = g.Average(x => x.Dbref) })
+            .OrderByDescending(x => x.Total));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (o:Object) WHERE o.dbref > $p0 RETURN o.loc AS Key, cast(sum(o.dbref), 'INT64') AS Total, min(o.dbref) AS Lo, max(o.dbref) AS Hi, avg(o.dbref) AS Mean ORDER BY Total DESC");
+    }
+
+    [Test]
+    public async Task GroupBy_AfterAStep_GroupsOnEitherEnd()
+    {
+        var q = Translate(NodesOf<Obj>().Out<Obj, Has, Attr>().GroupBy(p => p.Source.Dbref).Select(g => new { g.Key, N = g.LongCount() }));
+        await Assert.That(q.Text.Cypher).IsEqualTo("MATCH (n0:Object)-[:Has]->(n1:Attr) RETURN n0.dbref AS Key, count(*) AS N");
+    }
+
+    [Test]
+    public async Task GroupBy_Refusals_NameTheRule()
+    {
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc)).Message).Contains("GroupBy needs a Select");
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc).Where(g => g.Key == 1)).Message).Contains("after GroupBy");
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => g.LongCount())).Message).Contains("must include g.Key");
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => g.Key)).Message).Contains("needs an aggregate");
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => new { g.Key, First = g.First().Name })).Message).Contains("First");
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => new { g.Key, N = g.Count(x => x.Dbref > 2) })).Message).Contains("predicate");
+        await Assert.That(Refused(() => NodesOf<Obj>().Select(o => o.Loc).GroupBy(l => l)).Message).Contains("WITH");
+        await Assert.That(Refused(NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => new { g.Key, N = g.LongCount() }), q => q.Count()).Message).Contains("Count after Select");
+        await Assert.That(Refused(() => NodesOf<Obj>().GroupBy(o => o.Loc).Select(g => new { g.Key, N = g.LongCount() }).Where(x => x.N > 1)).Message).Contains("HAVING");
     }
 
     /// <summary>Translation reads closures when it runs, so the same query re-translated after the variable changes carries the new value.</summary>

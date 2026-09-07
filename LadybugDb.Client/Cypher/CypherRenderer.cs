@@ -114,6 +114,10 @@ internal static class CypherRenderer
                     Text.Append(m.Optional ? "OPTIONAL MATCH " : "MATCH ");
                     AppendList(m.Paths, AppendPath);
                     break;
+                case RawMatchClause r:
+                    Text.Append("MATCH ").Append(r.Pattern.Trim());
+                    foreach (var (name, value) in r.Parameters) BindNamed(name, value);
+                    break;
                 case WhereClause w:
                     Text.Append("WHERE ");
                     AppendExpr(w.Predicate);

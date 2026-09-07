@@ -432,6 +432,16 @@ public abstract record Clause;
 /// <param name="Optional"><see langword="true"/> for <c>OPTIONAL MATCH</c>.</param>
 public sealed record MatchClause(IReadOnlyList<PatternPath> Paths, bool Optional) : Clause;
 
+/// <summary>
+/// <c>MATCH pattern</c> with the pattern text written by the caller and rendered verbatim - the
+/// escape hatch for a shape the AST does not model. The <c>$name</c> placeholders in it bind from
+/// <paramref name="Parameters"/> under the same rules as <see cref="ParameterExpr"/>: plain names,
+/// not of the reserved form <c>p&lt;digits&gt;</c>.
+/// </summary>
+/// <param name="Pattern">The text after <c>MATCH</c>, verbatim. The caller answers for its validity; the engine reports a parse error as it would for any statement.</param>
+/// <param name="Parameters">The values of the pattern's <c>$name</c> placeholders, keyed without the <c>$</c>.</param>
+public sealed record RawMatchClause(string Pattern, IReadOnlyDictionary<string, object?> Parameters) : Clause;
+
 /// <summary><c>WHERE predicate</c>.</summary>
 /// <param name="Predicate">The predicate.</param>
 public sealed record WhereClause(Expr Predicate) : Clause;

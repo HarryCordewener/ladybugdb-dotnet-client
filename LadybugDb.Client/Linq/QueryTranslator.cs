@@ -50,6 +50,21 @@ internal static class QueryTranslator
         return new Translation(schema, holder.Root, calls).Run();
     }
 
+    /// <summary>Whether <paramref name="pattern"/> mentions <paramref name="alias"/> as a whole identifier - <c>(n:Object)</c> mentions <c>n</c>, <c>(n1:Object)</c> does not.</summary>
+    internal static bool MentionsVariable(string pattern, string alias)
+    {
+        for (var at = pattern.IndexOf(alias, StringComparison.Ordinal); at >= 0; at = pattern.IndexOf(alias, at + 1, StringComparison.Ordinal))
+        {
+            var before = at == 0 ? ' ' : pattern[at - 1];
+            var after = at + alias.Length == pattern.Length ? ' ' : pattern[at + alias.Length];
+            if (!IsIdentifierChar(before) && !IsIdentifierChar(after)) return true;
+        }
+
+        return false;
+
+        static bool IsIdentifierChar(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
+    }
+
     /// <summary>The exception every refusal raises: names the sub-expression and the escape hatch.</summary>
     internal static NotSupportedException Refuse(Expression expression, string reason) => Refuse(expression.ToString(), reason);
 
@@ -91,8 +106,10 @@ internal static class QueryTranslator
         private Type _elementType = null!;
         private Stage _stage = Stage.Matching;
         private Terminal _terminal = Terminal.Sequence;
-        private int _nodeCount;
-        private int _relCount;
+        private MethodCallExpression? _groupBy;
+        private bool _grouped;
+        private int _nextNode = 1;
+        private int _nextRel;
 
         internal Translation(LadybugSchema schema, QueryRoot root, IReadOnlyList<MethodCallExpression> calls)
         {
@@ -105,13 +122,19 @@ internal static class QueryTranslator
         internal TranslatedQuery Run()
         {
             var node = _schema.Node(_root.ElementType);
-            var alias = RootAlias();
-            _path = CypherDsl.Node(node.Table, alias).ToPatternPath();
+            var alias = _root is MatchRoot raw ? raw.Variable : RootAlias();
+            // A caller-written pattern already binds the variable; the steps continue from a bare reference to it.
+            _path = (_root is MatchRoot ? CypherDsl.NodeRef(alias) : CypherDsl.Node(node.Table, alias)).ToPatternPath();
             _current = new NodeBinding(alias, node);
             _shape = new NodeShape(node);
             _elementType = _root.ElementType;
 
             foreach (var call in _calls) Apply(call);
+
+            if (_current is GroupBinding)
+            {
+                throw Refuse(_groupBy!, "GroupBy needs a Select projecting g.Key and aggregates (g.Count(), g.Sum(x => ...), ...); Cypher groups implicitly in RETURN, so there is no grouped row to return whole");
+            }
 
             return new TranslatedQuery(Build().Render(), _elementType, _shape, _terminal);
         }
@@ -147,7 +170,8 @@ internal static class QueryTranslator
 
         private Query Build()
         {
-            var builder = CypherDsl.Match(_path);
+            var builder = _root is MatchRoot raw ? CypherDsl.MatchRaw(raw.Pattern, raw.Parameters) : CypherDsl.Match(_path);
+            if (_root is MatchRoot && _path.Steps.Count > 0) builder = builder.Match(_path);
             if (_where is not null) builder = builder.Where(_where);
 
             switch (_terminal)
@@ -183,6 +207,11 @@ internal static class QueryTranslator
         private void Apply(MethodCallExpression call)
         {
             var method = call.Method;
+            if (_current is GroupBinding && method.Name != nameof(Queryable.Select))
+            {
+                throw Refuse(call, $"{method.Name} after GroupBy has no grouped rows to work on - Cypher groups implicitly in RETURN; filter, traverse and sort before GroupBy, or sort after the Select that projects the groups");
+            }
+
             if (method.DeclaringType == typeof(GraphSteps))
             {
                 ApplyStep(call);
@@ -235,6 +264,14 @@ internal static class QueryTranslator
                     Require(call, Stage.Projected);
                     _distinct = true;
                     _stage = Stage.Distinct;
+                    break;
+                case nameof(Queryable.GroupBy):
+                    if (_stage != Stage.Matching) throw Refuse(call, "GroupBy after Select/Distinct/Skip/Take would need a WITH stage; group first");
+                    if (call.Arguments.Count != 2) throw Refuse(call, "only GroupBy(keySelector) is translated; shape the elements inside the Select's aggregates instead");
+                    var keySelector = Lambda(call, 1);
+                    _current = new GroupBinding(Bind(keySelector).Value(keySelector.Body), _current);
+                    _elementType = ElementTypeOf(method.ReturnType);
+                    _groupBy = call;
                     break;
                 case nameof(Queryable.Count):
                 case nameof(Queryable.LongCount):
@@ -306,8 +343,8 @@ internal static class QueryTranslator
             CheckDirection(rel, from.Node, target, outgoing, call);
 
             var withRel = name is nameof(GraphSteps.OutWithRel) or nameof(GraphSteps.InWithRel);
-            var relAlias = withRel ? "r" + _relCount++ : null;
-            var targetAlias = "n" + ++_nodeCount;
+            var relAlias = withRel ? FreshAlias("r", ref _nextRel) : null;
+            var targetAlias = FreshAlias("n", ref _nextNode);
             int? min = null;
             int? max = null;
             if (call.Arguments.Count == 3)
@@ -327,6 +364,15 @@ internal static class QueryTranslator
             _current = tuple;
             _elementType = ElementTypeOf(method.ReturnType);
             _shape = new TupleShape(_elementType, tuple);
+        }
+
+        /// <summary>The next unused alias with <paramref name="prefix"/> - skipping any a caller-written pattern already uses, so a step never rebinds the caller's variable.</summary>
+        private string FreshAlias(string prefix, ref int next)
+        {
+            string alias;
+            do alias = prefix + (next++).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            while (_root is MatchRoot raw && MentionsVariable(raw.Pattern, alias));
+            return alias;
         }
 
         /// <summary>The node the next step continues from: the current node, or the last node reached by the previous step.</summary>
@@ -364,7 +410,7 @@ internal static class QueryTranslator
 
             // The far node's variable is the predicate's parameter name, as the root's is, so
             // `x => x.Dbref == 3` reads back as `(x:Object) WHERE x.dbref = $p0`.
-            var alias = predicate.Parameters[0].Name is { Length: > 0 } n && Identifier.IsPlain(n) && n != from.Alias ? n : "x" + _nodeCount;
+            var alias = predicate.Parameters[0].Name is { Length: > 0 } n && Identifier.IsPlain(n) && n != from.Alias ? n : "x" + _nextNode;
             _scope[predicate.Parameters[0]] = new NodeBinding(alias, target);
             var condition = new ExpressionTranslator(_scope).Predicate(predicate.Body);
 
@@ -389,6 +435,7 @@ internal static class QueryTranslator
 
         private void AddWhere(LambdaExpression predicate)
         {
+            if (_grouped) throw Refuse(predicate, "a filter after a grouped Select is a HAVING, which needs a WITH stage; filter before GroupBy, or write the Cypher");
             var expr = Bind(predicate).Predicate(predicate.Body);
             _where = _where is null ? expr : _where.And(expr);
         }
@@ -415,6 +462,7 @@ internal static class QueryTranslator
         [RequiresUnreferencedCode("Reads the projected type's constructor by reflection.")]
         private void Project(LambdaExpression selector)
         {
+            var group = _current as GroupBinding;
             var translator = Bind(selector);
             var body = selector.Body;
             _elementType = selector.ReturnType;
@@ -434,6 +482,8 @@ internal static class QueryTranslator
                         _shape = new TupleShape(_elementType, tuple);
                         _current = tuple;
                         return;
+                    case GroupBinding:
+                        throw Refuse(body, "a group cannot be returned whole; project g.Key and aggregates over g");
                     default:
                         throw Refuse(body, "only a node, or a step's tuple, can be returned whole");
                 }
@@ -456,7 +506,36 @@ internal static class QueryTranslator
                     _current = new ScalarBinding(value);
                     break;
             }
+
+            if (group is null) return;
+            CheckGrouped(body);
+            _grouped = true;
+
+            // After an aggregating RETURN the engine resolves ORDER BY against the projected names
+            // only (measured: "Variable o is not in scope"), so later sort keys name the columns.
+            _current = new ProjectedBinding(_projection!.ToDictionary(i => ((AliasExpr)i).Alias, i => (Expr)CypherDsl.Variable(((AliasExpr)i).Alias), StringComparer.Ordinal));
         }
+
+        /// <summary>
+        /// Cypher has no GROUP BY: <c>RETURN</c> groups by its non-aggregate items. A projection
+        /// after <c>GroupBy</c> therefore needs both kinds - without the key the aggregate would run
+        /// over every row, without an aggregate the key would repeat once per row - for the rows to
+        /// mean what the LINQ says.
+        /// </summary>
+        private void CheckGrouped(Expression body)
+        {
+            var items = _projection!.Select(i => ((AliasExpr)i).Expression).ToList();
+            if (!items.Any(IsAggregate)) throw Refuse(body, "a projection after GroupBy needs an aggregate (g.Count(), g.Sum(x => ...), g.Min, g.Max, g.Average) alongside g.Key; for distinct keys alone use Select then Distinct");
+            if (items.All(IsAggregate)) throw Refuse(body, "a projection after GroupBy must include g.Key, or the aggregate would run over every row rather than per group");
+        }
+
+        private static bool IsAggregate(Expr expr) => expr switch
+        {
+            CountExpr => true,
+            FunctionExpr { Name: "sum" or "min" or "max" or "avg" } => true,
+            CastExpr c => IsAggregate(c.Operand),
+            _ => false,
+        };
 
         private void ProjectMembers(ExpressionTranslator translator, IReadOnlyList<Expression> arguments, string[] names)
         {
@@ -490,10 +569,17 @@ internal static class QueryTranslator
 
             var value = translator.Value(argument);
 
-            // string.Length is an int; size() is INT64, which the row mapping refuses to narrow.
-            // The cast makes the column the type the C# says it is. Predicates need no cast - the
-            // engine compares INT64 to a bound value at any width.
-            return argument.Type == typeof(int) && value is FunctionExpr { Name: "size" } ? value.Cast("INT32") : value;
+            // size() and count(*) are INT64 where the C# says int, and sum() over INT64 is INT128
+            // (measured) where the C# says long: widths the row mapping refuses to narrow. The cast
+            // makes the column the type the C# says it is. Predicates need no cast - the engine
+            // compares INT64 to a bound value at any width.
+            var clrType = Nullable.GetUnderlyingType(argument.Type) ?? argument.Type;
+            return value switch
+            {
+                FunctionExpr { Name: "size" } or CountExpr when clrType == typeof(int) => value.Cast("INT32"),
+                FunctionExpr { Name: "sum" } when EngineTypeMap.DdlTypeName(clrType) is { } sumType => value.Cast(sumType),
+                _ => value,
+            };
         }
 
         /// <summary>The column alias for a scalar projection: the member or method name where there is one, so the row reads like the C#.</summary>
@@ -512,17 +598,17 @@ internal static class QueryTranslator
             if (index < call.Arguments.Count && TryLambda(call.Arguments[index], out var lambda)) return lambda;
             throw Refuse(call, $"argument {index} of {call.Method.Name} is not a lambda");
         }
+    }
 
-        private static bool TryLambda(Expression argument, [NotNullWhen(true)] out LambdaExpression? lambda)
+    private static bool TryLambda(Expression argument, [NotNullWhen(true)] out LambdaExpression? lambda)
+    {
+        lambda = argument switch
         {
-            lambda = argument switch
-            {
-                UnaryExpression { NodeType: ExpressionType.Quote, Operand: LambdaExpression l } => l,
-                LambdaExpression l => l,
-                _ => null,
-            };
-            return lambda is not null;
-        }
+            UnaryExpression { NodeType: ExpressionType.Quote, Operand: LambdaExpression l } => l,
+            LambdaExpression l => l,
+            _ => null,
+        };
+        return lambda is not null;
     }
 
     // ------------------------------------------------------------------------ expressions
@@ -642,6 +728,7 @@ internal static class QueryTranslator
                     NodeBinding n => CypherDsl.Variable(n.Alias),
                     RelBinding r => CypherDsl.Variable(r.Alias),
                     ScalarBinding s => s.Value,
+                    GroupBinding => throw Refuse(expression, "a group has no value of its own; use g.Key or an aggregate over g"),
                     _ => throw Refuse(expression, "a tuple of variables has no value of its own; pick one of its items"),
                 };
             }
@@ -661,6 +748,8 @@ internal static class QueryTranslator
                     return Value(u.Operand).Negate();
                 case MemberExpression m when m.Expression is not null && TryResolveBinding(m.Expression, out var owner):
                     return Property(m, owner);
+                case MethodCallExpression { Method.DeclaringType: var t, Arguments.Count: > 0 } call when t == typeof(Enumerable) && TryResolveBinding(call.Arguments[0], out var grouped) && grouped is GroupBinding group:
+                    return Aggregate(call, group);
                 case MemberExpression { Member.Name: nameof(Nullable<int>.Value) } m when IsNullable(m.Expression?.Type):
                     return Value(m.Expression!);
                 case MemberExpression { Member.Name: nameof(string.Length) } m when m.Expression?.Type == typeof(string):
@@ -682,10 +771,41 @@ internal static class QueryTranslator
             throw Refuse(expression, "not a translatable value");
         }
 
+        /// <summary><c>g.Count()</c>, <c>g.LongCount()</c>, and <c>g.Sum/Min/Max/Average(x =&gt; ...)</c> over a group, as the Cypher aggregates.</summary>
+        private Expr Aggregate(MethodCallExpression call, GroupBinding group)
+        {
+            var name = call.Method.Name;
+            if (name is nameof(Enumerable.Count) or nameof(Enumerable.LongCount))
+            {
+                if (call.Arguments.Count != 1) throw Refuse(call, "Count with a predicate inside a grouped projection is not translated; filter with Where before GroupBy");
+                return CypherDsl.CountAll();
+            }
+
+            var function = name switch
+            {
+                nameof(Enumerable.Sum) => "sum",
+                nameof(Enumerable.Min) => "min",
+                nameof(Enumerable.Max) => "max",
+                nameof(Enumerable.Average) => "avg",
+                _ => throw Refuse(call, $"'{name}' is not an aggregate this provider translates; Count(), LongCount(), Sum, Min, Max and Average with a selector are"),
+            };
+            if (call.Arguments.Count != 2 || !TryLambda(call.Arguments[1], out var selector) || selector.Parameters.Count != 1)
+            {
+                throw Refuse(call, $"{name} over a group needs a selector, g.{name}(x => x.Property)");
+            }
+
+            scope[selector.Parameters[0]] = group.Element;
+            return CypherDsl.Func(function, Value(selector.Body));
+        }
+
         private static Expr Property(MemberExpression member, Binding owner)
         {
             switch (owner)
             {
+                case GroupBinding g:
+                    return member.Member.Name == nameof(IGrouping<int, int>.Key)
+                        ? g.Key
+                        : throw Refuse(member, "only Key and the aggregates (Count, Sum, Min, Max, Average) are available on a group");
                 case NodeBinding n:
                     return n.Node.FindProperty(member.Member.Name) is { } np
                         ? CypherDsl.Prop(n.Alias, np.Column)

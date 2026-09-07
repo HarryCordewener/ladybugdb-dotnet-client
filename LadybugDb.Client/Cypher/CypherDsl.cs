@@ -135,6 +135,11 @@ public static class CypherDsl
     /// <param name="paths">The patterns.</param>
     public static QueryBuilder OptionalMatch(params PatternPath[] paths) => QueryBuilder.Empty.OptionalMatch(paths);
 
+    /// <summary>Starts a query with <c>MATCH pattern</c>, the pattern written as text. See <see cref="RawMatchClause"/>.</summary>
+    /// <param name="pattern">The text after <c>MATCH</c>, verbatim.</param>
+    /// <param name="parameters">The values of the pattern's <c>$name</c> placeholders, or <see langword="null"/> when it has none.</param>
+    public static QueryBuilder MatchRaw(string pattern, IReadOnlyDictionary<string, object?>? parameters = null) => QueryBuilder.Empty.MatchRaw(pattern, parameters);
+
     /// <summary>Starts a query with <c>UNWIND list AS alias</c>.</summary>
     /// <param name="list">The list expression.</param>
     /// <param name="alias">The element variable.</param>
@@ -171,6 +176,15 @@ public sealed class QueryBuilder
     /// <summary>Appends <c>OPTIONAL MATCH path, ...</c>.</summary>
     /// <param name="paths">The patterns.</param>
     public QueryBuilder OptionalMatch(params PatternPath[] paths) => Append(new MatchClause(paths, Optional: true));
+
+    /// <summary>Appends <c>MATCH pattern</c>, the pattern written as text. See <see cref="RawMatchClause"/>.</summary>
+    /// <param name="pattern">The text after <c>MATCH</c>, verbatim.</param>
+    /// <param name="parameters">The values of the pattern's <c>$name</c> placeholders, or <see langword="null"/> when it has none.</param>
+    public QueryBuilder MatchRaw(string pattern, IReadOnlyDictionary<string, object?>? parameters = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
+        return Append(new RawMatchClause(pattern, parameters ?? new Dictionary<string, object?>()));
+    }
 
     /// <summary>
     /// Appends <c>WHERE predicate</c> - or, when the previous clause is already a <c>WHERE</c>,

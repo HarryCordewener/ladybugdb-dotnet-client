@@ -105,6 +105,14 @@ public class RendererEngineTests
     });
 
     [Test]
+    public Task MatchRaw_RunsTheCallersPattern() => Check(async conn =>
+    {
+        var rows = await Run(conn, CypherDsl.MatchRaw("(o:Object)-[:Located]->(r:Object {dbref: $room})", new Dictionary<string, object?> { ["room"] = 2L })
+            .Return(O.Prop("name").As("Name")));
+        await Assert.That(rows.Select(r => r.GetString("Name"))).IsEquivalentTo(["n1"]);
+    });
+
+    [Test]
     public Task With_AggregateAndVariables() => Check(async conn =>
     {
         var rows = await Run(conn, CypherDsl.Match(O)

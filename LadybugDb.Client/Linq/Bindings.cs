@@ -15,6 +15,16 @@ internal sealed record RelBinding(string Alias, RelDescriptor Rel) : Binding;
 /// <summary>A <see cref="ValueTuple"/> of bindings, as a graph step yields: <c>p.Item1</c> (<c>Source</c>), <c>p.Item2</c> (<c>Target</c>), ...</summary>
 internal sealed record TupleBinding(IReadOnlyList<Binding> Items) : Binding;
 
+/// <summary>
+/// The groups of a <c>GroupBy</c>: <c>g.Key</c> renders <paramref name="Key"/>, and the aggregates
+/// over <c>g</c> (<c>g.Count()</c>, <c>g.Sum(x =&gt; ...)</c>) render Cypher's, with the selector's
+/// parameter bound to <paramref name="Element"/>. Cypher groups implicitly - <c>RETURN key,
+/// count(*)</c> - so the binding lives only until the <c>Select</c> that projects it.
+/// </summary>
+/// <param name="Key">The grouping key expression.</param>
+/// <param name="Element">What each element of a group was before grouping.</param>
+internal sealed record GroupBinding(Expr Key, Binding Element) : Binding;
+
 /// <summary>The result of a <c>Select</c> with named members: <c>x.Name</c> renders the expression projected as <c>Name</c>.</summary>
 internal sealed record ProjectedBinding(IReadOnlyDictionary<string, Expr> Members) : Binding;
 

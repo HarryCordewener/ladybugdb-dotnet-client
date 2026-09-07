@@ -182,6 +182,22 @@ public class RendererTests
     }
 
     [Test]
+    public async Task MatchRaw_RendersThePatternVerbatim_AndBindsItsParameters()
+    {
+        var q = CypherDsl.MatchRaw("(r:Object {dbref: $room})-[:Located]->(o:Object)", new Dictionary<string, object?> { ["room"] = 2L })
+            .Where(CypherDsl.Prop("o", "dbref").Gt(CypherDsl.Literal(0L)))
+            .Return(CypherDsl.Prop("o", "name").As("Name")).Build();
+        var text = q.Render();
+        await Assert.That(text.Cypher).IsEqualTo("MATCH (r:Object {dbref: $room})-[:Located]->(o:Object) WHERE o.dbref > $p0 RETURN o.name AS Name");
+        await Assert.That(text.Parameters["room"]).IsEqualTo(2L);
+        await Assert.That(text.Parameters["p0"]).IsEqualTo(0L);
+
+        var reserved = CypherDsl.MatchRaw("(o:Object {dbref: $p0})", new Dictionary<string, object?> { ["p0"] = 2L }).Return(CypherDsl.Variable("o")).Build();
+        Assert.Throws<InvalidOperationException>(() => reserved.Render());
+        Assert.Throws<ArgumentException>(() => CypherDsl.MatchRaw(" "));
+    }
+
+    [Test]
     public async Task Exists_RendersSubquery()
     {
         var sub = CypherDsl.Match(CypherDsl.NodeRef("o").RelTo("Located", CypherDsl.Node("Object", "x")))
