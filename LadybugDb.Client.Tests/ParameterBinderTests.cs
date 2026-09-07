@@ -324,4 +324,56 @@ public class ParameterBinderTests
         await Assert.That(Assert.Throws<ArgumentException>(() => Enumerate(new NoProperties()))!.Message)
             .Contains(nameof(NoProperties));
     }
+
+    // ------------------------------------------------- dictionaries that are not the two fast paths
+
+    /// <summary>
+    /// A dictionary implementing only <see cref="IReadOnlyDictionary{TKey,TValue}"/> at a value
+    /// type other than <c>object?</c>, and no non-generic <see cref="IDictionary"/>. The public
+    /// contract accepts any string-keyed dictionary; before the generic reader it fell through to
+    /// the property path and was rejected as a sequence.
+    /// </summary>
+    private sealed class TypedReadOnlyDictionary(Dictionary<string, long> inner) : IReadOnlyDictionary<string, long>
+    {
+        public long this[string key] => inner[key];
+        public IEnumerable<string> Keys => inner.Keys;
+        public IEnumerable<long> Values => inner.Values;
+        public int Count => inner.Count;
+        public bool ContainsKey(string key) => inner.ContainsKey(key);
+        public bool TryGetValue(string key, out long value) => inner.TryGetValue(key, out value);
+        public IEnumerator<KeyValuePair<string, long>> GetEnumerator() => inner.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [Test]
+    public async Task ACustomStringKeyedReadOnlyDictionary_IsEnumerated()
+    {
+        var pairs = ParameterBinder.Enumerate(
+            new TypedReadOnlyDictionary(new Dictionary<string, long> { ["dbref"] = 42, ["parent"] = 1 }));
+
+        await Assert.That(pairs.Select(p => p.Key).Order()).IsEquivalentTo(new[] { "dbref", "parent" });
+        await Assert.That(pairs.Single(p => p.Key == "dbref").Value).IsEqualTo(42L);
+    }
+
+    [Test]
+    public async Task AnExpandoObject_IsEnumerated()
+    {
+        dynamic expando = new System.Dynamic.ExpandoObject();
+        expando.dbref = 42L;
+        expando.name = "Limbo";
+
+        var pairs = ParameterBinder.Enumerate((object)expando);
+
+        await Assert.That(pairs.Select(p => p.Key).Order()).IsEquivalentTo(new[] { "dbref", "name" });
+        await Assert.That(pairs.Single(p => p.Key == "name").Value).IsEqualTo("Limbo");
+    }
+
+    [Test]
+    public async Task AGenericDictionaryAtANarrowValueType_IsEnumerated()
+    {
+        var pairs = ParameterBinder.Enumerate(new Dictionary<string, int> { ["n"] = 7 });
+
+        await Assert.That(pairs.Single().Key).IsEqualTo("n");
+        await Assert.That(pairs.Single().Value).IsEqualTo(7);
+    }
 }

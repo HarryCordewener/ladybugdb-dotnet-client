@@ -24,12 +24,33 @@ public class ParameterObjectTests
     private const string Schema =
         "CREATE NODE TABLE O(id INT64, name STRING, score DOUBLE, PRIMARY KEY(id))";
 
+    /// <remarks>
+    /// Ownership passes to the caller only on the way out; a throw in here would otherwise leave
+    /// the database and connection alive until finalization, where they race
+    /// <see cref="TestDatabase.Cleanup"/> for the files.
+    /// </remarks>
     private static async Task<(LadybugDatabase Db, LadybugConnection Conn)> Open(string path)
     {
         var db = new LadybugDatabase(path);
-        var conn = await db.ConnectAsync();
-        await conn.ExecuteAsync(Schema);
-        return (db, conn);
+        try
+        {
+            var conn = await db.ConnectAsync();
+            try
+            {
+                await conn.ExecuteAsync(Schema);
+                return (db, conn);
+            }
+            catch
+            {
+                await conn.DisposeAsync();
+                throw;
+            }
+        }
+        catch
+        {
+            db.Dispose();
+            throw;
+        }
     }
 
     // ------------------------------------------------------------------ both forms, both entry points
@@ -573,6 +594,12 @@ public class ParameterObjectTests
                 // ("CancellationToken ... is a single value") rather than run.
                 await conn.ExecuteAsync("MATCH (n:O) RETURN count(n)");
                 await conn.ExecuteAsync("MATCH (n:O) RETURN count(n)", ct);
+
+                // The same two overloads on QueryAsync, which this test's name is about: reached
+                // through ExecuteAsync above only indirectly, so a regression in either QueryAsync
+                // signature would otherwise pass here.
+                await using (var bare = await conn.QueryAsync("MATCH (n:O) RETURN count(n)")) { _ = bare.HasNext; }
+                await using (var tokened = await conn.QueryAsync("MATCH (n:O) RETURN count(n)", ct)) { _ = tokened.HasNext; }
 
                 // With parameters, and with parameters plus a token.
                 await conn.ExecuteAsync(

@@ -342,6 +342,20 @@ public sealed partial class LadybugConnection : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(parameters);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // This overload executes through a prepared statement, which is not the path that tracks
+        // transaction state - so an unclassified BEGIN TRANSACTION here would open a transaction
+        // this connection knew nothing about, and the next guarded BEGIN would then reach the
+        // engine and destroy it, discarding its writes. Transaction control takes no parameters,
+        // so refusing is both safe and the whole answer.
+        if (TransactionStatement.Classify(cypher) != TransactionEffect.None)
+        {
+            throw new ArgumentException(
+                "Transaction-control statements (BEGIN TRANSACTION, COMMIT, ROLLBACK) take no parameters " +
+                "and are not run through the parameterized overloads, which would open or close a " +
+                "transaction this connection could not track. Use BeginTransactionAsync, or the " +
+                "parameterless QueryAsync/ExecuteAsync overload.", nameof(cypher));
+        }
+
         // Enumerated once: the names gate reuse (StatementCache<T>.Entry.ParameterNames) and the
         // binder takes the same list, so the parameters object is reflected over once per call.
         var pairs = ParameterBinder.Enumerate(parameters);

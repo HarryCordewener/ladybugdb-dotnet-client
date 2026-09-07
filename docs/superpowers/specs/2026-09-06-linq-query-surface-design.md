@@ -162,7 +162,7 @@ text):
 | C# | Cypher |
 |---|---|
 | `==`, `!=`, `<`, `<=`, `>`, `>=` between a member and a constant, closure, or another member | the same operator |
-| `&&`, `||`, `!` on translatable sub-expressions | `AND`, `OR`, `NOT` |
+| `&&`, `\|\|`, `!` on translatable sub-expressions | `AND`, `OR`, `NOT` |
 | `x.Prop == null`, `!= null` | `IS NULL`, `IS NOT NULL` |
 | `x.S.StartsWith(c)`, `.EndsWith(c)`, `.Contains(c)` (ordinal only) | `STARTS WITH`, `ENDS WITH`, `CONTAINS` |
 | `collection.Contains(x.Prop)` where collection is a closure | `x.prop IN $p` |

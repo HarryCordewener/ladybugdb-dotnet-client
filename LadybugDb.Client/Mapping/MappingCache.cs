@@ -31,10 +31,11 @@ namespace LadybugDb.Client.Mapping;
 /// correct.
 /// </para>
 /// <para>
-/// The cache is unbounded and never evicts. It is bounded in practice by the number of distinct
-/// (<c>T</c>, column shape) pairs a program's queries can produce, which is a property of the source
-/// - not of the data, the row count, or any value in a row - so it cannot grow with runtime input
-/// the way a value-keyed cache could.
+/// A program's own queries produce a bounded number of distinct (<c>T</c>, column shape) pairs, so
+/// in normal use this cache stops growing on its own. It is not guaranteed, though: a caller that
+/// generates aliases (<c>RETURN ... AS x123</c>) makes the shape a function of runtime input, and an
+/// unbounded cache would then grow for the life of the process. <see cref="Capacity"/> is the
+/// backstop - see it for what happens on reaching it.
 /// </para>
 /// </remarks>
 internal static class MappingCache
@@ -46,6 +47,16 @@ internal static class MappingCache
     /// generic over every <c>T</c>.
     /// </summary>
     private static readonly ConcurrentDictionary<PlanKey, object> Plans = new();
+
+    /// <summary>
+    /// How many plans may be retained. On reaching it the cache is cleared rather than evicted
+    /// one entry at a time: plans are immutable and rebuilt on demand, so a clear costs the next
+    /// query of each live shape one reflection pass and nothing else, and it needs no per-entry
+    /// bookkeeping on a path every row goes through. A program whose shapes are source-bounded (the
+    /// normal case) never reaches this; one that generates aliases pays a periodic rebuild instead
+    /// of unbounded growth.
+    /// </summary>
+    internal const int Capacity = 1024;
 
     private static long _plansBuilt;
 
@@ -81,6 +92,8 @@ internal static class MappingCache
         // run it more than once for the same key; a duplicate plan is harmless - plans are
         // immutable and value-equivalent - and PlansBuilt counts reflection passes, which is
         // exactly what it is there to measure.
+        if (Plans.Count >= Capacity) Plans.Clear();
+
         return (RowPlan<T>)Plans.GetOrAdd(new PlanKey(typeof(T), columnNames), static key => Build<T>(key));
     }
 

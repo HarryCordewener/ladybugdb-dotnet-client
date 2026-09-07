@@ -27,6 +27,14 @@ namespace LadybugDb.Client.Mapping;
 /// }
 /// </code>
 /// <para>
+/// <b>What resolving early does and does not catch.</b> Everything about the column <em>shape</em>:
+/// an unmatched constructor, an ambiguous one, a scalar target against more than one column. Not a
+/// type mismatch - conversion is per value, so a target whose name matches a column it cannot read
+/// from raises on the first row and, for an empty result, never. Predicting that from the column
+/// metadata would take a second table of engine-type to CLR-type reachability maintained beside
+/// <see cref="Converters"/> and free to drift from the conversions it claims to describe.
+/// </para>
+/// <para>
 /// <b>Resolve from the <em>result</em>'s column shape, not from the first row</b> - which is what
 /// <see cref="LadybugConnection.Select{T}"/> does. The two are equivalent for every result that has a
 /// first row; they differ for one that has none. Resolving from a row means a query returning

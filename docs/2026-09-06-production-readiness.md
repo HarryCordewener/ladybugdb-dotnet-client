@@ -185,7 +185,7 @@ is optional; for an outside consumer it is what "production" means. The research
 the OpenTelemetry database conventions (stable since 1.33) and the Aspire client-integration shape;
 put them in an `Extensions` package so the core stays dependency-free.
 
-### Platforms — six packaged, two verified
+### Platforms — five packaged, two verified
 
 linux-x64 and win-x64 run in CI. linux-arm64, osx-x64 and osx-arm64 come from upstream's packages
 and are never executed here (win-arm64 has no upstream package; see the packaging addendum). A GitHub-hosted macOS runner and an arm64 Linux runner both

@@ -13,7 +13,10 @@ the cited page that day; "inference" means reasoning not confirmed on a page.
 | `LadybugDb.Client` + `LadybugDb.Client.Native` | this repository | 0.1.0-alpha, unpublished | `net10.0` | See the readiness review. (Later the same day the native package was retired in favour of upstream's `LadybugDB.Native` packages.) |
 
 Upstream `LadybugDB/ladybug` v0.20.2 (2026-09-02) ships six dynamic-library RIDs; the official binding
-packages five (no win-arm64); this client fetches all six.
+packages five (no win-arm64). *(Historical: at the time of this survey this client fetched all six
+into its own `LadybugDb.Client.Native` package. It was retired the same day in favour of upstream's
+packages, so the client now covers the five they publish - see the readiness report's packaging
+addendum.)*
 
 Consequences: the README's "upstream ships no .NET binding" statement is now false and must be
 replaced by a positioning statement. Everything the official binding already does (LibraryImport,
@@ -82,7 +85,8 @@ contribution guide, reproducible build script), not engineering.
 - Peers: SQLitePCLRaw (core + provider + lib + bundle), DuckDB.NET (`Bindings` vs `Bindings.Full`,
   natives downloaded at pack time), LibGit2Sharp (`NativeBinaries` package), official LadybugDB
   (managed with no native dependency + per-RID packages + meta). This client's one-package-for-all-RIDs
-  `LadybugDb.Client.Native` (roughly 130 MB of binaries) is the least flexible of these shapes.
+  `LadybugDb.Client.Native` (roughly 130 MB of binaries) was the least flexible of these shapes.
+  *(Historical: retired the same day; the client now consumes upstream's per-RID packages.)*
 - macOS arm64: upstream dylibs are ad-hoc signed by the linker; they load from a NuGet extraction
   (no quarantine attribute). A consumer who notarizes must re-sign. Do not sign upstream binaries
   yourself; it would break the SHA256 verification.

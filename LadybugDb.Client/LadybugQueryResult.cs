@@ -140,6 +140,13 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEn
         Interlocked.Increment(ref _liveCount);
     }
 
+    /// <summary>
+    /// This result's own handle, for the interop layer. Dereferencing it requires the same leases
+    /// every native call in this type takes - the owning database's, the root result's, and this
+    /// handle's own - held for the whole call; taking them in any other combination is how a
+    /// disposed ancestor's freed storage gets dereferenced, which is a crash rather than an
+    /// exception. See <see cref="HasNext"/> for the shape.
+    /// </summary>
     internal LbugQueryResultHandle Handle => _handle;
 
     /// <summary>

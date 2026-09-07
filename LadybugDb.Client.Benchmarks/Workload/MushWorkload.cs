@@ -38,13 +38,29 @@ internal static class MushWorkload
         var models = new List<string> { "map", "edge" };
         for (var i = 0; i < args.Length; i++)
         {
-            switch (args[i])
+            // Every option here takes a value; a trailing option without one is a usage error, not
+            // an IndexOutOfRangeException.
+            string Value(string option)
             {
-                case "--sizes": sizes = args[++i].Split(',').Select(s => int.Parse(s, CultureInfo.InvariantCulture)).ToList(); break;
-                case "--samples": samples = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
-                case "--output": output = args[++i]; break;
-                case "--models": models = args[++i].Split(',').ToList(); break;
-                default: Console.Error.WriteLine($"unknown argument {args[i]}"); return 2;
+                if (i + 1 >= args.Length) throw new ArgumentException($"{option} needs a value.");
+                return args[++i];
+            }
+
+            try
+            {
+                switch (args[i])
+                {
+                    case "--sizes": sizes = [.. Value("--sizes").Split(',').Select(s => int.Parse(s, CultureInfo.InvariantCulture))]; break;
+                    case "--samples": samples = int.Parse(Value("--samples"), CultureInfo.InvariantCulture); break;
+                    case "--output": output = Value("--output"); break;
+                    case "--models": models = [.. Value("--models").Split(',')]; break;
+                    default: Console.Error.WriteLine($"unknown argument {args[i]}"); return 2;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 2;
             }
         }
 

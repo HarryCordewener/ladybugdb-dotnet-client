@@ -213,19 +213,19 @@ All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
 
 | Method | Cypher parameter type | Notes |
 |---|---|---|
-| `Bind(string, bool)` | `BOOL` | |
-| `Bind(string, sbyte)` | `INT8` | |
-| `Bind(string, short)` | `INT16` | |
-| `Bind(string, int)` | `INT32` | |
-| `Bind(string, long)` | `INT64` | |
-| `Bind(string, byte)` | `UINT8` | |
-| `Bind(string, ushort)` | `UINT16` | |
-| `Bind(string, uint)` | `UINT32` | |
-| `Bind(string, ulong)` | `UINT64` | |
-| `Bind(string, float)` | `FLOAT` | |
-| `Bind(string, double)` | `DOUBLE` | |
-| `Bind(string, string)` | `STRING` | |
-| `Bind(string, DateOnly)` | `DATE` | |
+| `Bind(string, bool)` | `BOOL` | - |
+| `Bind(string, sbyte)` | `INT8` | - |
+| `Bind(string, short)` | `INT16` | - |
+| `Bind(string, int)` | `INT32` | - |
+| `Bind(string, long)` | `INT64` | - |
+| `Bind(string, byte)` | `UINT8` | - |
+| `Bind(string, ushort)` | `UINT16` | - |
+| `Bind(string, uint)` | `UINT32` | - |
+| `Bind(string, ulong)` | `UINT64` | - |
+| `Bind(string, float)` | `FLOAT` | - |
+| `Bind(string, double)` | `DOUBLE` | - |
+| `Bind(string, string)` | `STRING` | - |
+| `Bind(string, DateOnly)` | `DATE` | - |
 | `Bind(string, TimeSpan)` | `INTERVAL` | Built via the engine's own `lbug_interval_from_difftime`. |
 | `Bind(string, DateTime)` | `TIMESTAMP` (microsecond) | `Local` normalized to UTC first; `Unspecified` assumed already UTC. |
 | `Bind(string, DateTimeOffset)` | `TIMESTAMP_TZ` | Uses `UtcTicks`; the engine does not retain a distinct source offset. |
@@ -1052,9 +1052,18 @@ Cypher.
 The first is a misspelt property: `o.nmae` matches nothing, and the message names both the column
 and the parameter left unmatched.
 
-A mismatched `T` is reported even when the query returns **no rows**. The projection is resolved from
-the result's column shape before the first row is read, precisely so that an empty result cannot
-silently "succeed" against a `T` that could never have mapped its columns.
+A `T` whose **columns** cannot match is reported even when the query returns **no rows**: the
+projection is resolved from the result's column shape before the first row is read, so an unmatched
+constructor, an ambiguous one, or a scalar target against a multi-column result all raise
+immediately rather than letting an empty result silently "succeed".
+
+A **type** mismatch is different. Conversion happens per value, so `record Person(long Name)` against
+a `STRING` column resolves a plan (the names match) and, on an empty result, yields nothing without
+complaint; the first row is what raises. The check is deliberately not duplicated over the column
+metadata: the conversion rules live in one place, in the converters themselves, and a second table
+of "which engine type reaches which CLR type" maintained beside them would be free to drift from the
+behaviour it claims to predict. If you need the type checked without rows, project one row
+(`LIMIT 1`) against real data in a test.
 
 ## LINQ
 

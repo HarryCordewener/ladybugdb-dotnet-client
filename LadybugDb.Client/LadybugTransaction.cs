@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 namespace LadybugDb.Client;
 
 /// <summary>
@@ -132,8 +133,11 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
     /// than a scoped execution path.
     /// </remarks>
     public ValueTask<LadybugQueryResult> QueryAsync(
-        string cypher, CancellationToken cancellationToken = default) =>
-        _connection.QueryAsync(cypher, cancellationToken);
+        string cypher, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.QueryAsync(cypher, cancellationToken);
+    }
 
     /// <summary>
     /// Runs a parameterized Cypher statement inside this transaction, by delegating to
@@ -147,8 +151,11 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
         "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
         "typed Bind overloads, when trimming.")]
     public ValueTask<LadybugQueryResult> QueryAsync(
-        string cypher, object parameters, CancellationToken cancellationToken = default) =>
-        _connection.QueryAsync(cypher, parameters, cancellationToken);
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.QueryAsync(cypher, parameters, cancellationToken);
+    }
 
     /// <summary>
     /// Runs a Cypher statement inside this transaction whose rows you do not need, by delegating to
@@ -157,8 +164,11 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
     /// <param name="cypher">The Cypher statement.</param>
     /// <param name="cancellationToken">Checked before the statement runs.</param>
     /// <returns>A task that completes when the statement has run and its result has been released.</returns>
-    public ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default) =>
-        _connection.ExecuteAsync(cypher, cancellationToken);
+    public ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.ExecuteAsync(cypher, cancellationToken);
+    }
 
     /// <summary>
     /// Runs a parameterized Cypher statement inside this transaction whose rows you do not need, by
@@ -172,8 +182,11 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
         "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
         "typed Bind overloads, when trimming.")]
     public ValueTask ExecuteAsync(
-        string cypher, object parameters, CancellationToken cancellationToken = default) =>
-        _connection.ExecuteAsync(cypher, parameters, cancellationToken);
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.ExecuteAsync(cypher, parameters, cancellationToken);
+    }
 
     /// <summary>
     /// Streams this transaction's rows projected into <typeparamref name="T"/>, by delegating to
@@ -187,8 +200,40 @@ public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
     [RequiresUnreferencedCode(
         "Projection resolves a constructor and column conversions by reflection.")]
     public IAsyncEnumerable<T> Select<T>(
-        string cypher, object? parameters = null, CancellationToken cancellationToken = default) =>
-        _connection.Select<T>(cypher, parameters, cancellationToken);
+        string cypher, object? parameters = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return SelectCore<T>(cypher, parameters, cancellationToken);
+    }
+
+    /// <remarks>
+    /// The check is repeated here because the stream is lazy: a caller can create it while this
+    /// transaction is open and first enumerate it after the transaction has committed, at which
+    /// point the rows would come from outside the transaction they asked for.
+    /// </remarks>
+    [RequiresUnreferencedCode(
+        "Projection resolves a constructor and column conversions by reflection.")]
+    private async IAsyncEnumerable<T> SelectCore<T>(
+        string cypher, object? parameters, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ThrowIfCompleted();
+        await foreach (var item in _connection.Select<T>(cypher, parameters, cancellationToken)
+            .WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            yield return item;
+        }
+    }
+
+    /// <summary>
+    /// Refuses work once this transaction has committed, rolled back, been disposed, or been closed
+    /// out by a raw <c>COMMIT</c>/<c>ROLLBACK</c>. Without it these methods delegate to the
+    /// connection, where the statement runs auto-committed - persisting, with no error, work the
+    /// caller believes is inside a transaction it could still roll back.
+    /// </summary>
+    private void ThrowIfCompleted()
+    {
+        if (IsCompleted) throw AlreadyCompleted();
+    }
 
     /// <summary>
     /// <see cref="LadybugConnection.Nodes{T}"/> on this transaction's connection. A transaction lives

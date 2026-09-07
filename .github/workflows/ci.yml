@@ -7,6 +7,13 @@ on:
 # Every dotnet command names LadybugDb.Client.slnx (or one project) explicitly. With a solution
 # file at the root that is what the bare command would pick anyway, but it stops a stray
 # .sln/.slnx or a second project file from silently changing what CI builds.
+
+# These jobs restore and execute package, project and test code; none of them writes to the
+# repository, so the token they run with should not be able to either, whatever the repository
+# default is. The release workflow declares its own (it needs id-token for Trusted Publishing).
+permissions:
+  contents: read
+
 jobs:
   build:
     name: build (${{ matrix.os }})

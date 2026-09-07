@@ -42,6 +42,12 @@ internal sealed class BenchDatabase : IDisposable
     /// <param name="seed">Seed for the location assignment.</param>
     public static BenchDatabase Create(int size, string model = "edge", LadybugConfig? config = null, int seed = 20260727)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(size, 0);
+        // An unrecognized model would silently take the edge branch and then be recorded under its
+        // own name in the results, publishing a mislabeled benchmark.
+        if (model is not ("edge" or "map"))
+            throw new ArgumentException($"Unknown schema model '{model}'; expected 'edge' or 'map'.", nameof(model));
+
         var path = NewPath();
         Cleanup(path);
         var db = new BenchDatabase(path, model, size, config ?? new LadybugConfig());
