@@ -14,7 +14,7 @@ internal sealed class LbugLogicalTypeHandle : LbugStructHandle
     /// so a second lease here would be redundant, not safer.
     ///
     /// <c>lbug_value_get_data_type</c> returns <c>void</c> - there is no <see cref="lbug_state"/>
-    /// to check. Unlike <see cref="LbugValueHandle.GetValue"/> or <see cref="LbugFlatTupleHandle.GetNext"/>,
+    /// to check. Unlike <see cref="LbugValueHandle.GetListElement"/> and the other element getters,
     /// which only adopt on <see cref="lbug_state.LbugSuccess"/>, this adopts unconditionally once
     /// the native call has run - the same reasoning <see cref="LbugQueryResultHandle.Execute"/>
     /// documents for its own unconditional adopt: with no distinct failure signal, treating the

@@ -2,6 +2,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
+    <!-- QueryResultErrorTests drives one native call directly to pin a precondition of the row reader. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Never packed, so no XML doc sidecar is produced from here; its public test classes are test scaffolding, not shipped API. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>

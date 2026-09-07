@@ -60,6 +60,15 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     /// </summary>
     private readonly string[] _columnNames;
 
+    /// <summary>
+    /// Every column's engine type id, read once here for the same reason as
+    /// <see cref="_columnNames"/>: a column's type cannot change between rows, and looking it up
+    /// per cell (<c>lbug_value_get_data_type</c>) allocates on the C++ side and cost this client a
+    /// native block, a <see cref="Interop.LbugLogicalTypeHandle"/> and a lease per cell. See
+    /// <see cref="ReadRow"/>.
+    /// </summary>
+    private readonly lbug_data_type_id[] _columnTypes;
+
     /// <summary><see langword="true"/> once <see cref="GetAsyncEnumerator"/> has been called - see its remarks.</summary>
     private bool _enumerated;
 
@@ -130,6 +139,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
         _handle = handle;
         _root = root;
         _columnNames = ReadColumnNames();
+        _columnTypes = ReadColumnTypes();
 
         // Last, so a constructor that threw above (ReadColumnNames can) does not count a result that
         // was never handed out and so can never be disposed - see LiveCount.
@@ -304,41 +314,90 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     }
 
     /// <remarks>
-    /// Leases <see cref="_database"/> and <see cref="_root"/> for the entire read, in addition to
-    /// the per-call lease each native step already takes on its own handle - see
-    /// <see cref="HasNext"/> for why. The lease is held across every native call this method makes
-    /// (has-next check, tuple fetch, one value fetch per column) rather than re-acquired per call,
-    /// since none of it can run safely once the database or the owning result is gone.
+    /// <para>
+    /// Leases <see cref="_database"/>, <see cref="_root"/> and this result's own handle for the
+    /// entire read - see <see cref="HasNext"/> for why the first two - since none of it can run
+    /// safely once the database or the owning result is gone, and one lease taken once is the
+    /// same guarantee as a lease taken around every native call.
+    /// </para>
+    /// <para>
+    /// <b>No <see cref="System.Runtime.InteropServices.SafeHandle"/> and no destroy call for the
+    /// tuple or the cells, on purpose.</b> Both are borrows the engine owns: upstream's
+    /// <c>lbug_query_result_get_next</c> stores the result's single, reused <c>FlatTuple</c> with
+    /// <c>_is_owned_by_cpp = true</c>, and <c>lbug_flat_tuple_get_value</c> stores a pointer into
+    /// that tuple the same way (<c>src/c_api/query_result.cpp</c>, <c>src/c_api/flat_tuple.cpp</c>);
+    /// their destroy functions are no-ops on such wrappers (<c>src/c_api/flat_tuple.cpp</c>,
+    /// <c>src/c_api/value.cpp</c>). So the 16-byte wrapper structs live on this frame, and the
+    /// tuple's contents are consumed before the next <c>get_next</c> overwrites them - which is
+    /// the reuse contract the header documents. The column types come from
+    /// <see cref="_columnTypes"/>, read once per result. Measured before this shape (BenchmarkDotNet,
+    /// 10,000 three-column rows): 858 ns and about 440 B per row, of which roughly 520 ns and 250 B
+    /// were the per-cell handles, native blocks, leases and type lookups this removes.
+    /// </para>
+    /// <para>
+    /// Container elements, node and relationship properties and the like are a different case:
+    /// their getters hand back caller-owned values, and <see cref="ValueReader"/> still wraps
+    /// each in a <see cref="LbugValueHandle"/> and destroys it.
+    /// </para>
     /// </remarks>
     private unsafe LadybugRow? ReadRow()
     {
         using var dbLease = _database.Acquire();
         using var rootLease = _root.Acquire();
+        using var lease = _handle.Acquire();
 
-        bool hasNext;
-        using (var lease = _handle.Acquire())
-        {
-            hasNext = LbugNative.lbug_query_result_has_next((lbug_query_result*)lease.Pointer) != 0;
-        }
-        if (!hasNext) return null;
+        var result = (lbug_query_result*)lease.Pointer;
+        if (LbugNative.lbug_query_result_has_next(result) == 0) return null;
 
-        using var tupleHandle = LbugFlatTupleHandle.GetNext(_handle, out var tupleState);
-        if (tupleState != lbug_state.LbugSuccess)
+        lbug_flat_tuple tuple;
+        if (LbugNative.lbug_query_result_get_next(result, &tuple) != lbug_state.LbugSuccess)
             throw new LadybugException(NativeString.WithErrorDetail("Failed to advance to the next row."));
 
         var columnCount = _columnNames.Length;
         var values = new LadybugValue[columnCount];
+        lbug_value cell;
         for (var i = 0; i < columnCount; i++)
         {
-            using var valueHandle = LbugValueHandle.GetValue(tupleHandle, (ulong)i, out var valueState);
-            if (valueState != lbug_state.LbugSuccess)
+            if (LbugNative.lbug_flat_tuple_get_value(&tuple, (ulong)i, &cell) != lbug_state.LbugSuccess)
                 throw new LadybugException(NativeString.WithErrorDetail($"Failed to read column {i}."));
 
-            using var lease = valueHandle.Acquire();
-            values[i] = ValueReader.Read((lbug_value*)lease.Pointer);
+            values[i] = ValueReader.Read(&cell, _columnTypes[i]);
         }
 
         return new LadybugRow(values, _columnNames);
+    }
+
+    /// <remarks>
+    /// Runs once, from the constructor, like <see cref="ReadColumnNames"/>.
+    /// <c>lbug_query_result_get_column_data_type</c> fills a caller-owned <c>lbug_logical_type</c>
+    /// (a C++ <c>LogicalType</c> allocation) that <c>lbug_data_type_destroy</c> must release; only
+    /// the id is kept.
+    /// </remarks>
+    private unsafe lbug_data_type_id[] ReadColumnTypes()
+    {
+        using var dbLease = _database.Acquire();
+        using var rootLease = _root.Acquire();
+        using var lease = _handle.Acquire();
+
+        var result = (lbug_query_result*)lease.Pointer;
+        var count = LbugNative.lbug_query_result_get_num_columns(result);
+        var types = new lbug_data_type_id[count];
+        for (ulong i = 0; i < count; i++)
+        {
+            lbug_logical_type type;
+            var state = LbugNative.lbug_query_result_get_column_data_type(result, i, &type);
+            if (state != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read the type of column {i}."));
+            try
+            {
+                types[i] = LbugNative.lbug_data_type_get_id(&type);
+            }
+            finally
+            {
+                LbugNative.lbug_data_type_destroy(&type);
+            }
+        }
+        return types;
     }
 
     /// <remarks>
