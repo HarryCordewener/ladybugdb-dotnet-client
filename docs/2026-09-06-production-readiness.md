@@ -217,6 +217,7 @@ Full scan of 10,000 rows (`RETURN o.dbref, o.name, o.loc`), engine time 0.18 ms:
 | Path | Time | Per row | Allocated | Relative |
 |---|---:|---:|---:|---:|
 | `await foreach` + typed accessors (documented allocation-light path) | 8.58 ms (9.52 ms in the second run) | 858 ns | 4.40 MB | 1.00 |
+| *the same path after the read-path rewrite (Roadmap item 3, done)* | *3.23 ms* | *323 ns* | *1.60 MB* | *0.38* |
 | `Select<ObjRow>` (reflective constructor plan, cached) | 9.50 ms | 950 ns | 5.76 MB | 1.00 (time), 1.31 (memory) |
 | `ToListAsync()` over the same enumerator | 12.46 ms | | 4.92 MB | 1.45 |
 | `RETURN o` whole nodes | 21.13 ms | 2.1 µs | 10.24 MB | 2.46 |
@@ -224,7 +225,12 @@ Full scan of 10,000 rows (`RETURN o.dbref, o.name, o.loc`), engine time 0.18 ms:
 | Prototype: typed record per row, no boxing | 1.89 ms | 189 ns | 1.06 MB | 0.22 |
 | Prototype: Arrow chunks (2,048 rows) decoded from buffers | 1.79 ms | 179 ns | 1.06 MB | 0.21 |
 
-Reading: of the 858 ns the client spends per row today, about 520 ns is interop discipline that
+The italic row is the shape this section recommends, measured after it landed. Its allocation
+figure is exact and load-independent; the timings in this table come from a quiet host, and a later
+re-run under unrelated load reproduced the allocations exactly while the timings moved (see
+`benchmarks/dotnet-microbenchmarks.md`).
+
+Reading: of the 858 ns the client spent per row before that change, about 520 ns is interop discipline that
 upstream's ownership rules make unnecessary. Per cell the shipping path allocates a native block
 and a `SafeHandle` for the value wrapper, another pair for the logical type (`lbug_value_get_data_type`
 also does a C++ `new` per call), takes three leases, boxes the scalar, and destroys both handles.
