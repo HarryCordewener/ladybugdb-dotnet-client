@@ -52,6 +52,16 @@ public class RendererTests
     }
 
     [Test]
+    public async Task Identifier_ReservedWord_IsBackticked()
+    {
+        await Assert.That(Identifier.Render("End")).IsEqualTo("`End`");
+        await Assert.That(Identifier.Render("order")).IsEqualTo("`order`");
+        await Assert.That(Identifier.Render("Ending")).IsEqualTo("Ending");
+        var q = CypherDsl.Match(O).Return(CypherDsl.Prop("o", "dbref").As("End")).Build();
+        await Assert.That(q.Render().Cypher).IsEqualTo("MATCH (o:Object) RETURN o.dbref AS `End`");
+    }
+
+    [Test]
     public async Task BacktickedIdentifiers_RenderInsidePatternsAndProjections()
     {
         var q = CypherDsl.Match(CypherDsl.Node("my table", "o"))

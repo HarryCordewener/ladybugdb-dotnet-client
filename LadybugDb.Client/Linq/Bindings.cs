@@ -30,6 +30,15 @@ internal sealed record RowShape : ResultShape;
 /// <summary>A single NODE column, materialized into the <c>[Node]</c> record through its constructor by property name.</summary>
 internal sealed record NodeShape(NodeDescriptor Node) : ResultShape;
 
+/// <summary>
+/// One NODE or REL column per variable of a graph step's tuple, in <see cref="Binding"/> order,
+/// materialized into the <see cref="ValueTuple"/> the steps declared - nested where steps were
+/// chained.
+/// </summary>
+/// <param name="TupleType">The <see cref="ValueTuple"/> type to build.</param>
+/// <param name="Binding">The tuple's structure; each leaf is one column.</param>
+internal sealed record TupleShape(Type TupleType, TupleBinding Binding) : ResultShape;
+
 /// <summary>What the query returns beyond its rows.</summary>
 internal enum Terminal
 {

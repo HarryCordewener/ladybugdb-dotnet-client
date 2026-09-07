@@ -18,6 +18,14 @@ namespace LadybugDb.Client.Cypher;
 /// backticked, which is always legal. Measured against the engine: <c>MATCH (`o`:`Object`) RETURN
 /// `o`.`name` AS `my name`</c> runs, and the column comes back named <c>my name</c>.
 /// </para>
+/// <para>
+/// A plain name that is one of the parser's reserved words is backticked too: <c>RETURN x AS End</c>
+/// is a parse error (measured: "mismatched input 'End'"), <c>AS `End`</c> runs and the column
+/// comes back named <c>End</c>. The list is every keyword the engine's grammar does not also accept
+/// as a symbolic name, so a projection named after a C# property such as <c>End</c>, <c>Order</c>
+/// or <c>Any</c> renders rather than fails; over-quoting a name the parser would have accepted
+/// bare costs nothing.
+/// </para>
 /// </remarks>
 public static class Identifier
 {
@@ -31,8 +39,21 @@ public static class Identifier
     public static string Render(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return IsPlain(name) ? name : "`" + name.Replace("`", "``", StringComparison.Ordinal) + "`";
+        return IsPlain(name) && !IsReserved(name) ? name : "`" + name.Replace("`", "``", StringComparison.Ordinal) + "`";
     }
+
+    /// <summary>Whether <paramref name="name"/> is a reserved word of the engine's Cypher grammar (case-insensitively), which must be backticked to name anything.</summary>
+    /// <param name="name">The identifier to test.</param>
+    public static bool IsReserved(string name) => Reserved.Contains(name);
+
+    private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ALL", "AND", "ANY", "ASC", "ASCENDING", "CASE", "CAST", "COLUMN", "CREATE", "DBTYPE", "DEFAULT",
+        "DESC", "DESCENDING", "DISTINCT", "ELSE", "END", "ENDS", "EXISTS", "FALSE", "GLOB", "GROUP",
+        "HEADERS", "HINT", "IN", "INSTALL", "JOIN", "MACRO", "MULTI_JOIN", "NONE", "NOT", "NULL", "ON",
+        "ONLY", "OPTIONAL", "OR", "ORDER", "PRIMARY", "PROFILE", "RDFGRAPH", "SHORTEST", "SINGLE",
+        "STARTS", "TABLE", "THEN", "TRUE", "UNION", "UNWIND", "WHEN", "WHERE", "WITH", "XOR",
+    };
 
     /// <summary>
     /// Whether <paramref name="name"/> can appear in Cypher without quoting: ASCII letters, digits

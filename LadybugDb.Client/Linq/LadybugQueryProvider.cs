@@ -265,24 +265,86 @@ internal static class Materializer
         switch (query.Shape)
         {
             case NodeShape node:
-                var names = node.Node.Properties.Select(p => p.Column).ToArray();
-                var plan = RowMapper.ResolvePlan<T>(names);
-                return row =>
-                {
-                    var value = row.GetValue(0);
-                    if (value.IsNull)
-                    {
-                        throw new LadybugException($"Column '{row.GetColumnName(0)}' is NULL where a {node.Node.ClrType.Name} node was expected.");
-                    }
-
-                    var properties = value.AsNode().Properties;
-                    var values = new LadybugValue[names.Length];
-                    for (var i = 0; i < names.Length; i++) values[i] = Lookup(properties, names[i]);
-                    return plan.Map(new LadybugRow(values, names));
-                };
+                var readNode = GraphValueReader<T>(node.Node.ClrType, node.Node.Properties);
+                return row => readNode(row.GetValue(0));
+            case TupleShape tuple:
+                var column = 0;
+                var readTuple = TupleReader(tuple.TupleType, tuple.Binding, ref column);
+                return row => (T)readTuple(row)!;
             default:
                 return RowMapper.ResolvePlan<T>(columnNames).Map;
         }
+    }
+
+    /// <summary>
+    /// Reads a NODE or REL value into <paramref name="clrType"/> by laying its properties out as a
+    /// row in the descriptor's column order and mapping it through <see cref="RowMapper"/>'s plan
+    /// for that shape - resolved once here, not per row.
+    /// </summary>
+    [RequiresUnreferencedCode("Resolves the type's constructor and its parameter types by reflection.")]
+    private static Func<LadybugValue, T> GraphValueReader<T>(Type clrType, IReadOnlyList<PropertyDescriptor> properties)
+    {
+        var names = properties.Select(p => p.Column).ToArray();
+        var plan = RowMapper.ResolvePlan<T>(names);
+        return value =>
+        {
+            if (value.IsNull) throw new LadybugException($"A NULL was returned where a {clrType.Name} node or relationship was expected.");
+            var bag = value.Type == LadybugType.Rel ? value.AsRel().Properties : value.AsNode().Properties;
+            var values = new LadybugValue[names.Length];
+            for (var i = 0; i < names.Length; i++) values[i] = Lookup(bag, names[i]);
+            return plan.Map(new LadybugRow(values, names));
+        };
+    }
+
+    /// <summary>Builds the reader for one binding of a tuple shape, consuming columns left to right; tuples nest as the steps did.</summary>
+    [RequiresUnreferencedCode("Resolves constructors by reflection.")]
+    private static Func<LadybugRow, object?> TupleReader(Type type, Binding binding, ref int column)
+    {
+        switch (binding)
+        {
+            case NodeBinding node:
+            {
+                var index = column++;
+                var read = ReaderFor(node.Node.ClrType, node.Node.Properties);
+                return row => read(row.GetValue(index));
+            }
+
+            case RelBinding rel:
+            {
+                var index = column++;
+                var read = ReaderFor(rel.Rel.ClrType, rel.Rel.Properties);
+                return row => read(row.GetValue(index));
+            }
+
+            case TupleBinding tuple:
+            {
+                var itemTypes = type.GetGenericArguments();
+                var readers = new Func<LadybugRow, object?>[tuple.Items.Count];
+                for (var i = 0; i < readers.Length; i++) readers[i] = TupleReader(itemTypes[i], tuple.Items[i], ref column);
+                var constructor = type.GetConstructor(itemTypes)
+                    ?? throw new InvalidOperationException($"{type} has no constructor taking its items.");
+                return row =>
+                {
+                    var items = new object?[readers.Length];
+                    for (var i = 0; i < items.Length; i++) items[i] = readers[i](row);
+                    return constructor.Invoke(items);
+                };
+            }
+
+            default:
+                throw new InvalidOperationException($"A {binding.GetType().Name} has no column to read.");
+        }
+    }
+
+    private static readonly MethodInfo GraphValueReaderMethod =
+        typeof(Materializer).GetMethod(nameof(GraphValueReader), BindingFlags.Static | BindingFlags.NonPublic)!;
+
+    /// <summary>The non-generic face of <see cref="GraphValueReader{T}"/>, for tuple items whose type is only known at run time.</summary>
+    [RequiresUnreferencedCode("Resolves the type's constructor and its parameter types by reflection.")]
+    private static Func<LadybugValue, object?> ReaderFor(Type clrType, IReadOnlyList<PropertyDescriptor> properties)
+    {
+        var typed = (Delegate)GraphValueReaderMethod.MakeGenericMethod(clrType).Invoke(null, [clrType, properties])!;
+        return value => typed.DynamicInvoke(value);
     }
 
     /// <summary>A node's property by name, case-insensitively as the engine resolves names; NULL when the node has no such property.</summary>

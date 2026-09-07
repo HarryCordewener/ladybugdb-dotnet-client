@@ -91,6 +91,8 @@ internal static class QueryTranslator
         private Type _elementType = null!;
         private Stage _stage = Stage.Matching;
         private Terminal _terminal = Terminal.Sequence;
+        private int _nodeCount;
+        private int _relCount;
 
         internal Translation(LadybugSchema schema, QueryRoot root, IReadOnlyList<MethodCallExpression> calls)
         {
@@ -121,7 +123,12 @@ internal static class QueryTranslator
         /// </summary>
         private string RootAlias()
         {
-            foreach (var call in _calls)
+            // With graph steps the pattern has several nodes, named n0, n1, ... in pattern order so
+            // the rendered Cypher reads left to right; a lambda parameter would name only one of them.
+            if (_calls.Any(IsStep)) return "n0";
+
+            // A WhereExists predicate names the far node, not the root.
+            foreach (var call in _calls.Where(c => c.Method.DeclaringType != typeof(GraphSteps)))
             {
                 foreach (var argument in call.Arguments.Skip(1))
                 {
@@ -135,6 +142,9 @@ internal static class QueryTranslator
             return "n";
         }
 
+        private static bool IsStep(MethodCallExpression call) =>
+            call.Method.DeclaringType == typeof(GraphSteps) && call.Method.Name != nameof(GraphSteps.WhereExists);
+
         private Query Build()
         {
             var builder = CypherDsl.Match(_path);
@@ -145,12 +155,11 @@ internal static class QueryTranslator
                 case Terminal.Count or Terminal.LongCount:
                     return builder.Return(CypherDsl.CountAll().As("Count")).Build();
                 case Terminal.Any:
-                    // Not "AS Any": ANY is a keyword to the engine's parser (measured: "mismatched
-                    // input 'Any'"), and Identifier only backticks names that are not plain.
+                    // Not "AS Any": ANY is reserved, so it would render backticked.
                     return builder.Return(CypherDsl.CountAll().As("Found")).Build();
             }
 
-            var items = _projection ?? [CurrentVariable()];
+            var items = _projection ?? Variables(_current);
             builder = _distinct ? builder.ReturnDistinct([.. items]) : builder.Return([.. items]);
             if (_orderBy.Count > 0) builder = builder.OrderBy([.. _orderBy]);
             if (_skip is { } skip) builder = builder.Skip(skip);
@@ -158,11 +167,14 @@ internal static class QueryTranslator
             return builder.Build();
         }
 
-        private Expr CurrentVariable() => _current switch
+        /// <summary>The <c>RETURN</c> items for an unprojected chain: the node, or every variable of a step's tuple in order.</summary>
+        private static Expr[] Variables(Binding binding) => binding switch
         {
-            NodeBinding n => CypherDsl.Variable(n.Alias),
-            ScalarBinding s => s.Value,
-            _ => throw new InvalidOperationException($"No projection for a {_current.GetType().Name}."),
+            NodeBinding n => [CypherDsl.Variable(n.Alias)],
+            RelBinding r => [CypherDsl.Variable(r.Alias)],
+            ScalarBinding s => [s.Value],
+            TupleBinding t => [.. t.Items.SelectMany(Variables)],
+            _ => throw new InvalidOperationException($"No projection for a {binding.GetType().Name}."),
         };
 
         // ----------------------------------------------------------------------------- operators
@@ -171,6 +183,12 @@ internal static class QueryTranslator
         private void Apply(MethodCallExpression call)
         {
             var method = call.Method;
+            if (method.DeclaringType == typeof(GraphSteps))
+            {
+                ApplyStep(call);
+                return;
+            }
+
             if (method.DeclaringType != typeof(Queryable))
             {
                 throw Refuse(call, $"'{method.Name}' is not an operator this provider translates");
@@ -262,6 +280,101 @@ internal static class QueryTranslator
             }
         }
 
+        // --------------------------------------------------------------------------- graph steps
+
+        [RequiresUnreferencedCode("Resolves [Node]/[Rel] descriptors by reflection.")]
+        private void ApplyStep(MethodCallExpression call)
+        {
+            var method = call.Method;
+            var typeArguments = method.GetGenericArguments();
+            var rel = _schema.Rel(typeArguments[1]);
+            var target = _schema.Node(typeArguments[2]);
+            var name = method.Name;
+
+            if (name == nameof(GraphSteps.WhereExists))
+            {
+                Require(call, Stage.Projected);
+                AddExists(Lambda(call, 1), rel, target, call);
+                return;
+            }
+
+            // A step extends the pattern, which is fixed once RETURN is written.
+            if (_stage != Stage.Matching) throw Refuse(call, $"{name} after Select/Distinct/Skip/Take would extend a pattern that is already projected; traverse first");
+
+            var outgoing = name is nameof(GraphSteps.Out) or nameof(GraphSteps.OutWithRel);
+            var from = LastNode(call);
+            CheckDirection(rel, from.Node, target, outgoing, call);
+
+            var withRel = name is nameof(GraphSteps.OutWithRel) or nameof(GraphSteps.InWithRel);
+            var relAlias = withRel ? "r" + _relCount++ : null;
+            var targetAlias = "n" + ++_nodeCount;
+            int? min = null;
+            int? max = null;
+            if (call.Arguments.Count == 3)
+            {
+                min = (int)Evaluate(call.Arguments[1])!;
+                max = (int)Evaluate(call.Arguments[2])!;
+            }
+
+            _path = _path.Extend(
+                new RelPattern(relAlias, rel.Table, outgoing ? Direction.Outgoing : Direction.Incoming, min, max),
+                CypherDsl.Node(target.Table, targetAlias));
+
+            var targetBinding = new NodeBinding(targetAlias, target);
+            var tuple = withRel
+                ? new TupleBinding([_current, new RelBinding(relAlias!, rel), targetBinding])
+                : new TupleBinding([_current, targetBinding]);
+            _current = tuple;
+            _elementType = ElementTypeOf(method.ReturnType);
+            _shape = new TupleShape(_elementType, tuple);
+        }
+
+        /// <summary>The node the next step continues from: the current node, or the last node reached by the previous step.</summary>
+        private NodeBinding LastNode(MethodCallExpression call)
+        {
+            var binding = _current;
+            while (binding is TupleBinding tuple) binding = tuple.Items[^1];
+            return binding as NodeBinding
+                ?? throw Refuse(call, "a graph step continues from a node, and the current element is not one");
+        }
+
+        /// <summary>
+        /// A relationship table has one direction. A step that asks for the other one would match
+        /// nothing, silently; naming both tables here is what turns that into a compile-and-run
+        /// error a reader can act on.
+        /// </summary>
+        private static void CheckDirection(RelDescriptor rel, NodeDescriptor from, NodeDescriptor target, bool outgoing, MethodCallExpression call)
+        {
+            var (expectedFrom, expectedTo) = outgoing ? (from, target) : (target, from);
+            if (rel.From.ClrType == expectedFrom.ClrType && rel.To.ClrType == expectedTo.ClrType) return;
+
+            throw new InvalidOperationException(
+                $"{rel.ClrType.Name} connects '{rel.From.Table}' to '{rel.To.Table}', but {call.Method.Name}<{from.ClrType.Name}, {rel.ClrType.Name}, {target.ClrType.Name}> " +
+                $"needs a relationship from '{expectedFrom.Table}' to '{expectedTo.Table}'. " +
+                (rel.From.ClrType == expectedTo.ClrType && rel.To.ClrType == expectedFrom.ClrType
+                    ? $"The direction is reversed: use {(outgoing ? "In" : "Out")} instead."
+                    : "Check the [Rel] attribute's From and To."));
+        }
+
+        private void AddExists(LambdaExpression predicate, RelDescriptor rel, NodeDescriptor target, MethodCallExpression call)
+        {
+            var from = LastNode(call);
+            CheckDirection(rel, from.Node, target, outgoing: true, call);
+            if (predicate.Parameters.Count != 1) throw Refuse(predicate, "WhereExists takes a single-parameter predicate");
+
+            // The far node's variable is the predicate's parameter name, as the root's is, so
+            // `x => x.Dbref == 3` reads back as `(x:Object) WHERE x.dbref = $p0`.
+            var alias = predicate.Parameters[0].Name is { Length: > 0 } n && Identifier.IsPlain(n) && n != from.Alias ? n : "x" + _nodeCount;
+            _scope[predicate.Parameters[0]] = new NodeBinding(alias, target);
+            var condition = new ExpressionTranslator(_scope).Predicate(predicate.Body);
+
+            var sub = CypherDsl.Match(CypherDsl.NodeRef(from.Alias).RelTo(rel.Table, CypherDsl.Node(target.Table, alias))).Where(condition);
+            var exists = CypherDsl.Exists(sub);
+            _where = _where is null ? exists : _where.And(exists);
+        }
+
+        private static Type ElementTypeOf(Type queryableType) => queryableType.GetGenericArguments()[0];
+
         /// <summary>Refuses <paramref name="call"/> when the chain is already past <paramref name="latest"/>.</summary>
         private void Require(MethodCallExpression call, Stage latest)
         {
@@ -309,11 +422,21 @@ internal static class QueryTranslator
             // Identity, or the whole node: RETURN o, materialized from the NODE value.
             if (translator.TryResolveBinding(body, out var binding))
             {
-                if (binding is not NodeBinding node) throw Refuse(body, "only a node variable can be returned whole");
-                _projection = [CypherDsl.Variable(node.Alias)];
-                _shape = new NodeShape(node.Node);
-                _current = node;
-                return;
+                switch (binding)
+                {
+                    case NodeBinding node:
+                        _projection = [CypherDsl.Variable(node.Alias)];
+                        _shape = new NodeShape(node.Node);
+                        _current = node;
+                        return;
+                    case TupleBinding tuple:
+                        _projection = Variables(tuple);
+                        _shape = new TupleShape(_elementType, tuple);
+                        _current = tuple;
+                        return;
+                    default:
+                        throw Refuse(body, "only a node, or a step's tuple, can be returned whole");
+                }
             }
 
             switch (body)

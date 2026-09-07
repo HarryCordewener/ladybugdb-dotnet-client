@@ -96,6 +96,15 @@ public class RendererEngineTests
     });
 
     [Test]
+    public Task ReservedWordAlias_IsBackticked_AndTheColumnKeepsItsName() => Check(async conn =>
+    {
+        var rows = await Run(conn, CypherDsl.Match(O).Where(O.Prop("dbref").Eq(CypherDsl.Literal(3L))).Return(O.Prop("dbref").As("End"), O.Prop("name").As("Order")));
+        await Assert.That(rows.Count).IsEqualTo(1);
+        await Assert.That(rows[0].GetInt64("End")).IsEqualTo(3L);
+        await Assert.That(rows[0].GetString("Order")).IsEqualTo("n3");
+    });
+
+    [Test]
     public Task With_AggregateAndVariables() => Check(async conn =>
     {
         var rows = await Run(conn, CypherDsl.Match(O)

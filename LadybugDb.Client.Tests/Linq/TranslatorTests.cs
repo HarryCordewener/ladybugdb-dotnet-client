@@ -16,6 +16,12 @@ public sealed record Attr([property: Key] string Akey, string Aname, string Aval
 [Node("Flagged")]
 public sealed record Flagged([property: Key] long Id, bool IsRoom);
 
+[Rel("Has", From = typeof(Obj), To = typeof(Attr))]
+public sealed record Has(long Since);
+
+[Rel("Located", From = typeof(Obj), To = typeof(Obj))]
+public sealed record Located;
+
 public sealed record Dto(long Id, string Label);
 
 /// <summary>
@@ -326,6 +332,93 @@ public class TranslatorTests
         var ex = Refused(() => NodesOf<Obj>().Reverse());
         await Assert.That(ex.Message).Contains("Reverse");
         await Assert.That(ex.Message).Contains("Match<T>");
+    }
+
+    // ----------------------------------------------------------------------------- graph steps
+
+    [Test]
+    public async Task Out_RendersThePatternSegment_AndBindsBothEnds()
+    {
+        var d = 1L;
+        var n = "DESC";
+        var q = Translate(NodesOf<Obj>().Where(o => o.Dbref == d).Out<Obj, Has, Attr>().Where(p => p.Target.Aname == n && p.Source.Name != "x").Select(p => p.Target.Aval));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.aname = $p1 AND n0.name <> $p2 RETURN n1.aval AS Aval");
+        await Assert.That(q.Text.Parameters["p1"]).IsEqualTo("DESC");
+    }
+
+    [Test]
+    public async Task In_RendersTheReversedArrow()
+    {
+        var q = Translate(NodesOf<Obj>().Where(room => room.Dbref == 3).In<Obj, Located, Obj>().Select(p => new { p.Target.Dbref, p.Target.Name }));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (n0:Object)<-[:Located]-(n1:Object) WHERE n0.dbref = $p0 RETURN n1.dbref AS Dbref, n1.name AS Name");
+    }
+
+    [Test]
+    public async Task OutWithRel_BindsTheRelationship()
+    {
+        var q = Translate(NodesOf<Obj>().OutWithRel<Obj, Has, Attr>().Where(p => p.Rel.Since > 5).Select(p => new { p.Rel.Since, p.Target.Aname }));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (n0:Object)-[r0:Has]->(n1:Attr) WHERE r0.since > $p0 RETURN r0.since AS Since, n1.aname AS Aname");
+    }
+
+    [Test]
+    public async Task VariableLength_RendersHops()
+    {
+        var q = Translate(NodesOf<Obj>().Out<Obj, Located, Obj>(1, 3).Select(p => p.Target.Dbref));
+        await Assert.That(q.Text.Cypher).IsEqualTo("MATCH (n0:Object)-[:Located*1..3]->(n1:Object) RETURN n1.dbref AS Dbref");
+    }
+
+    [Test]
+    public async Task ChainedSteps_NestTheTuple_AndNumberTheNodes()
+    {
+        var q = Translate(NodesOf<Obj>().Out<Obj, Located, Obj>().Out<(Obj Source, Obj Target), Located, Obj>()
+            .Where(p => p.Source.Source.Dbref == 1).Select(p => new { Start = p.Source.Source.Name, Middle = p.Source.Target.Name, End = p.Target.Name }));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (n0:Object)-[:Located]->(n1:Object)-[:Located]->(n2:Object) WHERE n0.dbref = $p0 RETURN n0.name AS Start, n1.name AS Middle, n2.name AS `End`");
+    }
+
+    [Test]
+    public async Task UnprojectedStep_ReturnsEveryVariable_AsATuple()
+    {
+        var q = Translate(NodesOf<Obj>().OutWithRel<Obj, Has, Attr>());
+        await Assert.That(q.Text.Cypher).IsEqualTo("MATCH (n0:Object)-[r0:Has]->(n1:Attr) RETURN n0, r0, n1");
+        await Assert.That(q.Shape).IsTypeOf<TupleShape>();
+        await Assert.That(q.ElementType).IsEqualTo(typeof((Obj, Has, Attr)));
+
+        var target = Translate(NodesOf<Obj>().Out<Obj, Has, Attr>().Select(p => p.Target));
+        await Assert.That(target.Text.Cypher).IsEqualTo("MATCH (n0:Object)-[:Has]->(n1:Attr) RETURN n1");
+        await Assert.That(target.Shape).IsTypeOf<NodeShape>();
+    }
+
+    [Test]
+    public async Task WhereExists_RendersTheSubquery()
+    {
+        var q = Translate(NodesOf<Obj>().WhereExists<Obj, Located, Obj>(x => x.Dbref == 3).Select(o => o.Name));
+        await Assert.That(q.Text.Cypher).IsEqualTo(
+            "MATCH (o:Object) WHERE EXISTS { MATCH (o)-[:Located]->(x:Object) WHERE x.dbref = $p0 } RETURN o.name AS Name");
+        await Assert.That(q.Text.Parameters["p0"]).IsEqualTo(3L);
+    }
+
+    [Test]
+    public async Task MismatchedRelationship_IsRefused_NamingBothTables()
+    {
+        var reversed = Assert.Throws<InvalidOperationException>(() => Translate(NodesOf<Attr>().Out<Attr, Has, Obj>()));
+        await Assert.That(reversed!.Message).Contains("'Object' to 'Attr'");
+        await Assert.That(reversed.Message).Contains("'Attr' to 'Object'");
+        await Assert.That(reversed.Message).Contains("use In");
+
+        var unrelated = Assert.Throws<InvalidOperationException>(() => Translate(NodesOf<Obj>().Out<Obj, Located, Attr>()));
+        await Assert.That(unrelated!.Message).Contains("Located");
+        await Assert.That(unrelated.Message).Contains("'Attr'");
+    }
+
+    [Test]
+    public async Task Step_AfterSelect_IsRefused()
+    {
+        var ex = Refused(() => NodesOf<Obj>().Select(o => o.Name).Out<string, Has, Attr>());
+        await Assert.That(ex.Message).Contains("Out");
     }
 
     /// <summary>Translation reads closures when it runs, so the same query re-translated after the variable changes carries the new value.</summary>
