@@ -4,53 +4,6 @@ namespace LadybugDb.Client.Interop;
 
 internal sealed class LbugValueHandle : LbugStructHandle
 {
-    /// <summary>
-    /// Runs <c>lbug_flat_tuple_get_value</c> and takes ownership of the resulting
-    /// <c>lbug_value</c> storage.
-    /// </summary>
-    /// <remarks>
-    /// Same reasoning as <see cref="LbugFlatTupleHandle.GetNext"/>: only adopts on
-    /// <see cref="lbug_state.LbugSuccess"/>, since nothing documents <c>lbug_value_destroy</c> as
-    /// safe on storage <c>lbug_flat_tuple_get_value</c> never populated.
-    /// </remarks>
-    internal static unsafe LbugValueHandle GetValue(
-        LbugFlatTupleHandle tuple, ulong columnIndex, out lbug_state state)
-    {
-        var storage = AllocateUnowned((nuint)sizeof(lbug_value));
-        var adopted = false;
-        try
-        {
-            var value = (lbug_value*)storage;
-            using (var lease = tuple.Acquire())
-            {
-                state = LbugNative.lbug_flat_tuple_get_value((lbug_flat_tuple*)lease.Pointer, columnIndex, value);
-            }
-
-            var handle = new LbugValueHandle();
-            if (state == lbug_state.LbugSuccess)
-            {
-                // See LbugDatabaseHandle.Open: set before Adopt so a failure here biases toward a
-                // leak (storage never freed) rather than a double free.
-                adopted = true;
-                handle.Adopt(storage);
-            }
-            return handle;
-        }
-        finally
-        {
-            if (!adopted) FreeUnowned(storage);
-        }
-    }
-
-    /// <summary>
-    /// Runs <c>lbug_value_get_list_element</c> and takes ownership of the resulting element.
-    /// </summary>
-    /// <remarks>
-    /// <paramref name="list"/> is a raw pointer, not a handle: like <see cref="LbugLogicalTypeHandle.GetDataType"/>,
-    /// this is always called from inside a scope that already holds a lease covering it (see
-    /// <see cref="LadybugDb.Client.ValueReader.Read(lbug_value*)"/>), so a second lease here would be redundant.
-    /// Only adopts on <see cref="lbug_state.LbugSuccess"/>, same reasoning as <see cref="GetValue"/>.
-    /// </remarks>
     internal static unsafe LbugValueHandle GetListElement(lbug_value* list, ulong index, out lbug_state state)
     {
         var storage = AllocateUnowned((nuint)sizeof(lbug_value));

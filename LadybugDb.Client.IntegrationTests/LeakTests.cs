@@ -67,10 +67,10 @@ public class LeakTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 1, name: 'seed'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 1, name: 'seed'})");
 
             for (var i = 0; i < 500; i++)
             {
@@ -119,11 +119,11 @@ public class LeakTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE L(id INT64, tags STRING[], attrs MAP(STRING,STRING), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE L(id INT64, tags STRING[], attrs MAP(STRING,STRING), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
                 "CREATE (n:L {id: 1, tags: ['a','b','c','d','e'], " +
-                "attrs: map(['k1','k2','k3'],['v1','v2','v3'])})")) { }
+                "attrs: map(['k1','k2','k3'],['v1','v2','v3'])})");
 
             for (var i = 0; i < 300; i++)
             {
@@ -170,17 +170,17 @@ public class LeakTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'A'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'B'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 3, name: 'C'})")) { }
-            await using (var _ = await conn.QueryAsync(
-                "MATCH (a:Person {id:1}), (b:Person {id:2}) CREATE (a)-[:Knows {since: 1}]->(b)")) { }
-            await using (var _ = await conn.QueryAsync(
-                "MATCH (a:Person {id:2}), (b:Person {id:3}) CREATE (a)-[:Knows {since: 2}]->(b)")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)");
+            await conn.ExecuteAsync("CREATE (:Person {id: 1, name: 'A'})");
+            await conn.ExecuteAsync("CREATE (:Person {id: 2, name: 'B'})");
+            await conn.ExecuteAsync("CREATE (:Person {id: 3, name: 'C'})");
+            await conn.ExecuteAsync(
+                "MATCH (a:Person {id:1}), (b:Person {id:2}) CREATE (a)-[:Knows {since: 1}]->(b)");
+            await conn.ExecuteAsync(
+                "MATCH (a:Person {id:2}), (b:Person {id:3}) CREATE (a)-[:Knows {since: 2}]->(b)");
 
             const string pathQuery =
                 "MATCH p = (a:Person {id: 1})-[:Knows*1..3]->(c:Person {id: 3}) RETURN p";

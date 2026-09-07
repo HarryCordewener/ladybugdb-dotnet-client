@@ -69,11 +69,11 @@ public class TransactionConcurrentDisposalTests
             {
                 var db = new LadybugDatabase(path);
                 var conn = await db.ConnectAsync();
-                await using (var _ = await conn.QueryAsync(
-                    "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+                await conn.ExecuteAsync(
+                    "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
                 var tx = await conn.BeginTransactionAsync();
-                await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+                await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
                 using var barrier = new Barrier(2);
                 var dbTask = Task.Run(() =>

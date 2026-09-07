@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="TUnit" Version="1.62.0" />
+    <!-- NativeLibraryResolverTests loads the real library from this project's own runtimes/ layout. -->
+    <PackageReference Include="LadybugDB.Native" Version="0.19.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LadybugDb.Client\LadybugDb.Client.csproj" />

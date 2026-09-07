@@ -1,14 +1,15 @@
 # Usage guide
 
-This is the full guide to `LadybugDb.Client`. It assumes you've read the
-[README](../README.md)'s quick start. Every code sample below was compiled and run against the
-real engine while this guide was written.
+This is the full guide to `LadybugDb.Client` and its `LadybugDb.Client.Extensions` package. It
+assumes you've read the [README](../README.md)'s quick start. Every code sample below was compiled
+and run against the real engine while this guide was written.
 
 - [Opening and configuring a database](#opening-and-configuring-a-database)
 - [Connections](#connections)
 - [Executing Cypher](#executing-cypher)
 - [Prepared statements](#prepared-statements)
   - [Bind method reference](#bind-method-reference)
+- [Parameter objects](#parameter-objects)
 - [Reading results](#reading-results)
   - [LadybugRow: columns](#ladybugrow-columns)
   - [LadybugValue: accessor reference](#ladybugvalue-accessor-reference)
@@ -17,10 +18,26 @@ real engine while this guide was written.
   - [RECURSIVE_REL: variable-length paths](#recursive_rel-variable-length-paths)
   - [Graph values: LadybugNode, LadybugRel, LadybugPath, LadybugInternalId](#graph-values-ladybugnode-ladybugrel-ladybugpath-ladybuginternalid)
   - [UNION and POINTER: is AsString() enough?](#union-and-pointer-is-asstring-enough)
+- [Typed projection: Select&lt;T&gt;](#typed-projection-selectt)
+  - [How a row maps to T](#how-a-row-maps-to-t)
+  - [Conversion: lossless widening only](#conversion-lossless-widening-only)
+  - [Errors Select&lt;T&gt; reports](#errors-selectt-reports)
+- [LINQ](#linq)
+  - [Schema descriptors](#schema-descriptors)
+  - [Entry points](#entry-points)
+  - [Operators and the predicate whitelist](#operators-and-the-predicate-whitelist)
+  - [Graph steps](#graph-steps)
+  - [Aggregates](#aggregates)
+  - [Terminals and the async boundary](#terminals-and-the-async-boundary)
+  - [Refusals](#refusals)
+  - [The escape hatch: Match&lt;T&gt;](#the-escape-hatch-matcht)
 - [Transactions](#transactions)
 - [Error handling](#error-handling)
 - [Disposal and lifetime](#disposal-and-lifetime)
 - [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint)
+- [Extensions: dependency injection and health checks](#extensions-dependency-injection-and-health-checks)
+  - [AddLadybugDb](#addladybugdb)
+  - [The health check](#the-health-check)
 - [Schema guidance](#schema-guidance)
 - [What's deferred](#whats-deferred)
 
@@ -69,6 +86,10 @@ using var db = new LadybugDatabase("./mydb", config);
 | `ReadOnly` | `bool` | `false` | Opens the database read-only. No write transaction is permitted; use this for a process that only ever queries a database another process (or an earlier run) writes to. |
 | `MaxDbSize` | `ulong` | `0` (engine default) | Max database size in bytes. |
 | `EnableMultiWrites` | `bool` | `false` | Maps to the engine's `enable_multi_writes` setting. Measured to genuinely lift LadybugDB's one-write-transaction-at-a-time restriction — see [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint) for the numbers. |
+| `AutoCheckpoint` | `bool` | `true` | Maps to `auto_checkpoint`: checkpoint automatically once the write-ahead log passes `CheckpointThreshold`. A checkpoint blocks new writers and drains active ones while it runs, so a server that wants to pick its own quiet moment turns this off and issues `CHECKPOINT` itself. |
+| `CheckpointThreshold` | `ulong` | `0` (engine default, 16 MiB) | Maps to `checkpoint_threshold`, in bytes. The readiness review measured a 100,000-object database growing from 102 MB to 434 MB over 250,000 mutations; this is the knob that governs that growth. |
+| `EnableChecksums` | `bool` | `true` | Maps to `enable_checksums`: verify page checksums. |
+| `ThrowOnWalReplayFailure` | `bool` | `true` | Maps to `throw_on_wal_replay_failure`: fail to open a database whose write-ahead log cannot be replayed, instead of discarding the unreplayable tail. |
 
 ## Connections
 
@@ -77,6 +98,10 @@ using var db = new LadybugDatabase("./mydb", config);
 | Member | Description |
 |---|---|
 | `QueryAsync(string cypher, CancellationToken = default)` | Executes a Cypher statement, returns a `LadybugQueryResult`. See [Executing Cypher](#executing-cypher). |
+| `QueryAsync(string cypher, object parameters, CancellationToken = default)` | Runs a parameterized statement **once** — prepares, binds `parameters`, executes, and disposes the statement internally — and returns its `LadybugQueryResult`. `parameters` is a dictionary or an object (typically anonymous) whose properties name the parameters; `null` throws `ArgumentNullException`. See [Parameter objects](#parameter-objects). |
+| `Select<T>(string cypher, object? parameters = null, CancellationToken = default)` | Streams the statement's rows projected into `T`, as an `IAsyncEnumerable<T>`. Owns and disposes the underlying result itself. `parameters` may be `null` (the default), meaning "no parameters". See [Typed projection](#typed-projection-selectt). |
+| `ExecuteAsync(string cypher, CancellationToken = default)` | Runs a statement whose rows you do not need — DDL, `CREATE`, `SET`, `DELETE` — and disposes its result for you. Returns nothing: the engine reports no affected-row count. |
+| `ExecuteAsync(string cypher, object parameters, CancellationToken = default)` | As above, binding `parameters` first. |
 | `PrepareAsync(string cypher, CancellationToken = default)` | Compiles a parameterized Cypher statement, returns a `LadybugPreparedStatement`. See [Prepared statements](#prepared-statements). |
 | `BeginTransactionAsync(CancellationToken = default)` | Issues `BEGIN TRANSACTION`, returns a `LadybugTransaction`. See [Transactions](#transactions). |
 | `DisposeAsync()` | Closes the connection. Safe even if the parent database was disposed first. |
@@ -103,10 +128,10 @@ call for cancellation to preempt.
 ## Executing Cypher
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})");
 ```
 
 `QueryAsync` takes a plain Cypher string and returns a `LadybugQueryResult`. For a statement you
@@ -128,11 +153,11 @@ A statement that fails throws `LadybugException` or `LadybugWriteConflictExcepti
 await using var stmt = await conn.PrepareAsync("CREATE (o:Object {dbref: $dbref, name: $name})");
 stmt.Bind("dbref", 42L);
 stmt.Bind("name", "Limbo");
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 
 stmt.Bind("dbref", 43L);
 stmt.Bind("name", "The Void");
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 ```
 
 `conn.PrepareAsync(cypher)` compiles a Cypher string once and returns a `LadybugPreparedStatement`
@@ -188,19 +213,19 @@ All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
 
 | Method | Cypher parameter type | Notes |
 |---|---|---|
-| `Bind(string, bool)` | `BOOL` | |
-| `Bind(string, sbyte)` | `INT8` | |
-| `Bind(string, short)` | `INT16` | |
-| `Bind(string, int)` | `INT32` | |
-| `Bind(string, long)` | `INT64` | |
-| `Bind(string, byte)` | `UINT8` | |
-| `Bind(string, ushort)` | `UINT16` | |
-| `Bind(string, uint)` | `UINT32` | |
-| `Bind(string, ulong)` | `UINT64` | |
-| `Bind(string, float)` | `FLOAT` | |
-| `Bind(string, double)` | `DOUBLE` | |
-| `Bind(string, string)` | `STRING` | |
-| `Bind(string, DateOnly)` | `DATE` | |
+| `Bind(string, bool)` | `BOOL` | - |
+| `Bind(string, sbyte)` | `INT8` | - |
+| `Bind(string, short)` | `INT16` | - |
+| `Bind(string, int)` | `INT32` | - |
+| `Bind(string, long)` | `INT64` | - |
+| `Bind(string, byte)` | `UINT8` | - |
+| `Bind(string, ushort)` | `UINT16` | - |
+| `Bind(string, uint)` | `UINT32` | - |
+| `Bind(string, ulong)` | `UINT64` | - |
+| `Bind(string, float)` | `FLOAT` | - |
+| `Bind(string, double)` | `DOUBLE` | - |
+| `Bind(string, string)` | `STRING` | - |
+| `Bind(string, DateOnly)` | `DATE` | - |
 | `Bind(string, TimeSpan)` | `INTERVAL` | Built via the engine's own `lbug_interval_from_difftime`. |
 | `Bind(string, DateTime)` | `TIMESTAMP` (microsecond) | `Local` normalized to UTC first; `Unspecified` assumed already UTC. |
 | `Bind(string, DateTimeOffset)` | `TIMESTAMP_TZ` | Uses `UtcTicks`; the engine does not retain a distinct source offset. |
@@ -212,11 +237,15 @@ All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
 | `Bind(string, BigDecimal)` | `DECIMAL` | See [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below - lossless, all 38 digits. |
 | `BindNull(string)` | typed `NULL` | Binds a `NULL` of the parameter's own type. |
 | `ExecuteAsync(CancellationToken = default)` | - | Runs the statement with the currently bound values; may be called more than once. |
+| `ExecuteNonQueryAsync(CancellationToken = default)` | - | Executes with whatever is bound and discards the result — the reuse-a-plan-for-writes case. |
+| `ExecuteNonQueryAsync(object parameters, CancellationToken = default)` | - | Binds `parameters`, executes, discards the result. |
+| `Select<T>(object? parameters = null, CancellationToken = default)` | - | Executes and streams rows projected into `T`, disposing the result itself. Lets one statement be planned once *and* read typed. |
+| `ExecuteAsync(object parameters, CancellationToken = default)` | - | Binds every name/value pair `parameters` names, then runs the statement. See [Parameter objects](#parameter-objects). |
 | `DisposeAsync()` | - | Destroys the prepared statement. Safe even if the parent connection/database was disposed first. |
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Multi(id INT64, flag BOOL, big INT128, tag UUID, note STRING, PRIMARY KEY(id))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Multi(id INT64, flag BOOL, big INT128, tag UUID, note STRING, PRIMARY KEY(id))");
 
 await using var stmt = await conn.PrepareAsync(
     "CREATE (n:Multi {id: $id, flag: $flag, big: $big, tag: $tag, note: $note})");
@@ -225,8 +254,91 @@ stmt.Bind("flag", true);
 stmt.Bind("big", Int128.MaxValue);
 stmt.Bind("tag", Guid.NewGuid());
 stmt.BindNull("note");
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 ```
+
+## Parameter objects
+
+The typed `Bind` overloads above are the precise, allocation-free path. For a statement whose
+parameters you know at the call site, one overload per entry point takes them all at once:
+
+```csharp
+// A parameterized statement run once: prepared, bound, executed and disposed internally.
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})",
+    new { dbref = 42L, name = "Limbo" });
+
+// The same statement run repeatedly: planned once, bound per execution.
+await using (var stmt = await conn.PrepareAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})"))
+{
+    await stmt.ExecuteNonQueryAsync(new { dbref = 43L, name = "The Void" });
+    await stmt.ExecuteNonQueryAsync(new { dbref = 44L, name = "Master Room" });
+}
+
+// Names computed at runtime, which an anonymous object cannot express.
+var parameters = new Dictionary<string, object?> { ["dbref"] = 45L, ["name"] = "Nowhere" };
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})", parameters);
+```
+
+`conn.QueryAsync(cypher, parameters)` is for a statement run **once** — it prepares, binds, executes,
+and disposes the statement for you, and the result it returns deliberately outlives that statement.
+For a statement run in a loop, `PrepareAsync` it and call `stmt.ExecuteAsync(parameters)` per
+execution so the engine plans the query once.
+
+Both take a single `object`, which accepts either shape:
+
+| `parameters` | How it's read |
+|---|---|
+| An object, typically anonymous (`new { dbref = 42L }`) | Its public readable instance properties name the parameters. This is the reflective path. |
+| Any dictionary keyed by `string` — `Dictionary<string, object?>`, `Dictionary<string, long>`, `SortedDictionary`, `ConcurrentDictionary`, `ImmutableDictionary`, `FrozenDictionary`, `ReadOnlyDictionary` | Read directly by its own keys, with **no reflection**, whatever its value type. |
+| `null` | `ArgumentNullException`. `Select<T>` is the exception: there, `null` means "no parameters". |
+| A single value (`42L`, `"Limbo"`), or a sequence (`List<T>`, an array) | `ArgumentException` naming the type. Parameters are named, not positional. |
+
+Each value dispatches on its **runtime** type to the matching typed `Bind` overload, so the set of
+supported value types is exactly the [Bind method reference](#bind-method-reference) above, plus
+`null` for `BindNull`. A value of any other type is an `ArgumentException` naming both the parameter
+and the type — including an `enum` (which boxes as itself, not as its underlying integer) and a
+`decimal` (whose message points at `BigDecimal`, the target that holds all 38 digits the engine's
+`DECIMAL` does).
+
+Values bind at their **natural width** and the engine coerces them to the target column — measured
+against the engine, not assumed. A bound `INT32` reaches an `INT64` column, `FLOAT` reaches `DOUBLE`,
+and a value outside the column's range is *rejected* with an overflow error surfaced as
+`LadybugException`, never silently truncated. So `new { dbref = 42 }` works against an `INT64`
+column; you do not have to write `42L`.
+
+Validation is eager and complete before anything is bound: a parameters object carrying one
+unbindable value throws without having bound any of them, so a prepared statement's previously bound
+values survive intact for a retry.
+
+Both overloads are annotated `[RequiresUnreferencedCode]`, since either may reflect. If you are
+trimming or publishing AOT, use the typed `Bind` overloads.
+
+### The statement cache
+
+`QueryAsync(cypher, parameters)`, `ExecuteAsync(cypher, parameters)` and `Select<T>(cypher,
+parameters)` do not prepare on every call. Each connection keeps the statements those overloads
+prepare, keyed by the exact statement text and evicted least recently used, with
+`LadybugConfig.StatementCacheSize` entries (default 128; `0` turns the cache off). Measured: a key
+lookup through these overloads costs about 122 µs when prepared per call and about 65 µs when the
+statement is reused, the same as holding a `LadybugPreparedStatement` yourself.
+
+Two rules follow from how the engine treats a prepared statement:
+
+- **Bind the same set of parameter names every time you run a given statement text.** A prepared
+  statement keeps its previously bound values, so running it with a different set of names would
+  silently reuse stale values for the names left out. The connection refuses that with an
+  `ArgumentException` naming both sets; use a different statement text if you need a different shape.
+- **A statement whose execution fails is dropped from the cache**, so a schema change behind a
+  cached plan costs one failed call and one re-prepare, not a stale plan forever.
+
+Concurrency is handled by check-out: a cached statement is handed to exactly one caller at a time,
+and a second concurrent caller of the same text prepares its own (which then joins the cache), so
+two callers never interleave one's `Bind` with the other's execute. `PrepareAsync` is still the
+right call when you want to hold the statement yourself, bind incrementally, or keep it across
+connections' lifetimes on your own terms.
 
 ## Reading results
 
@@ -284,10 +396,10 @@ row["label"]                    // by name
 | `ToString()` | `{col: value, ...}` rendering for debugger/diagnostic output. `default(LadybugRow)` renders as `{}`. |
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})");
 
 await using var r = await conn.QueryAsync("MATCH (o:Object) RETURN o.dbref, o.name AS label");
 await using var e = r.GetAsyncEnumerator();
@@ -329,7 +441,7 @@ outside the normal path.
 | `AsDouble()` | `Double` | `double` |
 | `AsDecimal()` | `Decimal` | `decimal` (throws beyond ~28-29 significant digits) |
 | `AsBigDecimal()` | `Decimal` | `ExtendedNumerics.BigDecimal` (always lossless, all 38 digits) |
-| `AsString()` | `String`, plus **any** type whose payload happens to be a string (currently only `Unsupported`, i.e. `POINTER` - see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
+| `AsString()` | `String`, plus **any** type whose payload happens to be a string: `Decimal` (the engine's exact decimal string, trailing zeros included - see [DECIMAL](#decimal-asdecimal-vs-asbigdecimal)) and `Unsupported`, i.e. `POINTER` (see [UNION and POINTER](#union-and-pointer-is-asstring-enough)) | `string` |
 | `AsBlob()` | `Blob` | `byte[]` (a fresh copy every call) |
 | `AsGuid()` | `Uuid` | `Guid` |
 | `AsDateOnly()` | `Date` | `DateOnly` |
@@ -355,10 +467,10 @@ Beyond the accessors:
 | `ToString()` | A human-readable rendering (the payload's natural form, or the type name for `null`), for debugger/diagnostic output - not for parsing. |
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Flags(id INT64, active BOOL, tags STRING[], PRIMARY KEY(id))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:Flags {id: 1, active: true, tags: ['a', 'b']})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Flags(id INT64, active BOOL, tags STRING[], PRIMARY KEY(id))");
+await conn.ExecuteAsync(
+    "CREATE (n:Flags {id: 1, active: true, tags: ['a', 'b']})");
 
 await using var r = await conn.QueryAsync("MATCH (n:Flags) RETURN n.active, n.tags");
 await using var e = r.GetAsyncEnumerator();
@@ -434,14 +546,14 @@ resolved value's own real `LadybugType` (one of the rows above) rather than as `
 ### INT128 and UUID
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Wide(id INT64, big INT128, tag UUID, PRIMARY KEY(id))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Wide(id INT64, big INT128, tag UUID, PRIMARY KEY(id))");
 
 await using (var stmt = await conn.PrepareAsync("CREATE (n:Wide {id: 1, big: $big, tag: $tag})"))
 {
     stmt.Bind("big", Int128.MaxValue);
     stmt.Bind("tag", Guid.NewGuid());
-    await using (var _ = await stmt.ExecuteAsync()) { }
+    await stmt.ExecuteNonQueryAsync();
 }
 
 await using (var r = await conn.QueryAsync("MATCH (n:Wide) RETURN n.big, n.tag"))
@@ -511,14 +623,14 @@ above). `LadybugInternalId` is a `readonly record struct`, so it gets structural
 `GetHashCode`, `ToString`, and `==`/`!=` for free from the language.
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
-await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
-await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
-await using (var _ = await conn.QueryAsync(
-    "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))");
+await conn.ExecuteAsync(
+    "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)");
+await conn.ExecuteAsync("CREATE (:Person {id: 1, name: 'Ada'})");
+await conn.ExecuteAsync("CREATE (:Person {id: 2, name: 'Grace'})");
+await conn.ExecuteAsync(
+    "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)");
 
 await using var r = await conn.QueryAsync("MATCH (a:Person)-[k:Knows]->(b:Person) RETURN a, k, b");
 await using var e = r.GetAsyncEnumerator();
@@ -601,14 +713,14 @@ cross-coerce into the other member at all) resolves the same way with no fallbac
 `AsBoolean()`, ...) simply works on it.
 
 ```csharp
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 1, val: 42})")) { }                       // bare literal -> num (INT64)
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 2, val: '42'})")) { }                     // bare literal -> num (INT64), coerced
-await using (var _ = await conn.QueryAsync(
-    "CREATE (n:UN {id: 3, val: union_value(txt := '42')})")) { } // explicit constructor -> txt (STRING)
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))");
+await conn.ExecuteAsync(
+    "CREATE (n:UN {id: 1, val: 42})");                       // bare literal -> num (INT64)
+await conn.ExecuteAsync(
+    "CREATE (n:UN {id: 2, val: '42'})");                     // bare literal -> num (INT64), coerced
+await conn.ExecuteAsync(
+    "CREATE (n:UN {id: 3, val: union_value(txt := '42')})"); // explicit constructor -> txt (STRING)
 
 await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
 await foreach (var row in r)
@@ -663,7 +775,7 @@ using ExtendedNumerics;
 await using var stmt = await conn.PrepareAsync("CREATE (n:Ledger {id: $id, amount: $amount})");
 stmt.Bind("id", 1L);
 stmt.Bind("amount", BigDecimal.Parse("12345.6789"));
-await using (var _ = await stmt.ExecuteAsync()) { }
+await stmt.ExecuteNonQueryAsync();
 ```
 
 **Precision and scale are derived from the value itself**, not from the target column's declared
@@ -748,6 +860,555 @@ one native cursor behind a multi-statement script, not one per result: only ever
 would silently hand back a stale duplicate of a result already in hand (and can leave a later
 statement in the script never read through any result at all), rather than failing loudly.
 
+## Typed projection: `Select<T>`
+
+Everything above reads columns one accessor call at a time, which is precise and allocation-free.
+`Select<T>` is the other end of that trade: it projects each row into a type you define, so the
+per-column extraction is written once — by this client — instead of at every call site.
+
+```csharp
+record Person(long Dbref, string Name);
+
+await foreach (var person in conn.Select<Person>(
+    "MATCH (o:Object) WHERE o.dbref > $min RETURN o.dbref AS Dbref, o.name AS Name ORDER BY o.dbref",
+    new { min = 42L }))
+{
+    Console.WriteLine($"{person.Dbref}: {person.Name}");
+}
+```
+
+When `T` is a scalar type and the result has exactly one column, that column *is* the value — no
+type to declare:
+
+```csharp
+await foreach (var total in conn.Select<long>("MATCH (o:Object) RETURN count(*)"))
+{
+    Console.WriteLine($"{total} objects");
+}
+
+// .NET 10's in-box System.Linq.AsyncEnumerable operators work over it, so a one-row read is a
+// one-liner. Anything that enumerates it more than once will not: a LadybugQueryResult is
+// single-pass (see Reading results above), and Select<T> streams straight off it.
+var count = await conn.Select<long>("MATCH (o:Object) RETURN count(*)").FirstAsync();
+```
+
+**It streams, and it owns the result.** Nothing happens until you start enumerating; one row is read
+and projected per `MoveNextAsync`, and no list of rows is ever built. The `LadybugQueryResult`
+underneath is never handed to you, so `Select<T>` disposes it itself — on the loop finishing, on
+`break`, on an exception from inside your loop body, and on cancellation:
+
+```csharp
+await foreach (var person in conn.Select<Person>(
+    "MATCH (o:Object) RETURN o.dbref AS Dbref, o.name AS Name ORDER BY o.dbref"))
+{
+    Console.WriteLine($"first only: {person.Name}");
+    break; // the result is released here, by the enumerator this loop disposes
+}
+```
+
+There is therefore no `await using` to write, and no result to leak — but also no result to keep:
+if you need `HasNext`, `NextResultAsync`, or the raw `LadybugValue`s, use
+[`QueryAsync`](#reading-results) instead.
+
+Cancellation works either way round — passed to the call, or attached with `WithCancellation` — and
+is checked between rows, exactly as `QueryAsync`'s enumerator does it:
+
+```csharp
+await foreach (var person in conn.Select<Person>(cypher, null, token)) { /* ... */ }
+await foreach (var person in conn.Select<Person>(cypher).WithCancellation(token)) { /* ... */ }
+```
+
+`Select<T>` is annotated `[RequiresUnreferencedCode]`: it resolves `T`'s constructor by reflection.
+If you are trimming or publishing AOT, read results through `QueryAsync` and `LadybugRow`'s typed
+accessors.
+
+### How a row maps to `T`
+
+**Constructor matching.** The constructor whose parameter names all match returned column names,
+compared case-insensitively, is the one used — which is why a positional `record` works with no
+settable properties and no attributes. An unaliased column is named by the engine after its
+expression (`RETURN o.dbref, o.name` yields `o.dbref` and `o.name`); such a column also matches a
+parameter named after the part following its last dot, so `record Person(long Dbref, string Name)`
+maps that result with no `AS` at all. An exact alias always wins over a dotted suffix:
+
+- Exactly one fully-matching constructor → it is used.
+- No matching constructor → `InvalidOperationException` listing the returned columns *and* every
+  candidate constructor with the parameters it could not match.
+- More than one fully-matching constructor → `InvalidOperationException`. This does not guess.
+- A parameterless constructor never matches: it would "match" any result vacuously and produce
+  objects holding none of the returned data.
+- Columns matching no parameter are ignored. A parameter matching no column is an error.
+- A column name repeated in one result (legal Cypher: `RETURN n.a AS x, n.b AS x`) resolves to the
+  leftmost, the same rule `LadybugRow`'s string indexer uses.
+
+**Scalar unwrap.** If `T` is one of the types in the [conversion table](#conversion-lossless-widening-only)
+below — or a `Nullable<>` of one — the single column is converted directly to it. A scalar `T`
+against a result with any other number of columns is an `InvalidOperationException` naming the count.
+The unwrap is checked *before* any constructor, so `string` and `decimal` are never constructed from
+a column by name-matching their own constructors.
+
+**NULL.** A `NULL` column reads as `null` for a reference type or a `Nullable<>` target. Into a
+non-nullable value type it is a `LadybugException` naming the column — never `default(T)`, which
+would be indistinguishable from a real zero:
+
+```csharp
+record Reading(long Small, string? Note);   // Note is NULL-able; Small is not
+```
+
+**Reflection runs once per query, not per row.** The resolved constructor and per-column plan are
+cached, keyed by `T` *and* the result's ordered column names — so two queries returning the same
+columns in a different order get their own plans instead of one reading the other's positions.
+
+### Conversion: lossless widening only
+
+Each column converts through the `LadybugValue` accessor for the target type, and also reads any
+**narrower** type that provably fits — so a record can declare `long` against a schema's `INT32`
+column without a `CAST`:
+
+| Target | `LadybugType`s it reads |
+|---|---|
+| `bool` | `Boolean` |
+| `sbyte` | `Int8` |
+| `short` | `Int16`, `Int8`, `UInt8` |
+| `int` | `Int32`, `Int16`, `Int8`, `UInt16`, `UInt8` |
+| `long` | `Int64`, `Int32`, `Int16`, `Int8`, `UInt32`, `UInt16`, `UInt8` |
+| `Int128` | `Int128`, every signed width, every unsigned width (including `UInt64`) |
+| `byte` | `UInt8` |
+| `ushort` | `UInt16`, `UInt8` |
+| `uint` | `UInt32`, `UInt16`, `UInt8` |
+| `ulong` | `UInt64`, `UInt32`, `UInt16`, `UInt8` |
+| `float` | `Single` |
+| `double` | `Double`, `Single` |
+| `decimal` | `Decimal` (throws beyond 28-29 significant digits — see below) |
+| `BigDecimal` | `Decimal` (lossless, all 38 digits) |
+| `string` | `String`, plus any value whose payload is already a string (`Decimal`, `Unsupported`) |
+| `byte[]` | `Blob` |
+| `Guid` | `Uuid` |
+| `DateOnly` | `Date` |
+| `DateTime` | `Timestamp` (and its `_SEC`/`_MS`/`_NS` variants) |
+| `DateTimeOffset` | `TimestampTz` |
+| `TimeSpan` | `Interval` (lossy — the engine converts months at 30 days each) |
+
+Each also as a `Nullable<>` value type. Anything not in this table — `Node`, `Rel`, `Path`, `List`,
+`Struct`, `Map`, `InternalId` — has no projection target; read those through
+[`LadybugValue`](#ladybugvalue-accessor-reference).
+
+**Only widening, and only where nothing can be lost:**
+
+- **No narrowing.** An `Int64` column into an `int` target is an error, not a truncation.
+- **No signed into unsigned.** An `Int8` column into a `byte` target is an error however small the
+  value: a negative one has nowhere to go, and reinterpreting the bits is exactly the silent
+  corruption this rule prevents.
+- **No unsigned into a same-width signed target.** `UInt32` reads into `long`, not into `int`;
+  `UInt64` reads into `Int128`, not into `long`. The rule is about what the column's *type* can hold,
+  not what one row happens to hold.
+- **No integer into floating-point**, even where it would be lossless. `Int32` into `double` loses
+  nothing, but `Int64` into `double` loses integers above 2^53 and `Int32` into `float` loses them
+  above 2^24. A rule whose boundary is a mantissa width is not one you should have to remember, so
+  the whole cross-family conversion is refused; `CAST` in the Cypher says it explicitly where you
+  want it.
+
+This mirrors what binding already does in the other direction (see
+[Parameter objects](#parameter-objects)): the engine coerces a bound value into a wider column and
+range-*checks* rather than truncating.
+
+### Errors `Select<T>` reports
+
+Only a null/blank `cypher` is rejected by the `Select<T>` call itself. Everything else needs the
+query to have run, so it surfaces from the first `MoveNextAsync` — i.e. from your `await foreach`:
+
+| Condition | Exception | Names |
+|---|---|---|
+| `cypher` is null, empty, or whitespace | `ArgumentException` (**eagerly**, at the call) | the parameter |
+| `parameters` is not a usable bag, or holds a value with no `Bind` overload | `ArgumentException` | the parameter, and the offending value's type |
+| No constructor of `T` matches the returned columns | `InvalidOperationException` | the columns, and every rejected candidate constructor |
+| More than one constructor matches | `InvalidOperationException` | the competing constructors |
+| `T` is scalar but the result has ≠ 1 column | `InvalidOperationException` | the column count |
+| The matched constructor takes a parameter of a type no column converts to | `InvalidOperationException` | the parameter, its type, and every supported target type |
+| A column's `LadybugType` does not convert to its target | `LadybugException` | the column, its `LadybugType`, and the target type |
+| A `NULL` column into a non-nullable value type | `LadybugException` | the column and the target type |
+| A `DECIMAL` needing more than `decimal`'s 28-29 significant digits | `LadybugException` | the column, and `BigDecimal` as the lossless target |
+| The statement itself failed | `LadybugException` / `LadybugWriteConflictException` | see [Error handling](#error-handling) |
+| The token was cancelled | `OperationCanceledException` | - |
+
+Every one of these names the column or parameter at fault, because a projection spanning a dozen
+columns is otherwise a debugger session. Two worked examples:
+
+```
+Cannot project into Person: no public constructor's parameters all match the returned columns
+(matching is case-insensitive, an unaliased column such as 'o.name' matches a parameter named after
+the part following its last dot, and extra columns are ignored). Returned columns: 'o.dbref',
+'o.nmae'. Candidate constructor(s): Person(long Dbref, string Name) - no returned column matches
+parameter 'Name'.
+```
+
+```
+Column 'Dbref' is Int64, which cannot be read as int. Conversion accepts only lossless widening -
+never narrowing, never signed into unsigned, never integer into floating-point: declare the target
+as the type the column actually has (or a wider one of the same kind), or CAST the column in the
+Cypher.
+```
+
+The first is a misspelt property: `o.nmae` matches nothing, and the message names both the column
+and the parameter left unmatched.
+
+A `T` whose **columns** cannot match is reported even when the query returns **no rows**: the
+projection is resolved from the result's column shape before the first row is read, so an unmatched
+constructor, an ambiguous one, or a scalar target against a multi-column result all raise
+immediately rather than letting an empty result silently "succeed".
+
+A **type** mismatch is different. Conversion happens per value, so `record Person(long Name)` against
+a `STRING` column resolves a plan (the names match) and, on an empty result, yields nothing without
+complaint; the first row is what raises. The check is deliberately not duplicated over the column
+metadata: the conversion rules live in one place, in the converters themselves, and a second table
+of "which engine type reaches which CLR type" maintained beside them would be free to drift from the
+behaviour it claims to predict. If you need the type checked without rows, project one row
+(`LIMIT 1`) against real data in a test.
+
+## LINQ
+
+`Select<T>` takes the Cypher you wrote. The LINQ surface writes it for you from a typed schema:
+`conn.Nodes<T>()` is an `IQueryable<T>` over one node table, and `Where`, `Select`, `OrderBy`,
+`Skip`, `Take`, `Distinct`, `GroupBy`, the graph steps and the terminals below translate to **one
+Cypher statement** when the query runs. Nothing is evaluated on the client, and every value in
+the expression becomes a bound `$p<n>` parameter — never interpolated. Every sample in this chapter
+is run against the real engine by `LadybugDb.Client.IntegrationTests/Linq/UsageSamplesTests.cs`.
+
+- [Schema descriptors](#schema-descriptors)
+- [Entry points](#entry-points)
+- [Operators and the predicate whitelist](#operators-and-the-predicate-whitelist)
+- [Graph steps](#graph-steps)
+- [Aggregates](#aggregates)
+- [Terminals and the async boundary](#terminals-and-the-async-boundary)
+- [Refusals](#refusals)
+- [The escape hatch: Match&lt;T&gt;](#the-escape-hatch-matcht)
+
+### Schema descriptors
+
+The engine has one table per node type and one per relationship type, so a C# type maps to exactly
+one table. Say which with `[Node]`, `[Rel]` and `[Key]` (`[Column("name")]` overrides one column
+name); every public readable property is a column, named after the property case-insensitively:
+
+```csharp
+using LadybugDb.Client.Linq;
+using LadybugDb.Client.Schema;
+
+[Node("Object")]
+public sealed record Obj([property: Key] long Dbref, string Name, long? Loc);
+
+[Node("Attr")]
+public sealed record Attr([property: Key] string Akey, string Aname, string Aval);
+
+[Rel("Has", From = typeof(Obj), To = typeof(Attr))]
+public sealed record Has(long Since);
+
+[Rel("Located", From = typeof(Obj), To = typeof(Obj))]
+public sealed record Located;
+```
+
+A `[Node]` record is a positional record like any `Select<T>` target, so the same constructor rule
+and the same widening rule apply. `LadybugSchema` turns the types into descriptors once; it can
+create the tables on a fresh database and check an existing one against them:
+
+```csharp
+var schema = LadybugSchema.For(typeof(Obj), typeof(Attr), typeof(Has), typeof(Located));
+await schema.CreateTablesAsync(conn);   // CREATE NODE TABLE Object(dbref INT64, name STRING, loc INT64, PRIMARY KEY(dbref)), ...
+await schema.ValidateAsync(conn);       // throws SchemaMismatchException listing every mismatch, or returns
+```
+
+`ValidateAsync` reads the catalog (`CALL show_tables()`, `table_info()`, `show_connection()`) and
+reports every missing table, missing column, and column whose engine type the property cannot read
+under [the widening rule](#conversion-lossless-widening-only), in one `SchemaMismatchException`
+whose `Mismatches` lists them all. Both are opt-in: the queries below only need the attributes.
+`Nodes<T>()` without a schema argument uses `LadybugSchema.Default`, which describes any annotated
+type the first time it is asked for.
+
+### Entry points
+
+```csharp
+IQueryable<T> Nodes<T>(LadybugSchema? schema = null)                                              // MATCH (n:Table)
+IQueryable<T> Match<T>(string pattern, object? parameters = null, string variable = "n", ...)     // MATCH <your pattern>, T bound to `variable`
+```
+
+Both are on `LadybugConnection`. The query runs when it is enumerated — through `foreach`, or
+through one of the `...Async` terminals — and is translated then, so closures are read at that
+point and an expression the whitelist does not cover throws then. `ToString()` on any query renders
+its Cypher, for logging or a test:
+
+```csharp
+var dbref = 7L;
+var found = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == dbref)
+    .Select(o => new { o.Name, o.Loc })
+    .FirstOrDefaultAsync();
+// MATCH (o:Object) WHERE o.dbref = $p0 RETURN o.name AS Name, o.loc AS Loc LIMIT $p1
+
+Console.WriteLine(conn.Nodes<Obj>().Where(o => o.Dbref == dbref).Select(o => o.Name));
+// MATCH (o:Object) WHERE o.dbref = $p0 RETURN o.name AS Name
+```
+
+The root variable is named after your lambda parameter, and every projected column is aliased to
+the member it feeds, so the row maps to the anonymous type, record or tuple by name and the
+`Select<T>` suffix rule is never needed. Without a `Select`, the whole node comes back as the
+`[Node]` record:
+
+```csharp
+var page = await conn.Nodes<Obj>().OrderBy(o => o.Name).Skip(2).Take(3).ToListAsync();   // List<Obj>
+// MATCH (o:Object) RETURN o ORDER BY o.name SKIP $p0 LIMIT $p1
+
+foreach (var o in conn.Nodes<Obj>().Where(o => o.Loc == 3))   // synchronous: the engine is in-process, see below
+{
+    Console.WriteLine(o);
+}
+```
+
+### Operators and the predicate whitelist
+
+The translator is a whitelist, not a general expression compiler. This is the entire list; anything
+else throws `NotSupportedException` at translation, naming the sub-expression ([Refusals](#refusals)).
+
+| LINQ | Cypher |
+|---|---|
+| `Where(pred)` | `WHERE` (whitelist below) |
+| `Select(proj)` | `RETURN` with one alias per projected member; anonymous types, records, tuples, scalars |
+| `OrderBy/ThenBy/Descending` | `ORDER BY` |
+| `Skip(n)` / `Take(n)` | `SKIP $p` / `LIMIT $p` |
+| `Distinct()` | `RETURN DISTINCT` |
+| `Count()`, `Any()`, `First()`, `FirstOrDefault()`, `Single()`, `SingleOrDefault()` | `RETURN count(*)`, `LIMIT 1`, `LIMIT 2` |
+| `GroupBy(key).Select(g => new { g.Key, n = g.Count() })` | implicit grouping in `RETURN` |
+| everything else | `NotSupportedException` naming the operator |
+
+Predicate whitelist (the entire list; anything else throws at translation with the sub-expression
+text):
+
+| C# | Cypher |
+|---|---|
+| `==`, `!=`, `<`, `<=`, `>`, `>=` between a member and a constant, closure, or another member | the same operator |
+| `&&`, `\|\|`, `!` on translatable sub-expressions | `AND`, `OR`, `NOT` |
+| `x.Prop == null`, `!= null` | `IS NULL`, `IS NOT NULL` |
+| `x.S.StartsWith(c)`, `.EndsWith(c)`, `.Contains(c)` (ordinal only) | `STARTS WITH`, `ENDS WITH`, `CONTAINS` |
+| `collection.Contains(x.Prop)` where collection is a closure | `x.prop IN $p` |
+| `x.S.Length`, `x.S.ToUpper()`, `.ToLower()` | `size()`, `upper()`, `lower()` |
+| a bare boolean member `x.Flag` | **rejected**; write `x.Flag == true` (Cypher's three-valued NULL makes the bare form ambiguous, the same rule Neo4jClient adopted) |
+| closure variables, constants | `$p<n>` parameters, bound with the typed `Bind` overloads (never interpolated) |
+
+```csharp
+var names = new[] { "obj1", "obj2" };
+var some = await conn.Nodes<Obj>()
+    .Where(o => (o.Name.StartsWith("obj1") && o.Name.Length == 5) || names.Contains(o.Name) || o.Loc == null)
+    .OrderBy(o => o.Dbref)
+    .Select(o => o.Dbref)
+    .ToListAsync();
+// MATCH (o:Object) WHERE o.name STARTS WITH $p0 AND size(o.name) = $p1 OR o.name IN [$p2, $p3] OR o.loc IS NULL
+// RETURN o.dbref AS Dbref ORDER BY o.dbref
+```
+
+Operators are applied in Cypher's clause order, which is stricter than LINQ's: `Where` after
+`Take`, a second `Select`, or `Count()` after `Select` would need a `WITH` stage and are refused
+rather than silently reordered. Filter and sort first, project, then page.
+
+### Graph steps
+
+The `MATCH` pattern has no C# analogue, so it is built by typed steps over the `[Rel]` types. Each
+step appends one pattern segment and yields a pair — `(Source, Target)`, or `(Source, Rel, Target)`
+when you ask for the relationship — so the next `Where` or `Select` can name either end:
+
+```csharp
+q.Out<TSource, TRel, TTarget>()            // (source)-[:TRel]->(target:TTarget)
+q.In<TSource, TRel, TTarget>()             // (source)<-[:TRel]-(target:TTarget)
+q.OutWithRel<...>(), q.InWithRel<...>()    // ... yielding (Source, Rel, Target)
+q.Out<...>(minHops, maxHops)               // [:TRel*min..max]; the engine requires the upper bound
+q.WhereExists<TSource, TRel, TTarget>(pred) // WHERE EXISTS { MATCH (source)-[:TRel]->(x:TTarget) WHERE ... }, element unchanged
+```
+
+`TRel`'s `[Rel]` must connect the current table to `TTarget`'s in the direction asked; a mismatch
+throws `InvalidOperationException` naming both tables at translation, since the engine would
+otherwise match nothing, silently. The pattern's nodes are named `n0`, `n1`, ... left to right.
+
+```csharp
+// one attribute of one object
+var value = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 5)
+    .Out<Obj, Has, Attr>()
+    .Where(p => p.Target.Aname == "A3")
+    .Select(p => p.Target.Aval)
+    .FirstOrDefaultAsync();
+// MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.aname = $p1 RETURN n1.aval AS Aval LIMIT $p2
+
+// contents of a room: the objects whose Located points at it
+var contents = await conn.Nodes<Obj>()
+    .Where(room => room.Dbref == 3)
+    .In<Obj, Located, Obj>()
+    .OrderBy(p => p.Target.Dbref)
+    .Select(p => p.Target.Name)
+    .ToListAsync();
+// MATCH (n0:Object)<-[:Located]-(n1:Object) WHERE n0.dbref = $p0 RETURN n1.name AS Name ORDER BY n1.dbref
+
+// the relationship's own properties
+var recent = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 5)
+    .OutWithRel<Obj, Has, Attr>()
+    .Where(p => p.Rel.Since > 8)
+    .Select(p => new { p.Target.Aname, p.Rel.Since })
+    .ToListAsync();
+// MATCH (n0:Object)-[r0:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND r0.since > $p1 RETURN n1.aname AS Aname, r0.since AS Since
+
+// variable length: everything one or two Located hops away
+var nearby = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == 1)
+    .Out<Obj, Located, Obj>(1, 2)
+    .Select(p => p.Target.Dbref)
+    .ToListAsync();
+// MATCH (n0:Object)-[:Located*1..2]->(n1:Object) WHERE n0.dbref = $p0 RETURN n1.dbref AS Dbref
+
+// keep the objects that have an attribute named A10, without projecting it
+var described = await conn.Nodes<Obj>()
+    .WhereExists<Obj, Has, Attr>(a => a.Aname == "A10")
+    .CountAsync();
+// MATCH (n:Object) WHERE EXISTS { MATCH (n)-[:Has]->(a:Attr) WHERE a.aname = $p0 } RETURN count(*) AS Count
+
+// no Select: the tuple itself, each item materialized from its NODE or REL value
+var pairs = await conn.Nodes<Obj>().Where(o => o.Dbref == 5).In<Obj, Located, Obj>().ToListAsync();   // List<(Obj Source, Obj Target)>
+```
+
+Steps chain: after `Out<Obj, Located, Obj>()` the element is `(Obj, Obj)`, so a second hop is
+`.Out<(Obj Source, Obj Target), Located, Obj>()` and its `Source` is the previous pair. Steps come
+before `Select`, since a projection fixes the pattern.
+
+### Aggregates
+
+Cypher has no `GROUP BY`: a `RETURN` that mixes aggregates with plain expressions groups by the
+plain ones. `GroupBy(key)` followed by a `Select` over the group renders exactly that, with
+`g.Count()`, `g.LongCount()`, `g.Sum(x => ...)`, `g.Min`, `g.Max` and `g.Average` as `count(*)`,
+`sum`, `min`, `max` and `avg`:
+
+```csharp
+var perRoom = await conn.Nodes<Obj>()
+    .GroupBy(o => o.Loc)
+    .Select(g => new { Room = g.Key, N = g.Count(), Highest = g.Max(x => x.Dbref) })
+    .OrderByDescending(x => x.N).ThenBy(x => x.Room)
+    .ToListAsync();
+// MATCH (o:Object) RETURN o.loc AS Room, cast(count(*), 'INT32') AS N, max(o.dbref) AS Highest ORDER BY N DESC, Room
+```
+
+The projection must include `g.Key` and at least one aggregate — without the key the aggregate
+would run over every row, without an aggregate the key would repeat once per row — and nothing
+but that `Select` may follow `GroupBy` directly; sort and page after it. A filter after it would be
+a `HAVING`, which needs a `WITH` stage: filter before grouping, or write the Cypher. `count(*)` and
+`sum()` are `cast` to the width the C# declares (`int` for `Count()`, the property's type for
+`Sum`), since the engine returns them wider than the row mapping will narrow.
+
+### Terminals and the async boundary
+
+The queryable is a plain `IQueryable<T>` — deliberately not `IAsyncEnumerable<T>`, which on .NET 10
+would make `Where` and `Select` ambiguous with the in-box `System.Linq.AsyncEnumerable` operators.
+Cross into async with one of these, all extension methods in `LadybugDb.Client.Linq`:
+
+```csharp
+IAsyncEnumerable<T> AsAsyncEnumerable<T>(this IQueryable<T> source, CancellationToken ct = default)
+Task<List<T>> ToListAsync<T>(...)        Task<T[]> ToArrayAsync<T>(...)
+Task<T> FirstAsync<T>(...)               Task<T?> FirstOrDefaultAsync<T>(...)
+Task<T> SingleAsync<T>(...)              Task<T?> SingleOrDefaultAsync<T>(...)
+Task<long> CountAsync<T>(...)            Task<bool> AnyAsync<T>(...)
+```
+
+```csharp
+var total = await conn.Nodes<Obj>().CountAsync();                                  // RETURN count(*)
+var hasAttributes = await conn.Nodes<Attr>().AnyAsync();
+var first = await conn.Nodes<Obj>().Where(o => o.Dbref == 1).SingleAsync();        // LIMIT 2, then checked
+
+await foreach (var o in conn.Nodes<Obj>().OrderBy(o => o.Dbref).AsAsyncEnumerable())
+{
+    if (o.Dbref == 2) break;   // the underlying result is released here, as Select<T> releases its own
+}
+```
+
+**The boundary is the method name.** Everything before `AsAsyncEnumerable()` (or a terminal)
+translates to Cypher; everything after it is the in-box `System.Linq.AsyncEnumerable` running on
+the client over the streamed rows. That is the place for what the whitelist refuses, when the row
+count makes it acceptable:
+
+```csharp
+var endingInZero = await conn.Nodes<Obj>().AsAsyncEnumerable()
+    .Where(o => o.Name.EndsWith('0'))    // client-side: a Func, not an Expression
+    .CountAsync();
+```
+
+Synchronous enumeration (`foreach`, `ToList()`, `Count()`, `First()`) is honest here: the engine is
+in-process and every operation this client wraps completes synchronously, so the sync path neither
+blocks a thread on a pending task nor spins one up. A `CancellationToken` passed to a terminal is
+checked before the statement runs and between rows, as `QueryAsync`'s is.
+
+The `...Async` methods throw `InvalidOperationException` for a queryable from any other provider.
+
+### Refusals
+
+Every refusal is a `NotSupportedException` raised at translation — not partway through a result —
+whose message names the offending sub-expression, the reason, and the escape hatch:
+
+```csharp
+try
+{
+    await conn.Nodes<Obj>().Where(o => o.Name.Trim() == "x").ToListAsync();
+}
+catch (NotSupportedException ex)
+{
+    Console.WriteLine(ex.Message);
+}
+```
+
+```
+Expression 'o.Name.Trim()' cannot be translated to Cypher: not a translatable value. Only the
+whitelist in docs/USAGE.md (LINQ) translates, and nothing is evaluated on the client. For anything
+else, write the Cypher yourself with LadybugConnection.Match<T>(pattern, parameters), which keeps
+the typed result.
+```
+
+The reasons you will meet:
+
+| Expression | Reason |
+|---|---|
+| `o => o.IsRoom` | `a bare boolean is ambiguous under Cypher's three-valued NULL logic; write it as a comparison, 'o.IsRoom == true' or 'o.IsRoom == false'` |
+| `.Take(5).Where(...)` | `Where after Take would apply to the rows Take already cut, which Cypher's clause order cannot express; put Where first` |
+| `.Select(...).Count()` | `Count after Select would need a WITH stage; count before projecting, or write the Cypher` |
+| `.Select(o => new { Node = o })` | `a whole node inside a projection has no column to map to; project its properties, or return the node alone` |
+| `.GroupBy(...).Select(g => g.LongCount())` | `a projection after GroupBy must include g.Key, or the aggregate would run over every row rather than per group` |
+| `.Out<Attr, Has, Obj>()` on `Nodes<Attr>()` | `InvalidOperationException`: `Has connects 'Object' to 'Attr', but Out<Attr, Has, Obj> needs a relationship from 'Attr' to 'Object'. The direction is reversed: use In instead.` |
+
+Nothing is ever evaluated on the client, so a query that translates is the whole query: no silent
+table scan with a filter applied afterwards.
+
+### The escape hatch: `Match<T>`
+
+For any shape the whitelist refuses — several patterns, inline property constraints, an undirected
+or untyped relationship — write the `MATCH` yourself. `T` is bound to `variable` (`n` by default),
+and the rest of the chain applies as after `Nodes<T>()`, graph steps included:
+
+```csharp
+var room = 3L;
+var exits = await conn.Match<Obj>("(r:Object {dbref: $room})<-[:Located]-(n:Object)", new { room })
+    .OrderBy(n => n.Dbref)
+    .Select(n => new { n.Dbref, n.Name })
+    .ToListAsync();
+// MATCH (r:Object {dbref: $room})<-[:Located]-(n:Object) RETURN n.dbref AS Dbref, n.name AS Name ORDER BY n.dbref
+
+var late = await conn.Match<Obj>("(o:Object {dbref: $d})", new { d = 5L }, variable: "o")
+    .OutWithRel<Obj, Has, Attr>()
+    .Where(p => p.Rel.Since == 10)
+    .Select(p => p.Target.Aname)
+    .SingleAsync();
+// MATCH (o:Object {dbref: $d}) MATCH (o)-[r0:Has]->(n1:Attr) WHERE r0.since = $p0 RETURN n1.aname AS Aname LIMIT $p1
+```
+
+The pattern is rendered verbatim and its `$name` placeholders bind from the parameters object (the
+same shapes [`QueryAsync`](#parameter-objects) accepts); a parse error is the engine's, reported when
+the query runs. Names of the form `p<digits>` are reserved for the values the translator binds
+itself, and a step after `Match<T>` picks aliases the pattern does not already use. A `variable`
+the pattern does not bind is an `ArgumentException` before anything runs.
+
+`Nodes<T>`, `Match<T>` and the terminals are annotated `[RequiresUnreferencedCode]` like
+`Select<T>`: descriptors and projected constructors are resolved by reflection.
+
 ## Transactions
 
 `LadybugTransaction` member reference:
@@ -765,8 +1426,8 @@ If you need a single logical write to span more than one statement, use
 ```csharp
 await using (var tx = await conn.BeginTransactionAsync())
 {
-    await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})")) { }
-    await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})")) { }
+    await conn.ExecuteAsync("CREATE (n:Object {dbref: 1, name: 'Limbo'})");
+    await conn.ExecuteAsync("CREATE (n:Object {dbref: 2, name: 'The Void'})");
     await tx.CommitAsync();
 }
 ```
@@ -785,27 +1446,48 @@ second call. Every statement run on the connection while a transaction is open �
 issued through the `LadybugTransaction` object — participates in it, because the transaction lives
 on the connection itself, matching what `BEGIN TRANSACTION` means to the engine.
 
-**The raw-Cypher escape hatch bypasses all of that safety — and it can crash the process, not just
-skip a rollback.** Nothing stops you from issuing `await conn.QueryAsync("BEGIN TRANSACTION")`
-directly instead of calling `BeginTransactionAsync`, but if you do, this client has no way to know
-a transaction is open. `BeginTransactionAsync`'s bookkeeping (the connection's `_activeTransaction`
-tracking and the database-side registration that drives the automatic rollback-on-dispose in
-[Disposal and lifetime](#disposal-and-lifetime)) only runs *inside* `BeginTransactionAsync` itself;
-a transaction opened by handing `BEGIN TRANSACTION` to `QueryAsync` as a plain string is invisible
-to it, so `LadybugDatabase.Dispose` never rolls it back.
+**The raw-Cypher escape hatch is tracked, but it is not managed for you.** Nothing stops you from
+issuing `await conn.QueryAsync("BEGIN TRANSACTION")` directly instead of calling
+`BeginTransactionAsync`, and there are good reasons to (Cypher your own driver already emits
+verbatim, for instance). The client recognizes the plain transaction-control statements —
+`BEGIN TRANSACTION`, `BEGIN TRANSACTION READ ONLY`, `COMMIT`, `ROLLBACK`, in any case, with any
+internal whitespace and an optional trailing semicolon — and keeps its own bookkeeping in step with
+them.
 
-Reproduced directly, not assumed: opening a transaction via raw `QueryAsync("BEGIN TRANSACTION")`,
-leaving it uncommitted, then disposing the database and letting the connection's own `DisposeAsync`
-run afterward, **aborts the whole process** — `lbug_connection_destroy`'s own auto-rollback (see
-[Disposal and lifetime](#disposal-and-lifetime)) fires against a transaction the now-destroyed
-database can no longer service, and the engine throws a native `lbug::common::TransactionManagerException`
-("Invalid transaction type to rollback") that crosses the P/Invoke boundary as an unhandled
-exception — `terminate()`, `SIGABRT`, the process is gone, not a catchable managed exception. This
-is a real tradeoff you can reach for deliberately (for example, Cypher your database driver already
-emits verbatim), not a footnote: reaching for it means you've opted back into managing that
-transaction's entire lifetime by hand — commit or roll it back yourself, before the connection or
-database can be disposed — exactly as if this client provided no transaction API at all, except
-that getting it wrong here doesn't throw, it takes the process down.
+**Why that tracking matters more than it sounds.** The engine does not merely reject a nested
+`BEGIN TRANSACTION`; it tears down the transaction already in flight, and the writes inside it are
+gone with no error at write time — the following `COMMIT` reports `No active transaction for COMMIT.`
+and nothing was committed. Reproduced directly, not assumed. So a nested `BEGIN` is refused
+client-side, before it can reach the engine, whether it arrives as raw Cypher or as a
+`BeginTransactionAsync` call that would otherwise have believed nothing was open:
+
+```csharp
+await conn.ExecuteAsync("BEGIN TRANSACTION");
+await conn.ExecuteAsync("CREATE (:T {id: 1})");
+
+// Both of these throw InvalidOperationException without sending anything to the engine,
+// so the transaction above — and its write — survive.
+await conn.QueryAsync("BEGIN TRANSACTION");
+await conn.BeginTransactionAsync();
+
+await conn.ExecuteAsync("COMMIT");   // commits, 1 row
+```
+
+**Two limits to know.** Recognition is conservative by design: a statement is tracked only when its
+entire text is a transaction-control statement, so a multi-statement script like
+`"BEGIN TRANSACTION; CREATE ...; COMMIT"` is *not* tracked and a transaction opened that way remains
+invisible to the guard. The trade is one-directional on purpose — failing to notice a transaction
+leaves you exactly where you were, whereas a false match would refuse a query that works, so
+`CREATE (n {s: 'BEGIN TRANSACTION'})` is correctly left alone. And tracking is not management. Uncommitted work is
+discarded either way — measured: abandoning a raw transaction and disposing the connection and
+database leaves only the previously committed rows — so the raw form does not risk half-written data.
+What `BeginTransactionAsync` adds is a *deterministic* close at a point you choose rather than
+whenever the connection is destroyed, refusal of a second commit or rollback, and rollback even when
+the database is disposed first. Reaching for the raw form means you own that timing.
+
+Issuing a raw `COMMIT` or `ROLLBACK` while a `LadybugTransaction` from `BeginTransactionAsync` is open
+closes the transaction at the engine level behind that object's back. Its later `CommitAsync` or
+disposal then has nothing to act on. Use one mechanism or the other on a given transaction, not both.
 
 ## Error handling
 
@@ -844,8 +1526,12 @@ connection, or result used after its own disposal, or after an ancestor's dispos
 
 ## Disposal and lifetime
 
-`LadybugDatabase` is `IDisposable`; `LadybugConnection`, `LadybugQueryResult`, and
-`LadybugTransaction` are `IAsyncDisposable`. For transactions opened through `BeginTransactionAsync`
+`LadybugDatabase` is `IDisposable`; `LadybugConnection`, `LadybugQueryResult`,
+`LadybugPreparedStatement` and `LadybugTransaction` implement both `IDisposable` and
+`IAsyncDisposable`, and the two are equivalent: every operation on them completes synchronously, so
+there is nothing for the asynchronous form to wait for. Use `using` or `await using`, whichever
+fits the call site; mixing them on one object is fine, and disposing twice is a no-op. For
+transactions opened through `BeginTransactionAsync`
 — the API this section otherwise describes — disposal is safe in any order: it never corrupts state
 or crashes the process. Children should still normally be disposed before the database they came
 from:
@@ -866,12 +1552,16 @@ await conn.DisposeAsync();
 db.Dispose();
 ```
 
-**This "never crashes" guarantee is specifically about the managed transaction API.** The raw-Cypher
-escape hatch (`conn.QueryAsync("BEGIN TRANSACTION")` instead of `BeginTransactionAsync`) is not
-covered by anything in this section — see [Transactions](#transactions) above for why disposing a
-database or connection with an uncommitted raw transaction still open aborts the whole process
-instead of throwing a catchable exception. Complete or roll back any such transaction yourself,
-before disposal, if you use that escape hatch.
+**The raw-Cypher escape hatch is covered by this guarantee too, but not by the automatic rollback.**
+Disposing a database and connection while a transaction opened by `conn.QueryAsync("BEGIN TRANSACTION")`
+is still uncommitted does not crash the process — verified across six disposal orderings, including
+never disposing the connection at all, disposing it before the database, and leaving a result open.
+The transaction is abandoned and its writes are discarded, exactly as an uncommitted transaction
+should be, and the process exits cleanly.
+
+What the raw form still does not get is `BeginTransactionAsync`'s explicit rollback-on-dispose, so
+complete or roll back any raw transaction yourself rather than relying on disposal to do it. See
+[Transactions](#transactions) above for the nested-`BEGIN` hazard that *is* actively guarded.
 
 Disposing a database out from under a still-open connection or result doesn't crash — it throws a
 managed `ObjectDisposedException` on the next call against that connection or result, instead:
@@ -900,7 +1590,7 @@ finalize, AFTER — including a DML result (`CREATE`/`SET`/`DELETE`/...), not ju
 ```csharp
 var db = new LadybugDatabase(path);
 var conn = await db.ConnectAsync();
-await using (var _ = await conn.QueryAsync("CREATE NODE TABLE Object(dbref INT64, PRIMARY KEY(dbref))")) { }
+await conn.ExecuteAsync("CREATE NODE TABLE Object(dbref INT64, PRIMARY KEY(dbref))");
 
 var result = await conn.QueryAsync("CREATE (o:Object {dbref: 1})"); // a DML result, kept alive
 
@@ -931,7 +1621,7 @@ further effect:
 var db = new LadybugDatabase(path);
 var conn = await db.ConnectAsync();
 var tx = await conn.BeginTransactionAsync();
-await using (var _ = await conn.QueryAsync("CREATE (n:Object {dbref: 1})")) { } // never committed
+await conn.ExecuteAsync("CREATE (n:Object {dbref: 1})"); // never committed
 
 db.Dispose(); // rolls the open transaction back first, then releases its own handle
 
@@ -985,15 +1675,57 @@ work immediately, so if it already ran before `BeginTransactionAsync` reaches th
 `BeginTransactionAsync` throws `ObjectDisposedException` instead of proceeding - same outcome as
 before, just without a bespoke mechanism dedicated to this one call.
 
+## Cancellation
+
+Every `CancellationToken` a query method accepts is checked before the statement runs and between
+rows, and — since 2026-09-06 — is also wired to the engine's `lbug_connection_interrupt` while the
+native call is in flight. Cancelling the token interrupts the running query: the engine stops at
+its next operator boundary and the call throws `OperationCanceledException` carrying the token. The
+connection stays usable afterwards; nothing else needs resetting. Measured: a query that would run
+for 1.5 s is stopped within a few milliseconds of the token firing, including when the token fires
+while the engine is still parsing and planning (the interrupt is re-sent until the call returns,
+because the engine clears its flag at execution start).
+
+Two things it does not do. A query that had already completed when the token fired returns its
+result — throwing would tell you a `CREATE` did not happen when it did. And interruption is between
+operators, so a single very expensive operator invocation (a large `COPY`, for instance) is
+interrupted when it yields, not mid-way.
+
+Cancellation and the transaction guard compose: a cancelled statement inside a
+`LadybugTransaction` leaves the transaction open, and disposing it rolls back as usual.
+
+## Observability
+
+The client emits one span per statement through a `System.Diagnostics.ActivitySource` named
+`LadybugDb.Client`, and one histogram, `db.client.operation.duration` (seconds), through a
+`System.Diagnostics.Metrics.Meter` of the same name. Both follow the OpenTelemetry database semantic
+conventions (stable since 1.33): `db.system.name` is `ladybugdb`, `db.namespace` is the database
+path, `db.operation.name` is the statement's first keyword (`MATCH`, `CREATE`, `BEGIN`, ...),
+`db.query.text` is the statement as written (with `$name` placeholders, never bound values), and
+`error.type` is the exception's full type name when the statement fails. The span's name is the
+operation name.
+
+```csharp
+// OpenTelemetry
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t.AddSource(LadybugDiagnostics.ActivitySourceName))
+    .WithMetrics(m => m.AddMeter(LadybugDiagnostics.MeterName));
+```
+
+With nobody listening, a statement pays one `HasListeners` check and one `Instrument.Enabled` check
+and allocates nothing. Every statement is covered: `QueryAsync`, `ExecuteAsync`, `Select<T>`,
+prepared statements, and the transaction control statements `BeginTransactionAsync`, `CommitAsync`
+and `RollbackAsync` issue.
+
 ## Concurrency and the single-writer constraint
 
 By default, LadybugDB permits exactly one write transaction at a time and **rejects** a second
 rather than queuing it. Under contention this is expected, not exceptional, and it's surfaced as
 the typed, retryable `LadybugWriteConflictException` rather than a raw engine error string.
 
-This was benchmarked, not assumed: with the default configuration, throughput was flat from 1 to
-8 concurrent writers (roughly 2,400-2,800 mutations/sec regardless of writer count) while conflict
-retries climbed past 10,000 over the same run. The client does not serialize writes internally —
+This was benchmarked, not assumed: with the default configuration, throughput falls from 1 to 8
+concurrent writers (6,200 to 2,600 mutations/sec on 10,000 objects) while a retry loop spins through
+hundreds of thousands of refusals in the same three seconds. The client does not serialize writes internally —
 if you open multiple connections and write from more than one at a time with the default
 configuration, you *will* see this exception, by design. A retry loop at the call site is the
 expected pattern:
@@ -1018,21 +1750,36 @@ async Task<LadybugQueryResult> ExecuteWithRetryAsync(
 
 ### `EnableMultiWrites`: measured, not assumed
 
-`LadybugConfig.EnableMultiWrites` maps to the engine's `enable_multi_writes` setting, and it was
-an open question — since the very first benchmark in this project — whether it actually changes
-anything. It does. Set on a database, the same 1/2/4/8-concurrent-writer workload above produced
-**zero** `LadybugWriteConflictException`s at any writer count, across four separate 3-second runs,
-and throughput rose with concurrency instead of staying flat (roughly 2,600-2,900 mutations/sec at
-one writer, up to 3,500-3,900/sec at four to eight). With it off (the default), conflicts climbed
-with writer count in every run of the same experiment (0 → ~2,700 → ~8,000 → ~18,000 over the same
-3-second window) while throughput stayed essentially flat.
+`LadybugConfig.EnableMultiWrites` maps to the engine's `enable_multi_writes` setting (also reachable
+at runtime as `CALL debug_enable_multi_writes=true`; upstream's own multi-threaded write benchmark
+turns it on). It changes the engine's concurrency model, not merely a limit: with it on, several
+write transactions are admitted at once and a collision is detected at the **row** instead of at the
+writer slot. The engine then reports `"Runtime exception: Write-write conflict of updating the same
+row."`, which this client classifies as the same retryable `LadybugWriteConflictException` as the
+single-writer refusal (it did not before 2026-09-06; that version of this section claimed "zero
+conflicts" because the conflicts were surfacing as a different exception type).
 
-These specific mutations/sec figures are this machine's, not a portable number - an independent
-spot-check on different hardware/load saw 602-1,248 mut/s instead of ~2,600-3,900, with the same
-conflict counts scaling into the thousands with the flag off. What travels is the *shape* of the
-result (conflicts present and climbing with the flag off, zero with it on, throughput flat vs.
-scaling), not the absolute rate - re-measure on your own hardware if the exact numbers matter to
-you.
+Measured with the benchmark workload (`LadybugDb.Client.Benchmarks --workload`, edge model, three
+seconds per writer count, retry on conflict, 2026-09-06):
+
+| Objects | Writers | Default: mutations/s (refused attempts) | `EnableMultiWrites`: mutations/s (row conflicts) |
+|---:|---:|---:|---:|
+| 10,000 | 1 | 6,210 (0) | 6,361 (0) |
+| 10,000 | 2 | 3,529 (many) | 7,604 (1) |
+| 10,000 | 4 | 3,180 (many) | 10,970 (10) |
+| 10,000 | 8 | 2,613 (358,204) | 14,393 (38) |
+| 100,000 | 8 | 3,645 (324,652) | 22,154 (5) |
+
+With the default, throughput *falls* as writers are added and the retry loop spins through hundreds
+of thousands of refusals. With the flag, throughput scales with writers and the handful of genuine
+row collisions are the only retries. The MAP-column schema model does not scale either way, because
+every attribute set rewrites a whole row; the attributes-as-nodes model above does.
+
+These mutations/sec figures are this machine's, not a portable number - earlier spot-checks on
+other hardware and load saw 602-1,248 and 2,600-3,900 mut/s for the same experiment. What travels
+is the *shape* of the result (refusals climbing and throughput falling with the flag off; a handful
+of row conflicts and throughput scaling with it on), not the absolute rate - re-measure on your own
+hardware if the exact numbers matter to you.
 
 ```csharp
 var config = new LadybugConfig { EnableMultiWrites = true };
@@ -1046,6 +1793,146 @@ still the expected approach; the client makes no attempt to serialize writers fo
 
 If you need a single logical write to span more than one statement, see
 [Transactions](#transactions).
+
+## Extensions: dependency injection and health checks
+
+`LadybugDb.Client.Extensions` is a second package for hosts built on
+`Microsoft.Extensions.DependencyInjection`: ASP.NET Core, the generic host, workers. It adds one
+registration call, an options type bound from configuration, and a health check. The core package
+stays free of `Microsoft.Extensions.*` so a console program pays for none of it.
+
+```console
+dotnet add package LadybugDb.Client.Extensions   # brings LadybugDb.Client at the same version
+dotnet add package LadybugDB.Native              # the engine, as for the core package
+```
+
+The samples in this chapter run in
+[`LadybugDb.Client.Extensions.Tests/UsageGuideSamples.cs`](../LadybugDb.Client.Extensions.Tests/UsageGuideSamples.cs),
+with a plain `ServiceCollection` standing in for the host's.
+
+### `AddLadybugDb`
+
+```csharp
+using LadybugDb.Client;
+using LadybugDb.Client.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddLadybugDb(builder.Configuration.GetSection("LadybugDb"));
+
+var app = builder.Build();
+app.MapHealthChecks("/health");
+app.MapGet("/objects/{dbref:long}", async (long dbref, LadybugConnection conn) =>
+    await conn.Select<string>(
+        "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.name", new { dbref }).FirstOrDefaultAsync());
+app.Run();
+```
+
+```json
+{
+  "LadybugDb": {
+    "DatabasePath": "./data/graph",
+    "Config": { "MaxThreads": 4, "EnableCompression": true }
+  }
+}
+```
+
+The section binds to `LadybugDbOptions`; `Config` is a `LadybugConfig`, so every engine setting
+from [Opening and configuring a database](#opening-and-configuring-a-database) is available under
+it by name. The other overload takes the path directly, with a callback for the rest:
+
+```csharp
+builder.Services.AddLadybugDb("./data/graph", o => o.Config = o.Config with { MaxThreads = 4 });
+```
+
+Either way, `AddLadybugDb` registers:
+
+| Service | Lifetime | Notes |
+|---|---|---|
+| `LadybugDatabase` | Singleton | Opened on first resolve, not at registration, so the container can be built before the data directory exists. Disposed with the container. |
+| `LadybugConnection` | Scoped | One per scope (per request in ASP.NET Core), disposed with the scope. `LadybugConnection` implements both `IDisposable` and `IAsyncDisposable`, so a scope you create yourself may be disposed either way; `CreateAsyncScope()` with `await using` is the idiomatic form, and ASP.NET Core's request scope is already asynchronous. |
+| `IOptions<LadybugDbOptions>` | Singleton | Reports exactly what the database was opened with. |
+| `ladybugdb` health check | — | See [The health check](#the-health-check). Skipped when `DisableHealthChecks` is set. |
+
+```csharp
+await using var scope = provider.CreateAsyncScope();
+var conn = scope.ServiceProvider.GetRequiredService<LadybugConnection>();
+await conn.ExecuteAsync("CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+```
+
+Options are resolved and validated once, at registration, the way Aspire's client integrations do
+it: a missing `DatabasePath` fails the `AddLadybugDb` call itself with `OptionsValidationException`,
+not the first request. (A singleton database could not follow a configuration reload anyway.)
+
+```csharp
+// "LadybugDb": { "Config": { "MaxThreads": 4 } } - no DatabasePath
+try { services.AddLadybugDb(configuration.GetSection("LadybugDb")); }
+catch (OptionsValidationException ex) { Console.WriteLine(ex.Message); }
+// DatabasePath must be set to the database file's path.
+```
+
+`LadybugDbOptions` member reference:
+
+| Member | Description |
+|---|---|
+| `DatabasePath` | The database file's path, passed to `new LadybugDatabase(path, config)`. Required. |
+| `Config` | The `LadybugConfig` for the open. Defaults to the engine's defaults. |
+| `DisableHealthChecks` | `true` to skip registering the health check. Default `false`. |
+
+Calling `AddLadybugDb` twice is not an error: the second call is a no-op, the first registration
+wins (as with `TryAdd`), and there is still exactly one database and one health check.
+
+### The health check
+
+`LadybugDbHealthCheck` opens a fresh connection to the registered `LadybugDatabase`, runs
+`RETURN 1`, and reports `Healthy` when the engine answers within five seconds. It is registered
+under the name `ladybugdb` with the tags `db` and `ladybugdb`, so `MapHealthChecks("/ready",
+new HealthCheckOptions { Predicate = r => r.Tags.Contains("db") })` selects it. A fresh connection,
+rather than the request's scoped one, so the check never contends with a transaction the request
+holds, and so it works from a health endpoint that has no scope of its own.
+
+```csharp
+var report = await provider.GetRequiredService<HealthCheckService>().CheckHealthAsync();
+var entry = report.Entries["ladybugdb"];
+Console.WriteLine($"{entry.Status}: {entry.Description}");
+// Healthy: LadybugDB 0.19.1 answered.
+```
+
+When the check fails, the entry carries the registration's failure status (`Unhealthy` unless you
+registered it otherwise), a description, the exception in `entry.Exception`, and the exception's
+type name under `entry.Data["exception"]`, since health endpoints commonly serialize `Data` and
+drop `Exception`. The failure an in-process engine can actually produce is the database having been
+disposed underneath the container:
+
+```csharp
+provider.GetRequiredService<LadybugDatabase>().Dispose();
+
+var report = await provider.GetRequiredService<HealthCheckService>().CheckHealthAsync();
+var entry = report.Entries["ladybugdb"];
+Console.WriteLine($"{entry.Status}: {entry.Exception?.GetType().Name} - {entry.Data["exception"]}");
+// Unhealthy: ObjectDisposedException - System.ObjectDisposedException
+```
+
+The five-second timeout is applied before the engine is entered, which is where cancellation
+currently takes effect (see [Connections](#connections)); since `RETURN 1` touches no data, a slow
+answer means the process is starved rather than the database.
+
+The check is an ordinary `IHealthCheck` and can be constructed directly against any
+`LadybugDatabase`, registered or not:
+
+```csharp
+using var db = new LadybugDatabase("./mydb");
+var check = new LadybugDbHealthCheck(db);
+var context = new HealthCheckContext
+{
+    Registration = new HealthCheckRegistration("ladybugdb", check, failureStatus: null, tags: null),
+};
+var result = await check.CheckHealthAsync(context);
+Console.WriteLine(result.Status); // Healthy
+```
+
+`HealthCheckService` itself needs logging in the container (`AddLogging()`); every host registers
+that before anything else, so it only comes up when building a bare `ServiceCollection` by hand,
+as the samples here do.
 
 ## Schema guidance
 
@@ -1061,12 +1948,12 @@ client you're using, because it's about how LadybugDB itself performs, not about
 
 ```csharp
 // Good: INT64 primary key.
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Attr(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Attr(dbref INT64, name STRING, PRIMARY KEY(dbref))");
 
 // Avoid: composite STRING primary key costs ~4.8x an INT64 key at equal row count.
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE AttrByString(key STRING, name STRING, PRIMARY KEY(key))")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE AttrByString(key STRING, name STRING, PRIMARY KEY(key))");
 ```
 
 **Don't pack many values into one wide column.** A `MAP(STRING,STRING)` holding ten attributes
@@ -1106,7 +1993,7 @@ static string EscapeForCypherLiteral(string value) =>
     value.Replace(@"\", @"\\").Replace("'", @"\'"); // backslashes first, then apostrophes
 
 var escapedCsvPath = EscapeForCypherLiteral(csvPath);
-await using (var _ = await conn.QueryAsync($"COPY Object FROM '{escapedCsvPath}'")) { }
+await conn.ExecuteAsync($"COPY Object FROM '{escapedCsvPath}'");
 ```
 
 Run against the real engine (`csvPath = @"C:\data\O'Brien's exports\x.csv"`, round-tripped through

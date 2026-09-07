@@ -29,17 +29,17 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 3, name: 'Alan'})")) { }
-            await using (var _ = await conn.QueryAsync(
-                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
-            await using (var _ = await conn.QueryAsync(
-                "MATCH (a:Person {id: 2}), (b:Person {id: 3}) CREATE (a)-[:Knows {since: 1995}]->(b)")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)");
+            await conn.ExecuteAsync("CREATE (:Person {id: 1, name: 'Ada'})");
+            await conn.ExecuteAsync("CREATE (:Person {id: 2, name: 'Grace'})");
+            await conn.ExecuteAsync("CREATE (:Person {id: 3, name: 'Alan'})");
+            await conn.ExecuteAsync(
+                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)");
+            await conn.ExecuteAsync(
+                "MATCH (a:Person {id: 2}), (b:Person {id: 3}) CREATE (a)-[:Knows {since: 1995}]->(b)");
 
             await using var r = await conn.QueryAsync(
                 "MATCH p = (a:Person {id: 1})-[:Knows*1..3]->(c:Person {id: 3}) RETURN p");
@@ -83,14 +83,14 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
-            await using (var _ = await conn.QueryAsync(
-                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 2001}]->(b)")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)");
+            await conn.ExecuteAsync("CREATE (:Person {id: 1, name: 'Ada'})");
+            await conn.ExecuteAsync("CREATE (:Person {id: 2, name: 'Grace'})");
+            await conn.ExecuteAsync(
+                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 2001}]->(b)");
 
             await using var r = await conn.QueryAsync(
                 "MATCH p = (a:Person {id: 1})-[:Knows*1..3]->(b:Person {id: 2}) RETURN p");
@@ -117,10 +117,10 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE U(id INT64, val UUID, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:U {id: 1, val: '3fa85f64-5717-4562-b3fc-2c963f66afa6'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE U(id INT64, val UUID, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:U {id: 1, val: '3fa85f64-5717-4562-b3fc-2c963f66afa6'})");
 
             await using var r = await conn.QueryAsync("MATCH (n:U) RETURN n.val");
             await using var e = r.GetAsyncEnumerator();
@@ -147,14 +147,14 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE U(id INT64, val UUID, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE U(id INT64, val UUID, PRIMARY KEY(id))");
 
             var original = Guid.Parse("f47ac10b-58cc-4372-a567-0e02b2c3d479");
             await using (var stmt = await conn.PrepareAsync("CREATE (n:U {id: 1, val: $val})"))
             {
                 stmt.Bind("val", original);
-                await using (var _ = await stmt.ExecuteAsync()) { }
+                await stmt.ExecuteNonQueryAsync();
             }
 
             await using var r = await conn.QueryAsync("MATCH (n:U) RETURN n.val");
@@ -180,10 +180,10 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE I(id INT64, val INT128, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:I {id: 1, val: 170141183460469231731687303715884105727})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE I(id INT64, val INT128, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:I {id: 1, val: 170141183460469231731687303715884105727})");
 
             await using var r = await conn.QueryAsync("MATCH (n:I) RETURN n.val");
             await using var e = r.GetAsyncEnumerator();
@@ -231,13 +231,13 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE I(id INT64, val INT128, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE I(id INT64, val INT128, PRIMARY KEY(id))");
 
             await using (var stmt = await conn.PrepareAsync("CREATE (n:I {id: 1, val: $val})"))
             {
                 stmt.Bind("val", expected);
-                await using (var _ = await stmt.ExecuteAsync()) { }
+                await stmt.ExecuteNonQueryAsync();
             }
 
             await using var r = await conn.QueryAsync("MATCH (n:I) RETURN n.val");
@@ -270,12 +270,12 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE UN(id INT64, val UNION(a INT64, b STRING), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:UN {id: 1, val: union_value(a := 42)})")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:UN {id: 2, val: union_value(b := 'hello')})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(a INT64, b STRING), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:UN {id: 1, val: union_value(a := 42)})");
+            await conn.ExecuteAsync(
+                "CREATE (n:UN {id: 2, val: union_value(b := 'hello')})");
 
             await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
             await using var e = r.GetAsyncEnumerator();
@@ -313,10 +313,10 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:UN {id: 1, val: union_value(txt := '42')})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:UN {id: 1, val: union_value(txt := '42')})");
 
             await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.val");
             await using var e = r.GetAsyncEnumerator();
@@ -350,9 +350,9 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync($"CREATE (n:UN {{id: 1, val: {literal}}})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(num INT64, txt STRING), PRIMARY KEY(id))");
+            await conn.ExecuteAsync($"CREATE (n:UN {{id: 1, val: {literal}}})");
 
             await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.val");
             await using var e = r.GetAsyncEnumerator();
@@ -386,10 +386,10 @@ public class TypeCoverageTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE UN(id INT64, val UNION(flag BOOL, txt STRING), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:UN {id: 1, val: true})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:UN {id: 2, val: 'hello'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE UN(id INT64, val UNION(flag BOOL, txt STRING), PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:UN {id: 1, val: true})");
+            await conn.ExecuteAsync("CREATE (n:UN {id: 2, val: 'hello'})");
 
             await using var r = await conn.QueryAsync("MATCH (n:UN) RETURN n.id, n.val ORDER BY n.id");
             await using var e = r.GetAsyncEnumerator();

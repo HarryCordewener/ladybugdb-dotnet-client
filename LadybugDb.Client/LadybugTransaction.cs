@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 namespace LadybugDb.Client;
 
 /// <summary>
@@ -10,11 +12,11 @@ namespace LadybugDb.Client;
 /// <see cref="LadybugConnection.BeginTransactionAsync"/> issues the Cypher statement
 /// <c>BEGIN TRANSACTION</c>, <see cref="CommitAsync"/> issues <c>COMMIT</c>, and
 /// <see cref="RollbackAsync"/> issues <c>ROLLBACK</c>, all through the exact same query path as
-/// <see cref="LadybugConnection.QueryAsync"/>. This type exists to make that lifecycle hard to
+/// <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>. This type exists to make that lifecycle hard to
 /// misuse - commit or rollback exactly once, and an undisposed-without-either transaction rolls
 /// back automatically - not because the engine hands back some native transaction handle
 /// underneath it. Nothing stops a caller from issuing <c>BEGIN TRANSACTION</c>/<c>COMMIT</c>/
-/// <c>ROLLBACK</c> directly through <see cref="LadybugConnection.QueryAsync"/> instead; this
+/// <c>ROLLBACK</c> directly through <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> instead; this
 /// type is a convenience over that, not a different code path.
 /// </para>
 /// <para>
@@ -29,7 +31,7 @@ namespace LadybugDb.Client;
 /// why never sending it is the only way to keep the original transaction usable.
 /// </para>
 /// </remarks>
-public sealed class LadybugTransaction : IAsyncDisposable
+public sealed class LadybugTransaction : IAsyncDisposable, IDisposable
 {
     private readonly LadybugConnection _connection;
 
@@ -93,7 +95,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
     internal static async ValueTask<LadybugTransaction> BeginAsync(
         LadybugConnection connection, CancellationToken cancellationToken)
     {
-        await using (var _ = await connection.QueryAsync("BEGIN TRANSACTION", cancellationToken))
+        await using (var _ = await connection.QueryUncheckedAsync("BEGIN TRANSACTION", cancellationToken))
         {
         }
 
@@ -106,6 +108,144 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// <see cref="DisposeAsync"/> performs when neither ran first.
     /// </summary>
     public bool IsCompleted => Volatile.Read(ref _completed) != 0;
+
+    /// <summary>The connection this transaction is open on, and which its statements run against.</summary>
+    /// <remarks>
+    /// A transaction belongs to its connection, not the other way round - that is what
+    /// <c>BEGIN TRANSACTION</c> means to the engine - so every statement run on
+    /// <see cref="Connection"/> participates in this transaction whether it is issued through this
+    /// object or directly. This property, and the three methods below, exist because that is not what
+    /// the shape of the API suggests: a caller holding a transaction reasonably reaches for
+    /// <c>tx.QueryAsync(...)</c> first, and finding nothing there reads as a missing feature rather
+    /// than as a deliberate model. They delegate; they do not add scoping this type cannot provide.
+    /// </remarks>
+    public LadybugConnection Connection => _connection;
+
+    /// <summary>
+    /// Runs a Cypher statement inside this transaction, by delegating to <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>The statement's result.</returns>
+    /// <remarks>
+    /// Exactly <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> on
+    /// <see cref="Connection"/> - see that property's remarks for why this delegation exists rather
+    /// than a scoped execution path.
+    /// </remarks>
+    public ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.QueryAsync(cypher, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a parameterized Cypher statement inside this transaction, by delegating to
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">A dictionary, or an object whose public properties name the parameters.</param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>The statement's result.</returns>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.QueryAsync(cypher, parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a Cypher statement inside this transaction whose rows you do not need, by delegating to
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    public ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.ExecuteAsync(cypher, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a parameterized Cypher statement inside this transaction whose rows you do not need, by
+    /// delegating to <see cref="Connection"/>.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">A dictionary, or an object whose public properties name the parameters.</param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public ValueTask ExecuteAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return _connection.ExecuteAsync(cypher, parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Streams this transaction's rows projected into <typeparamref name="T"/>, by delegating to
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <typeparam name="T">The shape to project each row into.</typeparam>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="parameters">A dictionary, an object whose properties name the parameters, or <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">Observed while streaming.</param>
+    /// <returns>The projected rows.</returns>
+    [RequiresUnreferencedCode(
+        "Projection resolves a constructor and column conversions by reflection.")]
+    public IAsyncEnumerable<T> Select<T>(
+        string cypher, object? parameters = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfCompleted();
+        return SelectCore<T>(cypher, parameters, cancellationToken);
+    }
+
+    /// <remarks>
+    /// The check is repeated here because the stream is lazy: a caller can create it while this
+    /// transaction is open and first enumerate it after the transaction has committed, at which
+    /// point the rows would come from outside the transaction they asked for.
+    /// </remarks>
+    [RequiresUnreferencedCode(
+        "Projection resolves a constructor and column conversions by reflection.")]
+    private async IAsyncEnumerable<T> SelectCore<T>(
+        string cypher, object? parameters, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ThrowIfCompleted();
+        await foreach (var item in _connection.Select<T>(cypher, parameters, cancellationToken)
+            .WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            yield return item;
+        }
+    }
+
+    /// <summary>
+    /// Refuses work once this transaction has committed, rolled back, been disposed, or been closed
+    /// out by a raw <c>COMMIT</c>/<c>ROLLBACK</c>. Without it these methods delegate to the
+    /// connection, where the statement runs auto-committed - persisting, with no error, work the
+    /// caller believes is inside a transaction it could still roll back.
+    /// </summary>
+    private void ThrowIfCompleted()
+    {
+        if (IsCompleted) throw AlreadyCompleted();
+    }
+
+    /// <summary>
+    /// <see cref="LadybugConnection.Nodes{T}"/> on this transaction's connection. A transaction lives
+    /// on the connection (see this type's remarks), so every query run while it is open already
+    /// participates in it; this exists so a caller holding only the transaction need not reach for
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <typeparam name="T">A <see cref="Schema.NodeAttribute"/> type.</typeparam>
+    /// <param name="schema">The schema to translate against, or <see langword="null"/> for <see cref="Schema.LadybugSchema.Default"/>.</param>
+    [RequiresUnreferencedCode("Resolves [Node]/[Rel] descriptors, projected constructors and row conversions by reflection.")]
+    [RequiresDynamicCode("The LINQ provider builds generic method instantiations and expression trees at run time. Use QueryAsync with LadybugRow, or Select<T>, when publishing AOT.")]
+    public IQueryable<T> Nodes<T>(Schema.LadybugSchema? schema = null) => _connection.Nodes<T>(schema);
 
     /// <summary>Commits the transaction by issuing <c>COMMIT</c>.</summary>
     /// <param name="cancellationToken">Forwarded to the underlying <c>COMMIT</c> query.</param>
@@ -134,7 +274,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
 
         try
         {
-            await using (var _ = await _connection.QueryAsync("COMMIT", cancellationToken))
+            await using (var _ = await _connection.QueryUncheckedAsync("COMMIT", cancellationToken))
             {
             }
         }
@@ -161,7 +301,7 @@ public sealed class LadybugTransaction : IAsyncDisposable
 
         try
         {
-            await using (var _ = await _connection.QueryAsync("ROLLBACK", cancellationToken))
+            await using (var _ = await _connection.QueryUncheckedAsync("ROLLBACK", cancellationToken))
             {
             }
         }
@@ -192,25 +332,14 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// still marked completed either way: a rollback that failed to run is not a transaction this
     /// type should let anyone try to commit or roll back again.
     /// </remarks>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (!TryClaimCompletion()) return;
-
-        try
-        {
-            await using var _ = await _connection.QueryAsync("ROLLBACK");
-        }
-        catch
-        {
-            // Swallowed - see remarks above. Unlike CommitAsync/RollbackAsync, the claim is NOT
-            // given back on failure here: disposal must not leave this transaction in a state
-            // where something could still try to commit or roll it back again.
-        }
-        finally
-        {
-            _connection.OnTransactionCompleted(this);
-        }
+        Dispose();
+        return ValueTask.CompletedTask;
     }
+
+    /// <summary>Rolls back if still open. Equivalent to <see cref="DisposeAsync"/>; never throws.</summary>
+    public void Dispose() => EnsureClosedForDispose();
 
     /// <summary>
     /// Closes this transaction out synchronously - rolling it back if it is not already
@@ -275,18 +404,45 @@ public sealed class LadybugTransaction : IAsyncDisposable
     /// exactly the kind of thing that can work by chance for a long time and then not.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Marks this transaction completed because it was closed at the engine level by something other
+    /// than this object - a raw <c>COMMIT</c> or <c>ROLLBACK</c> issued through the connection. Sends
+    /// nothing itself. Not for direct use.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if this call was the one that claimed completion; <see langword="false"/>
+    /// if the transaction had already been completed by some other path.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Without this, a raw <c>COMMIT</c> left this wrapper believing it was still open: its later
+    /// <see cref="CommitAsync"/> would have hit the engine with nothing to commit, and its
+    /// <see cref="DisposeAsync"/> would have issued a rollback for a transaction that no longer
+    /// existed - the client's view of the connection silently disagreeing with the engine's. The
+    /// statement really did close the transaction, so the honest response is to follow the engine
+    /// rather than to keep asserting a state that is no longer true.
+    /// </para>
+    /// <para>
+    /// Deliberately does <em>not</em> call <see cref="LadybugConnection.OnTransactionCompleted"/>:
+    /// the only caller already holds the connection's transaction gate, which that method also takes,
+    /// and <see cref="SemaphoreSlim"/> is not reentrant. Clearing the connection's own field is the
+    /// caller's job, under the gate it already holds.
+    /// </para>
+    /// </remarks>
+    internal bool MarkCompletedExternally() => TryClaimCompletion();
+
     internal void EnsureClosedForDispose()
     {
         if (!TryClaimCompletion()) return;
 
         try
         {
-            var result = _connection.QueryAsync("ROLLBACK").Result;
-            result.DisposeAsync().GetAwaiter().GetResult();
+            using var _ = _connection.QueryUnchecked("ROLLBACK");
         }
         catch
         {
-            // Swallowed - see remarks above: called from a Dispose path that must not throw,
+            // Swallowed - see remarks above. The claim is not given back on failure: disposal must
+            // not leave anything able to commit or roll back again. Called from a Dispose path that must not throw,
             // and there is nothing a caller could usefully do differently even if this
             // surfaced. If this failed because the database is already gone, there is nothing
             // left for the native auto-rollback to conflict with either - the transaction was

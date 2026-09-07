@@ -17,10 +17,10 @@ public class DatabaseLifecycleTests
             await using var conn = await db.ConnectAsync();
 
             // INT64 primary key: a STRING key costs ~4.8x at equal row count.
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 42, name: 'Limbo'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 42, name: 'Limbo'})");
 
             await using var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
             await Assert.That(result.HasNext).IsTrue();
@@ -77,11 +77,11 @@ public class DatabaseLifecycleTests
             await using var conn1 = await db.ConnectAsync();
             await using var conn2 = await db.ConnectAsync();
 
-            await using (var _ = await conn1.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
+            await conn1.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
 
-            await using (var _ = await conn1.QueryAsync("BEGIN TRANSACTION")) { }
-            await using (var _ = await conn1.QueryAsync("CREATE (o:Obj {dbref: 1, name: 'A'})")) { }
+            await conn1.ExecuteAsync("BEGIN TRANSACTION");
+            await conn1.ExecuteAsync("CREATE (o:Obj {dbref: 1, name: 'A'})");
 
             const string conflicting = "CREATE (o:Obj {dbref: 2, name: 'B'})";
             var ex = await Assert.ThrowsAsync<LadybugWriteConflictException>(
@@ -90,7 +90,70 @@ public class DatabaseLifecycleTests
             await Assert.That(ex!.Statement).IsEqualTo(conflicting);
             await Assert.That(ex.Message).Contains("write transaction");
 
-            await using (var _ = await conn1.QueryAsync("COMMIT")) { }
+            await conn1.ExecuteAsync("COMMIT");
+        }
+        finally
+        {
+            TestDatabase.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The same conflict, reached through <see cref="LadybugConnection.PrepareAsync"/> instead of
+    /// a query: preparing a WRITE statement contends for the engine's single writer slot exactly as
+    /// executing one does, so it can fail with the same conflict message. It must surface as the
+    /// same retryable <see cref="LadybugWriteConflictException"/>, not as a plain
+    /// <see cref="LadybugException"/> a retry loop would treat as fatal. Found by the benchmark
+    /// workload's concurrent-writer section, where every writer prepares its statements on its own
+    /// connection while the others are already writing.
+    /// </summary>
+    [Test]
+    public async Task ConcurrentPrepareOfWriteStatement_ThrowsLadybugWriteConflictException()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn1 = await db.ConnectAsync();
+            await using var conn2 = await db.ConnectAsync();
+
+            await conn1.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+
+            await conn1.ExecuteAsync("BEGIN TRANSACTION");
+            await conn1.ExecuteAsync("CREATE (o:Obj {dbref: 1, name: 'A'})");
+
+            const string conflicting = "CREATE (o:Obj {dbref: $d, name: 'B'})";
+            var ex = await Assert.ThrowsAsync<LadybugWriteConflictException>(
+                async () => await conn2.PrepareAsync(conflicting));
+
+            await Assert.That(ex!.Statement).IsEqualTo(conflicting);
+            await Assert.That(ex.Message).Contains("write transaction");
+
+            await conn1.ExecuteAsync("COMMIT");
+        }
+        finally
+        {
+            TestDatabase.Cleanup(path);
+        }
+    }
+
+    /// <summary>
+    /// The engine comes from upstream's <c>LadybugDB.Native</c> package, whose version is the engine
+    /// version, so the library this process loaded must report at least the version this client was
+    /// generated against - and the constructor's compatibility check must accept it.
+    /// </summary>
+    [Test]
+    public async Task EngineVersion_IsReportedAndAtLeastTheMinimum()
+    {
+        var loaded = LadybugDatabase.EngineVersion;
+        await Assert.That(string.IsNullOrWhiteSpace(loaded)).IsFalse();
+        await Assert.That(EngineVersion.IsCompatible(loaded, LadybugDatabase.MinimumEngineVersion)).IsTrue();
+
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
         }
         finally
         {

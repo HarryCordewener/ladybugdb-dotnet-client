@@ -428,5 +428,6 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-# Native binaries are fetched at build time, never committed (see spec §Native acquisition)
-LadybugDb.Client.Native/runtimes/
+
+# Native AOT sample output (docs/BUILDING.md and the aot-publish CI job publish to it).
+aot-out/

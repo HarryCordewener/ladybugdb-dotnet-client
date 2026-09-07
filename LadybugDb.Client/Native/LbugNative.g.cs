@@ -337,6 +337,10 @@ namespace LadybugDb.Client.Native
 
         [LibraryImport("lbug")]
         [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
+        internal static partial lbug_state lbug_connection_get_pushed_sql(lbug_connection* connection, [NativeTypeName("const char *")] sbyte* cypher_query, [NativeTypeName("char **")] sbyte** out_sql);
+
+        [LibraryImport("lbug")]
+        [UnmanagedCallConv(CallConvs = new[] { typeof(CallConvCdecl) })]
         internal static partial void lbug_prepared_statement_destroy(lbug_prepared_statement* prepared_statement);
 
         [LibraryImport("lbug")]

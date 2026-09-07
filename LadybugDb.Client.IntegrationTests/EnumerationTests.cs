@@ -15,10 +15,10 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE N(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE N(id INT64, PRIMARY KEY(id))");
             for (var i = 0; i < 5; i++)
-                await using (var _ = await conn.QueryAsync($"CREATE (n:N {{id: {i}}})")) { }
+                await conn.ExecuteAsync($"CREATE (n:N {{id: {i}}})");
 
             var seen = new List<long>();
             await using var r = await conn.QueryAsync("MATCH (n:N) RETURN n.id ORDER BY n.id");
@@ -38,9 +38,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE M(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:M {id: 1, name: 'x'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE M(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:M {id: 1, name: 'x'})");
 
             await using var r = await conn.QueryAsync("MATCH (n:M) RETURN n.id AS ident, n.name AS label");
             await foreach (var row in r)
@@ -60,10 +60,10 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Q(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Q(id INT64, PRIMARY KEY(id))");
             for (var i = 0; i < 50; i++)
-                await using (var _ = await conn.QueryAsync($"CREATE (n:Q {{id: {i}}})")) { }
+                await conn.ExecuteAsync($"CREATE (n:Q {{id: {i}}})");
 
             using var cts = new CancellationTokenSource();
             var count = 0;
@@ -96,10 +96,10 @@ public class EnumerationTests
         {
             var db = new LadybugDatabase(path);
             var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE R(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE R(id INT64, PRIMARY KEY(id))");
             for (var i = 0; i < 5; i++)
-                await using (var _ = await conn.QueryAsync($"CREATE (n:R {{id: {i}}})")) { }
+                await conn.ExecuteAsync($"CREATE (n:R {{id: {i}}})");
 
             var r = await conn.QueryAsync("MATCH (n:R) RETURN n.id ORDER BY n.id");
             await using var e = r.GetAsyncEnumerator();
@@ -136,8 +136,8 @@ public class EnumerationTests
         {
             var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE S(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE S(id INT64, PRIMARY KEY(id))");
 
             var original = await conn.QueryAsync(
                 "MATCH (n:S) RETURN n.id; MATCH (n:S) RETURN count(*);");
@@ -167,9 +167,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
             await using var original = await conn.QueryAsync(
                 "MATCH (n:T) RETURN n.id; MATCH (n:T) RETURN count(*);");
@@ -213,9 +213,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Z(id INT64, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:Z {id: 1})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Z(id INT64, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:Z {id: 1})");
 
             var script = "MATCH (n:Z) RETURN n.id; MATCH (n:Z) RETURN count(*); MATCH (n:Z) RETURN n.id + 100;";
 
@@ -251,8 +251,8 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE ZZ(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE ZZ(id INT64, PRIMARY KEY(id))");
 
             await using var root = await conn.QueryAsync(
                 "MATCH (n:ZZ) RETURN n.id; MATCH (n:ZZ) RETURN count(*); MATCH (n:ZZ) RETURN 1;");
@@ -278,9 +278,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE ZZZ(id INT64, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:ZZZ {id: 1})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE ZZZ(id INT64, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:ZZZ {id: 1})");
 
             await using var r = await conn.QueryAsync("MATCH (n:ZZZ) RETURN n.id");
             await foreach (var _ in r) { }
@@ -303,9 +303,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE W(id INT64, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:W {id: 1})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE W(id INT64, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:W {id: 1})");
 
             await using var r = await conn.QueryAsync("MATCH (n:W) RETURN n.id");
             await using var e = r.GetAsyncEnumerator();
@@ -329,9 +329,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE V(id INT64, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:V {id: 1})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE V(id INT64, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:V {id: 1})");
 
             await using var r = await conn.QueryAsync("MATCH (n:V) RETURN n.id");
             await using var e = r.GetAsyncEnumerator();
@@ -358,9 +358,9 @@ public class EnumerationTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE U(a INT64, b INT64, PRIMARY KEY(a))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:U {a: 1, b: 2})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE U(a INT64, b INT64, PRIMARY KEY(a))");
+            await conn.ExecuteAsync("CREATE (n:U {a: 1, b: 2})");
 
             await using var r = await conn.QueryAsync("MATCH (n:U) RETURN n.a AS dup, n.b AS dup");
             await using var e = r.GetAsyncEnumerator();

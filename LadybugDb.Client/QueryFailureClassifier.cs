@@ -14,6 +14,7 @@ internal static class QueryFailureClassifier
     /// Classifies a query failure by its error message and returns the exception to throw.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Matches the broad substring <c>"write transaction"</c> rather than a longer phrase like
     /// <c>"one write transaction"</c> or <c>"new write transaction"</c>. The real engine (v0.18.3)
     /// reports the full message
@@ -26,11 +27,25 @@ internal static class QueryFailureClassifier
     /// word (e.g. to "another write transaction is already in progress"). <c>"write transaction"</c>
     /// is present in every phrasing seen so far and is not part of any other error message this
     /// engine is known to emit.
+    /// </para>
+    /// <para>
+    /// Under <see cref="LadybugConfig.EnableMultiWrites"/> the same retryable condition is worded
+    /// <c>"Runtime exception: Write-write conflict of updating the same row."</c> - the collision is
+    /// detected at the row, not the writer slot, so no transaction is mentioned. Matched on
+    /// <c>"write-write conflict"</c>; before it was, a retry loop written to the documented contract
+    /// treated it as fatal.
+    /// </para>
     /// </remarks>
+    /// <summary>Whether the message is the engine's "Interrupted." - what <c>lbug_connection_interrupt</c> produces.</summary>
+    internal static bool IsInterrupted(string? message) =>
+        message is not null && message.Contains("Interrupted", StringComparison.Ordinal);
+
     internal static LadybugException Classify(string? message, string statement)
     {
+        // Two wordings, one retryable condition - see the remarks.
         var isWriteConflict = message is not null
-            && message.Contains("write transaction", StringComparison.OrdinalIgnoreCase);
+            && (message.Contains("write transaction", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("write-write conflict", StringComparison.OrdinalIgnoreCase));
         var normalized = string.IsNullOrEmpty(message) ? "Query failed." : message;
 
         return isWriteConflict

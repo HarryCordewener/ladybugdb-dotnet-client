@@ -157,7 +157,7 @@ internal sealed class LbugQueryResultHandle : LbugStructHandle
     /// <remarks>
     /// <para>
     /// Same allocate-unowned/run-native-call/adopt-only-on-success shape as
-    /// <see cref="LbugFlatTupleHandle.GetNext"/>. What is different, and safety-critical, is
+    /// <see cref="LbugValueHandle.GetListElement"/>. What is different, and safety-critical, is
     /// ownership: verified empirically (not from documentation - the header only says "Returns
     /// the next query result"; the one textual hint is the <c>_is_owned_by_cpp</c> field the
     /// struct carries but the header never explains) via a standalone probe process run three

@@ -1,7 +1,9 @@
 <Solution>
   <Project Path="LadybugDb.Client/LadybugDb.Client.csproj" />
-  <Project Path="LadybugDb.Client.Native/LadybugDb.Client.Native.csproj" />
   <Project Path="LadybugDb.Client.Tests/LadybugDb.Client.Tests.csproj" />
+  <Project Path="LadybugDb.Client.Extensions/LadybugDb.Client.Extensions.csproj" />
+  <Project Path="LadybugDb.Client.Extensions.Tests/LadybugDb.Client.Extensions.Tests.csproj" />
   <Project Path="LadybugDb.Client.IntegrationTests/LadybugDb.Client.IntegrationTests.csproj" />
   <Project Path="LadybugDb.Client.CrashRepro/LadybugDb.Client.CrashRepro.csproj" />
+  <Project Path="LadybugDb.Client.Benchmarks/LadybugDb.Client.Benchmarks.csproj" />
 </Solution>

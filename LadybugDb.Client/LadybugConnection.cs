@@ -1,5 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using LadybugDb.Client.Diagnostics;
 using LadybugDb.Client.Interop;
+using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
 
 namespace LadybugDb.Client;
@@ -13,7 +17,7 @@ namespace LadybugDb.Client;
 /// <remarks>
 /// <b>Thread-safety.</b> Every public member of this type is safe to call concurrently, from
 /// multiple threads, on the same instance - including two overlapping calls to
-/// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync"/> and <see cref="PrepareAsync"/>
+/// <see cref="BeginTransactionAsync"/>. <see cref="QueryAsync(string, CancellationToken)"/> and <see cref="PrepareAsync"/>
 /// were already safe this way - concurrent native re-entry on one connection is the underlying
 /// <c>lbug_connection</c>'s own guarantee ("Each connection is thread-safe", per
 /// <c>third-party/lbug.h</c>'s <c>lbug_connection</c> doc comment), not something this client
@@ -32,7 +36,7 @@ namespace LadybugDb.Client;
 /// only that the C# API surface itself never corrupts its own bookkeeping or crashes the process
 /// under concurrent use.
 /// </remarks>
-public sealed class LadybugConnection : IAsyncDisposable
+public sealed partial class LadybugConnection : IAsyncDisposable, IDisposable
 {
     private readonly LadybugDatabase _database;
     private readonly LbugConnectionHandle _handle;
@@ -45,6 +49,21 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// field's remarks for why.
     /// </summary>
     private LadybugTransaction? _activeTransaction;
+
+    /// <summary>
+    /// Whether a transaction opened by raw <c>BEGIN TRANSACTION</c> through
+    /// <see cref="QueryAsync(string, CancellationToken)"/> - rather than through
+    /// <see cref="BeginTransactionAsync"/>, which produces a <see cref="LadybugTransaction"/> and
+    /// lands in <see cref="_activeTransaction"/> - is currently open.
+    /// </summary>
+    /// <remarks>
+    /// Read and written only under <see cref="_transactionGate"/>, alongside
+    /// <see cref="_activeTransaction"/>, because the two are checked together as one condition: the
+    /// engine allows exactly one transaction per connection regardless of which path opened it, and
+    /// sending a nested <c>BEGIN</c> destroys the one already in flight. See
+    /// <see cref="TrackedTransactionStatementAsync"/>.
+    /// </remarks>
+    private bool _rawTransactionOpen;
 
     /// <summary>
     /// Serializes <see cref="BeginTransactionAsync"/> against itself and against
@@ -68,10 +87,14 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// </summary>
     private readonly SemaphoreSlim _transactionGate = new(1, 1);
 
+    /// <summary>Statements the parameter-object overloads reuse; see <see cref="StatementCache{T}"/>.</summary>
+    private readonly StatementCache<LadybugPreparedStatement> _statements;
+
     internal LadybugConnection(LadybugDatabase database, LbugConnectionHandle handle)
     {
         _database = database;
         _handle = handle;
+        _statements = new StatementCache<LadybugPreparedStatement>(database.Config.StatementCacheSize);
     }
 
     /// <summary>This connection's underlying handle, mirroring <see cref="LadybugDatabase.Handle"/>.</summary>
@@ -92,7 +115,399 @@ public sealed class LadybugConnection : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Execute(cypher));
+
+        // Transaction-control statements go through the bookkeeping path so this connection is not
+        // blind to a transaction the caller opens directly - see TrackedTransactionStatementAsync
+        // for what being blind to one costs. Every other statement, which is nearly all of them,
+        // takes neither the gate nor an allocation for the check.
+        var effect = TransactionStatement.Classify(cypher);
+        return effect == TransactionEffect.None
+            ? ValueTask.FromResult(Execute(cypher, cancellationToken))
+            : TrackedTransactionStatementAsync(cypher, effect, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a raw <c>BEGIN TRANSACTION</c>/<c>COMMIT</c>/<c>ROLLBACK</c> while keeping
+    /// <see cref="_rawTransactionOpen"/> in step with it, and refuses a nested <c>BEGIN</c> before it
+    /// can reach the engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Refusing the nested <c>BEGIN</c> is the whole point, and it prevents silent data loss
+    /// rather than merely reporting an error earlier.</b> The engine does not just reject a nested
+    /// <c>BEGIN TRANSACTION</c> - it tears down the transaction already in flight. Reproduced
+    /// directly: the writes inside the first transaction vanish with no error at write time, and the
+    /// following <c>COMMIT</c> reports "No active transaction for COMMIT." with zero rows committed.
+    /// This is the same hazard <see cref="BeginTransactionAsync"/> has always guarded for the
+    /// transactions it opens itself; before this path existed, a transaction opened by handing
+    /// <c>BEGIN TRANSACTION</c> to <see cref="QueryAsync(string, CancellationToken)"/> was invisible
+    /// to that guard, so the guard could be walked straight past from either direction - a second raw
+    /// <c>BEGIN</c>, or a <see cref="BeginTransactionAsync"/> call that believed nothing was open.
+    /// </para>
+    /// <para>
+    /// The gate is the same one <see cref="BeginTransactionAsync"/> uses, so check-then-send is
+    /// atomic against it and against transaction completion. <see cref="LadybugTransaction"/> issues
+    /// its own statements through <see cref="QueryUncheckedAsync"/> instead of this path: it does its
+    /// own bookkeeping and already holds the gate while doing it, so routing it here would both
+    /// double-count and deadlock.
+    /// </para>
+    /// <para>
+    /// Flags move only on success. A <c>BEGIN</c> the engine refused opened nothing, and a
+    /// <c>COMMIT</c> that failed may well have left the transaction open - so the flag stays set, and
+    /// the next <see cref="BeginTransactionAsync"/> refuses rather than risking the teardown above.
+    /// Refusing when nothing is open is recoverable; destroying a live transaction is not.
+    /// </para>
+    /// </remarks>
+    private async ValueTask<LadybugQueryResult> TrackedTransactionStatementAsync(
+        string cypher, TransactionEffect effect, CancellationToken cancellationToken)
+    {
+        await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (effect == TransactionEffect.Begin && (_activeTransaction is not null || _rawTransactionOpen))
+            {
+                throw new InvalidOperationException(
+                    "This connection already has an active transaction, so this BEGIN TRANSACTION was " +
+                    "not sent to the engine. Sending it would not merely fail - the engine tears down " +
+                    "the transaction already in flight, discarding its writes with no error until a " +
+                    "later COMMIT reports there is nothing to commit. Commit or roll the current " +
+                    "transaction back first. Prefer BeginTransactionAsync, which rolls back " +
+                    "automatically if it is never committed.");
+            }
+
+            var result = Execute(cypher, cancellationToken);
+            _rawTransactionOpen = effect == TransactionEffect.Begin;
+
+            // A raw COMMIT or ROLLBACK closes the transaction at the engine level whichever way it was
+            // opened, including through BeginTransactionAsync. Left alone, that LadybugTransaction
+            // would go on believing it was open - and would later commit into nothing, or roll back a
+            // transaction that no longer exists. Follow the engine instead of asserting a state that
+            // stopped being true. Cleared here, under the gate this method already holds, rather than
+            // through OnTransactionCompleted, which takes that same non-reentrant gate.
+            if (effect == TransactionEffect.End && _activeTransaction is { } managed)
+            {
+                managed.MarkCompletedExternally();
+                _activeTransaction = null;
+                _database.TrackTransactionClosed(this);
+            }
+
+            return result;
+        }
+        finally
+        {
+            _transactionGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Executes a Cypher statement whose rows you do not need - DDL, <c>CREATE</c>, <c>SET</c>,
+    /// <c>DELETE</c>, <c>COPY</c> - and disposes its result for you.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ArgumentException"><paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">This connection or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="cypher"/> is a <c>BEGIN TRANSACTION</c> and this connection already has a
+    /// transaction open - see <see cref="QueryAsync(string, CancellationToken)"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Every statement returns a result, including those that produce no rows, and that result owns
+    /// native memory that has to be released. Reading rows you do not want in order to dispose a
+    /// result you never wanted is the overwhelmingly common case, so this exists to say it once:
+    /// <c>await conn.ExecuteAsync("CREATE (:Object {dbref: 42})")</c> rather than
+    /// <c>await conn.ExecuteAsync("CREATE (:Object {dbref: 42})");</c>.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is returned, because the engine reports nothing to return.</b> Measured directly:
+    /// <c>CREATE</c>, <c>SET</c>, and <c>DELETE</c> all produce a result with zero rows and zero
+    /// columns - there is no affected-row count to hand back, and inventing a <c>0</c> would be worse
+    /// than returning nothing. DDL is the one exception: it produces a single-column row carrying a
+    /// human-readable confirmation such as <c>"Table T has been created."</c>, which this method
+    /// discards. Use <see cref="QueryAsync(string, CancellationToken)"/> if you want to read it.
+    /// </para>
+    /// <para>
+    /// Transaction-control statements are classified exactly as they are by
+    /// <see cref="QueryAsync(string, CancellationToken)"/>, which this delegates to, so running
+    /// <c>BEGIN TRANSACTION</c> through here is tracked and guarded identically.
+    /// </para>
+    /// </remarks>
+    public async ValueTask ExecuteAsync(string cypher, CancellationToken cancellationToken = default)
+    {
+        await using var _ = ((IAsyncDisposable)await QueryAsync(cypher, cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Executes a parameterized Cypher statement whose rows you do not need, and disposes its result
+    /// for you.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L }</c> - whose public properties name the parameters.
+    /// </param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="cypher"/> is blank, or <paramref name="parameters"/> is not a usable parameter source.</exception>
+    /// <exception cref="ObjectDisposedException">This connection or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    /// <remarks>
+    /// Returns nothing for the same measured reason as
+    /// <see cref="ExecuteAsync(string, CancellationToken)"/>.
+    /// </remarks>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public async ValueTask ExecuteAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        await using var _ = ((IAsyncDisposable)await QueryAsync(cypher, parameters, cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Executes <paramref name="cypher"/> without classifying it as transaction control. For
+    /// <see cref="LadybugTransaction"/>, which does its own bookkeeping under
+    /// <see cref="_transactionGate"/> and would deadlock against
+    /// <see cref="TrackedTransactionStatementAsync"/>. Not for direct use.
+    /// </summary>
+    internal ValueTask<LadybugQueryResult> QueryUncheckedAsync(
+        string cypher, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(Execute(cypher, cancellationToken));
+    }
+
+    /// <summary>The synchronous twin of <see cref="QueryUncheckedAsync"/>, for the disposal paths. Not for direct use.</summary>
+    internal LadybugQueryResult QueryUnchecked(string cypher) => Execute(cypher, default);
+
+    /// <summary>
+    /// Executes a parameterized Cypher statement once - preparing it, binding
+    /// <paramref name="parameters"/>, executing, and disposing the statement - and returns its
+    /// result.
+    /// </summary>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L, name = "Limbo" }</c> - whose public properties name the parameters. Each
+    /// value dispatches on its runtime type to the matching typed
+    /// <see cref="LadybugPreparedStatement"/> <c>Bind</c> overload.
+    /// </param>
+    /// <param name="cancellationToken">Checked before the statement is prepared.</param>
+    /// <returns>The statement's result.</returns>
+    /// <remarks>
+    /// <para>
+    /// For a statement run <em>once</em>, which is what this overload is for. To run the same
+    /// statement repeatedly with different values, <see cref="PrepareAsync"/> it and call
+    /// <see cref="LadybugPreparedStatement.ExecuteAsync(object, CancellationToken)"/> per execution,
+    /// so the engine plans the query once instead of on every call.
+    /// </para>
+    /// <para>
+    /// <b>The returned result deliberately outlives the statement this method disposes.</b> That is
+    /// safe, and not by accident: a <see cref="LadybugQueryResult"/> leases its parent
+    /// <see cref="LadybugDatabase"/> and its own handle chain (see
+    /// <see cref="LbugQueryResultHandle.ExecutePrepared"/>), and never the prepared statement that
+    /// produced it - covered directly by the integration suite's
+    /// <c>DisposingStatementBeforeConsumingResult_ResultRemainsUsable</c>, and by
+    /// <c>OneShotQueryAsync_ResultOutlivesTheInternalStatement</c> for this path specifically,
+    /// including the DML case whose result outliving its <em>database</em> is a known
+    /// process-crashing shape in this client. What the result does keep alive is the database, so
+    /// the ordinary rule still holds: dispose the result before the database.
+    /// </para>
+    /// <para>
+    /// Values bind at their natural width and the engine coerces them to the target column - see
+    /// <see cref="LadybugPreparedStatement.ExecuteAsync(object, CancellationToken)"/>'s remarks for
+    /// the measured behaviour.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace; or
+    /// <paramref name="parameters"/> is not a usable parameter bag, or names a value whose runtime
+    /// type has no <c>Bind</c> overload.
+    /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or " +
+        "PrepareAsync with the typed Bind overloads, when trimming.")]
+    public ValueTask<LadybugQueryResult> QueryAsync(
+        string cypher, object parameters, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        ArgumentNullException.ThrowIfNull(parameters);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // This overload executes through a prepared statement, which is not the path that tracks
+        // transaction state - so an unclassified BEGIN TRANSACTION here would open a transaction
+        // this connection knew nothing about, and the next guarded BEGIN would then reach the
+        // engine and destroy it, discarding its writes. Transaction control takes no parameters,
+        // so refusing is both safe and the whole answer.
+        if (TransactionStatement.Classify(cypher) != TransactionEffect.None)
+        {
+            throw new ArgumentException(
+                "Transaction-control statements (BEGIN TRANSACTION, COMMIT, ROLLBACK) take no parameters " +
+                "and are not run through the parameterized overloads, which would open or close a " +
+                "transaction this connection could not track. Use BeginTransactionAsync, or the " +
+                "parameterless QueryAsync/ExecuteAsync overload.", nameof(cypher));
+        }
+
+        // Enumerated once: the names gate reuse (StatementCache<T>.Entry.ParameterNames) and the
+        // binder takes the same list, so the parameters object is reflected over once per call.
+        var pairs = ParameterBinder.Enumerate(parameters);
+        var names = new string[pairs.Count];
+        for (var i = 0; i < names.Length; i++) names[i] = pairs[i].Key;
+        Array.Sort(names, StringComparer.Ordinal);
+
+        var entry = _statements.TryCheckOut(cypher);
+        if (entry is not null && !entry.ParameterNames.AsSpan().SequenceEqual(names))
+        {
+            _statements.Return(entry);
+            throw new ArgumentException(
+                $"This statement was first run with parameters [{string.Join(", ", entry.ParameterNames)}] " +
+                $"and is now being run with [{string.Join(", ", names)}]. A cached prepared statement keeps " +
+                "its previous bound values, so running it with a different set of parameter names would " +
+                "silently reuse stale values for the names left out. Bind the same set of names every time, " +
+                "or use a different statement text.", nameof(parameters));
+        }
+
+        var statement = entry?.Statement ?? LadybugPreparedStatement.Prepare(_database, _handle, cypher);
+        entry ??= new StatementCache<LadybugPreparedStatement>.Entry(cypher, statement, names);
+        try
+        {
+            ParameterBinder.BindAll(statement, pairs);
+            var result = statement.ExecuteBound(cancellationToken);
+            // The result never depends on the statement (see the remarks), so it goes back in.
+            _statements.Return(entry);
+            return ValueTask.FromResult(result);
+        }
+        catch
+        {
+            // Not returned: a schema change behind a cached plan is one way this fails, and the next
+            // call should prepare afresh.
+            statement.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Executes a Cypher statement and streams its rows projected into <typeparamref name="T"/>.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The type to project each row into: either a type with exactly one public constructor whose
+    /// parameter names match the returned columns (case-insensitively - a <c>record</c> is the usual
+    /// shape), or a scalar type for a single-column result. See <see cref="Mapping.RowMapper"/> for the
+    /// full resolution and conversion rules.
+    /// </typeparam>
+    /// <param name="cypher">The Cypher statement, whose <c>$name</c> placeholders name the parameters.</param>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { min = 40L }</c> - whose public properties name the parameters; or
+    /// <see langword="null"/> (the default) for a statement with no parameters, which runs the plain
+    /// <see cref="QueryAsync(string, CancellationToken)"/> path.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Checked before the statement runs and between rows, exactly as
+    /// <see cref="LadybugQueryResult.GetAsyncEnumerator"/> does - honoured whether passed here or via
+    /// <c>await foreach (... in conn.Select&lt;T&gt;(cypher).WithCancellation(token))</c>.
+    /// </param>
+    /// <returns>
+    /// A stream of projected rows. Nothing runs until enumeration starts, and nothing is
+    /// materialized: one row is read and projected per <c>MoveNextAsync</c>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>This method owns the underlying <see cref="LadybugQueryResult"/>, which the caller never
+    /// sees.</b> The result is held in an <c>await using</c> <em>inside</em> the iterator body, so the
+    /// compiler-generated enumerator's <c>DisposeAsync</c> releases it - and that runs on every exit
+    /// path <c>await foreach</c> has: enumeration completing, the caller <c>break</c>ing out early, the
+    /// caller's loop body throwing, and cancellation. A leaked result per query is precisely the class
+    /// of defect this client has repeatedly found, so the <c>break</c> path in particular is pinned by
+    /// <c>SelectDisposalTests</c>, which asserts against
+    /// <see cref="LadybugQueryResult.LiveCount"/> rather than inferring release from process memory.
+    /// </para>
+    /// <para>
+    /// The projection plan is resolved <b>once, from the result's column shape, before the first
+    /// row</b> - not from the first row - so a <typeparamref name="T"/> that cannot map these columns
+    /// is reported even for a query that returns no rows. See <see cref="Mapping.RowMapper"/>'s remarks
+    /// for why that distinction is worth the accessor it needs.
+    /// </para>
+    /// <para>
+    /// Argument validation on <paramref name="cypher"/> happens eagerly, at the call - not deferred to
+    /// the first <c>MoveNextAsync</c> the way an iterator's body otherwise would be. Everything that
+    /// needs the engine or reflection (an unusable <paramref name="parameters"/> bag, a statement the
+    /// engine rejects, a <typeparamref name="T"/> that does not match the columns) necessarily surfaces
+    /// from the first <c>MoveNextAsync</c> instead, since none of it can be known before the query runs.
+    /// </para>
+    /// <para>
+    /// This is the reflective, allocating path: one <c>object?[]</c> per row and one box per column.
+    /// <see cref="QueryAsync(string, CancellationToken)"/> with <see cref="LadybugRow"/>'s typed
+    /// accessors remains the allocation-free way to read a result.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="cypher"/> is <see langword="null"/>, empty, or whitespace. Raised from this
+    /// call. On enumeration, also raised when <paramref name="parameters"/> is not a usable parameter
+    /// bag or names a value whose runtime type has no <c>Bind</c> overload.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// Raised on enumeration: <typeparamref name="T"/> has no constructor matching the returned
+    /// columns, or more than one, or is a scalar type against a result that does not have exactly one
+    /// column, or names a parameter of a type no column converts to.
+    /// </exception>
+    /// <exception cref="LadybugException">
+    /// Raised on enumeration: the statement failed, or a column cannot be converted to its target -
+    /// including a <c>NULL</c> read into a non-nullable value type.
+    /// </exception>
+    [RequiresUnreferencedCode(
+        "Resolves T's constructor and its parameter types by reflection, and reads the parameters " +
+        "object's public properties the same way. Use QueryAsync with LadybugRow's typed accessors " +
+        "when trimming.")]
+    public IAsyncEnumerable<T> Select<T>(
+        string cypher, object? parameters = null, CancellationToken cancellationToken = default)
+    {
+        // Validated here rather than in the iterator below, whose body would not run - and so would
+        // not throw - until the caller's first MoveNextAsync.
+        ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
+        return SelectCore<T>(cypher, parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// The iterator behind <see cref="Select{T}"/>. Separate so that method can validate its
+    /// arguments eagerly - see its remarks.
+    /// </summary>
+    [RequiresUnreferencedCode(
+        "Resolves T's constructor and its parameter types by reflection, and reads the parameters " +
+        "object's public properties the same way.")]
+    private async IAsyncEnumerable<T> SelectCore<T>(
+        string cypher,
+        object? parameters,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // The await using is INSIDE the iterator body deliberately, and this is the whole lifetime
+        // contract: the caller never receives this result, so nothing else can dispose it, and the
+        // generated enumerator's DisposeAsync is what runs this scope's exit - on early break and on a
+        // throw from the caller's loop body just as much as on running to the end.
+        //
+        // `parameters is null` routes to the plain overload rather than passing null to the
+        // parameter-taking one, which rejects null: an omitted parameters argument means "no
+        // parameters", not "a null parameter bag".
+        await using var result = parameters is null
+            ? await QueryAsync(cypher, cancellationToken).ConfigureAwait(false)
+            : await QueryAsync(cypher, parameters, cancellationToken).ConfigureAwait(false);
+
+        // Once, before the first row, and from the result's own column shape - so a T that cannot map
+        // these columns is reported even when there are no rows to map. See RowMapper's remarks.
+        var plan = RowMapper.ResolvePlan<T>(result.ColumnNamesArray);
+
+        await foreach (var row in result.WithCancellation(cancellationToken))
+        {
+            yield return plan.Map(row);
+        }
     }
 
     /// <summary>
@@ -100,7 +515,7 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// values, avoiding re-planning the same query on every call.
     /// </summary>
     /// <remarks>
-    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync"/>:
+    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="QueryAsync(string, CancellationToken)"/>:
     /// <see cref="LadybugPreparedStatement.Prepare"/> leases both this connection's handle and its
     /// parent <see cref="LadybugDatabase"/>'s handle internally.
     /// </remarks>
@@ -108,15 +523,37 @@ public sealed class LadybugConnection : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher));
+        return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database, _handle, cypher));
     }
 
-    private unsafe LadybugQueryResult Execute(string cypher)
+    /// <remarks>Cancellation is wired to the engine's interrupt for the native call's duration - see <see cref="QueryInterrupt"/>.</remarks>
+    private LadybugQueryResult Execute(string cypher, CancellationToken cancellationToken)
+    {
+        var scope = LadybugDiagnostics.Start(cypher, _database.Path);
+        try
+        {
+            var result = ExecuteCore(cypher, cancellationToken);
+            scope.Succeed();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            scope.Fail(ex);
+            throw;
+        }
+    }
+
+    private unsafe LadybugQueryResult ExecuteCore(string cypher, CancellationToken cancellationToken)
     {
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try
         {
-            var handle = LbugQueryResultHandle.Execute(_database.Handle, _handle, (sbyte*)utf8, out var state);
+            LbugQueryResultHandle handle;
+            lbug_state state;
+            using (QueryInterrupt.Register(_handle, cancellationToken))
+            {
+                handle = LbugQueryResultHandle.Execute(_database.Handle, _handle, (sbyte*)utf8, out state);
+            }
 
             // Non-null only on failure: NativeString.TakeOwnership never returns null (it maps a
             // null native pointer to string.Empty), so this doubles as the success/failure flag
@@ -135,7 +572,8 @@ public sealed class LadybugConnection : IAsyncDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                throw QueryFailureClassifier.Classify(failureMessage, cypher);
+                throw (Exception?)QueryInterrupt.AsCancellation(failureMessage, cancellationToken)
+                    ?? QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
             return LadybugQueryResult.Create(_database.Handle, handle);
@@ -181,7 +619,7 @@ public sealed class LadybugConnection : IAsyncDisposable
         // EnsureNoOpenTransactionForDispose) on this same connection - see _transactionGate's
         // remarks for why an unsynchronized version of exactly this sequence used to invalidate
         // the winner's transaction at the engine level under a race.
-        await _transactionGate.WaitAsync(cancellationToken);
+        await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_activeTransaction is not null)
@@ -190,6 +628,18 @@ public sealed class LadybugConnection : IAsyncDisposable
                     "dispose it) before beginning another - sending a nested BEGIN TRANSACTION to " +
                     "the engine would invalidate the first transaction rather than merely rejecting " +
                     "the second call.");
+
+            // The same condition, for a transaction opened by raw Cypher instead of by this method.
+            // Checking only _activeTransaction let this call sail straight past a raw transaction and
+            // destroy it at the engine level - the exact loss the message above describes, reached
+            // from the one direction that guard could not see.
+            if (_rawTransactionOpen)
+                throw new InvalidOperationException(
+                    "This connection already has a transaction opened by a raw BEGIN TRANSACTION " +
+                    "statement, so no BEGIN TRANSACTION was sent. Sending one would tear that " +
+                    "transaction down at the engine level and discard its writes, reporting nothing " +
+                    "until a later COMMIT finds nothing to commit. Commit or roll it back - with a " +
+                    "raw COMMIT or ROLLBACK, matching how it was opened - before beginning another.");
 
             var transaction = await LadybugTransaction.BeginAsync(this, cancellationToken);
 
@@ -269,8 +719,15 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// </remarks>
     public ValueTask DisposeAsync()
     {
-        EnsureNoOpenTransactionForDispose();
-        _handle.Dispose();
+        Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>Closes the connection. Equivalent to <see cref="DisposeAsync"/>: every operation completes synchronously. Safe after the database was disposed.</summary>
+    public void Dispose()
+    {
+        EnsureNoOpenTransactionForDispose();
+        _statements.Dispose();
+        _handle.Dispose();
     }
 }

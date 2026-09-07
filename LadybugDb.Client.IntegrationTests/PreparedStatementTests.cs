@@ -17,9 +17,9 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
                 "CREATE NODE TABLE I(id INT64, i8 INT8, i16 INT16, i32 INT32, i64 INT64, " +
-                "u8 UINT8, u16 UINT16, u32 UINT32, u64 UINT64, PRIMARY KEY(id))")) { }
+                "u8 UINT8, u16 UINT16, u32 UINT32, u64 UINT64, PRIMARY KEY(id))");
 
             await using var stmt = await conn.PrepareAsync(
                 "CREATE (n:I {id: 1, i8: $i8, i16: $i16, i32: $i32, i64: $i64, " +
@@ -32,7 +32,7 @@ public class PreparedStatementTests
             stmt.Bind("u16", ushort.MaxValue);
             stmt.Bind("u32", uint.MaxValue);
             stmt.Bind("u64", ulong.MaxValue);
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync(
                 "MATCH (n:I) RETURN n.i8, n.i16, n.i32, n.i64, n.u8, n.u16, n.u32, n.u64");
@@ -59,8 +59,8 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE R(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE R(id INT64, PRIMARY KEY(id))");
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:R {id: $id})");
             for (var i = 0; i < 3; i++)
@@ -93,8 +93,8 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE U(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE U(id INT64, PRIMARY KEY(id))");
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:U {id: $id})");
             stmt.Bind("nosuchparam", 1L);
@@ -117,11 +117,11 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
                 "CREATE NODE TABLE T(id INT64, b BOOL, f FLOAT, dbl DOUBLE, s STRING, " +
                 "dt DATE, iv INTERVAL, ts TIMESTAMP, tstz TIMESTAMP_TZ, " +
                 "tssec TIMESTAMP_SEC, tsms TIMESTAMP_MS, tsns TIMESTAMP_NS, " +
-                "PRIMARY KEY(id))")) { }
+                "PRIMARY KEY(id))");
 
             var date = new DateOnly(2026, 7, 28);
             var interval = TimeSpan.FromSeconds(123456);
@@ -145,7 +145,7 @@ public class PreparedStatementTests
             stmt.BindTimestampSeconds("tssec", timestampSec);
             stmt.BindTimestampMilliseconds("tsms", timestampMs);
             stmt.BindTimestampNanoseconds("tsns", timestampNs);
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync(
                 "MATCH (n:T) RETURN n.b, n.f, n.dbl, n.s, n.dt, n.iv, n.ts, n.tstz, n.tssec, n.tsms, n.tsns");
@@ -186,9 +186,9 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
                 "CREATE NODE TABLE L(id INT64, ts TIMESTAMP, tssec TIMESTAMP_SEC, " +
-                "tsms TIMESTAMP_MS, tsns TIMESTAMP_NS, PRIMARY KEY(id))")) { }
+                "tsms TIMESTAMP_MS, tsns TIMESTAMP_NS, PRIMARY KEY(id))");
 
             var local = DateTime.SpecifyKind(new DateTime(2026, 7, 28, 12, 34, 56), DateTimeKind.Local);
             var expectedInstant = local.ToUniversalTime();
@@ -199,7 +199,7 @@ public class PreparedStatementTests
             stmt.BindTimestampSeconds("tssec", local);
             stmt.BindTimestampMilliseconds("tsms", local);
             stmt.BindTimestampNanoseconds("tsns", local);
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync("MATCH (n:L) RETURN n.ts, n.tssec, n.tsms, n.tsns");
             await foreach (var row in r)
@@ -221,12 +221,12 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE N(id INT64, val INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE N(id INT64, val INT64, PRIMARY KEY(id))");
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:N {id: 1, val: $val})");
             stmt.BindNull("val");
-            await using (var _ = await stmt.ExecuteAsync()) { }
+            await stmt.ExecuteNonQueryAsync();
 
             await using var r = await conn.QueryAsync("MATCH (n:N) RETURN n.val");
             await foreach (var row in r)
@@ -250,8 +250,8 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE V(id INT64, val INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE V(id INT64, val INT64, PRIMARY KEY(id))");
 
             await using var stmt = await conn.PrepareAsync("CREATE (n:V {id: 1, val: $val})");
             Assert.Throws<ArgumentException>(() => stmt.Bind(name!, 1L));
@@ -274,8 +274,8 @@ public class PreparedStatementTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE D(id INT64, val INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE D(id INT64, val INT64, PRIMARY KEY(id))");
 
             var stmt = await conn.PrepareAsync("CREATE (n:D {id: 1, val: $val})");
             stmt.Bind("val", 42L);

@@ -15,13 +15,13 @@ public class ScalarValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
+            await conn.ExecuteAsync(
                 "CREATE NODE TABLE S(id INT64, b BOOL, i8 INT8, i16 INT16, i32 INT32, " +
                 "u8 UINT8, u16 UINT16, u32 UINT32, u64 UINT64, f FLOAT, d DOUBLE, s STRING, " +
-                "PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
+                "PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
                 "CREATE (n:S {id: 1, b: true, i8: -8, i16: -16, i32: -32, u8: 8, u16: 16, " +
-                "u32: 32, u64: 64, f: 1.5, d: 2.25, s: 'hello'})")) { }
+                "u32: 32, u64: 64, f: 1.5, d: 2.25, s: 'hello'})");
 
             await using var r = await conn.QueryAsync(
                 "MATCH (n:S) RETURN n.b, n.i8, n.i16, n.i32, n.u8, n.u16, n.u32, n.u64, n.f, n.d, n.s");
@@ -52,9 +52,9 @@ public class ScalarValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1, s: 'x'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, s STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:T {id: 1, s: 'x'})");
 
             await using var r = await conn.QueryAsync("MATCH (n:T) RETURN n.id, n.s");
             await using var e = r.GetAsyncEnumerator();
@@ -75,9 +75,9 @@ public class ScalarValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE W(id INT64, s STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:W {id: 1, s: 'x'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE W(id INT64, s STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:W {id: 1, s: 'x'})");
 
             await using var r = await conn.QueryAsync("MATCH (n:W) RETURN n.s");
             await using var e = r.GetAsyncEnumerator();

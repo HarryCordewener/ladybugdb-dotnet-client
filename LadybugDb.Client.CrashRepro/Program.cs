@@ -125,10 +125,10 @@ static async Task DbDisposedFirst_TransactionLeftOpen(string path)
 {
     var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
     var tx = await conn.BeginTransactionAsync();
-    await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+    await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
     db.Dispose();
     await tx.DisposeAsync();
@@ -142,10 +142,10 @@ static async Task DbDisposedFirst_TransactionAlreadyCommitted(string path)
 {
     var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
     var tx = await conn.BeginTransactionAsync();
-    await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+    await conn.ExecuteAsync("CREATE (n:T {id: 1})");
     await tx.CommitAsync();
 
     db.Dispose();
@@ -160,10 +160,10 @@ static async Task ConnectionDisposedFirst_TransactionLeftOpen(string path)
 {
     using var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
     var tx = await conn.BeginTransactionAsync();
-    await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+    await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
     await conn.DisposeAsync();
     _ = tx; // deliberately never committed, rolled back, or disposed directly
@@ -173,10 +173,10 @@ static async Task ConnectionDisposedFirst_TransactionAlreadyCommitted(string pat
 {
     using var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
     var tx = await conn.BeginTransactionAsync();
-    await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+    await conn.ExecuteAsync("CREATE (n:T {id: 1})");
     await tx.CommitAsync();
 
     await conn.DisposeAsync();
@@ -193,10 +193,10 @@ static async Task AbandonWithoutDisposal_TransactionLeftOpen(string path)
 {
     var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
     var tx = await conn.BeginTransactionAsync();
-    await using (var _ = await conn.QueryAsync("CREATE (n:T {id: 1})")) { }
+    await conn.ExecuteAsync("CREATE (n:T {id: 1})");
 
     _ = tx; // never committed, rolled back, or disposed - and neither are conn or db
 }
@@ -243,8 +243,8 @@ static async Task BeginTransactionRacingBeginTransaction(string basePath, int it
         {
             var db = new LadybugDatabase(path);
             var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             using var barrier = new Barrier(2);
             var successCount = 0;
@@ -351,7 +351,7 @@ static async Task DmlResultOutlivesDatabaseDispose(string path)
 {
     var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
     // Deliberately not disposed/awaited-using here - this result must still be alive when
     // db.Dispose() runs below.
@@ -373,8 +373,8 @@ static async Task ReadResultOutlivesDatabaseDispose(string path)
 {
     var db = new LadybugDatabase(path);
     var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
-    await using (var _ = await conn.QueryAsync("CREATE (t:T {id: 1})")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
+    await conn.ExecuteAsync("CREATE (t:T {id: 1})");
 
     var result = await conn.QueryAsync("MATCH (t:T) RETURN t.id");
 
@@ -394,7 +394,7 @@ static async Task ConcurrentBindOnSameStatement(string path, int iterationsPerTh
 {
     using var db = new LadybugDatabase(path);
     await using var conn = await db.ConnectAsync();
-    await using (var _ = await conn.QueryAsync("CREATE NODE TABLE T(id INT64, name STRING, PRIMARY KEY(id))")) { }
+    await conn.ExecuteAsync("CREATE NODE TABLE T(id INT64, name STRING, PRIMARY KEY(id))");
 
     await using var stmt = await conn.PrepareAsync("CREATE (t:T {id: $id, name: $name})");
 
@@ -442,8 +442,8 @@ static async Task BeginTransactionRacingDatabaseDispose(string basePath, int ite
         {
             var db = new LadybugDatabase(path);
             var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))");
 
             using var barrier = new Barrier(2);
             var beginTask = Task.Run(async () =>

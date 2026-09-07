@@ -14,7 +14,7 @@ namespace LadybugDb.Client;
 /// </para>
 /// <para>
 /// A result obtained from <see cref="NextResultAsync"/> additionally leases <c>_root</c>: the
-/// <em>original</em> result returned from a <see cref="LadybugConnection.QueryAsync"/> call, not
+/// <em>original</em> result returned from a <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> call, not
 /// necessarily this result's immediate predecessor in the chain. <see cref="Interop.LbugQueryResultHandle.GetNextQueryResult"/>
 /// documents the empirical finding this depends on - every result but the original comes back
 /// from the native API as a <em>view</em> the original's storage owns (its own
@@ -39,14 +39,14 @@ namespace LadybugDb.Client;
 /// instead of doing that silently - see the remarks on each member.
 /// </para>
 /// </remarks>
-public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<LadybugRow>
+public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEnumerable<LadybugRow>
 {
     private readonly LbugDatabaseHandle _database;
     private readonly LbugQueryResultHandle _handle;
 
     /// <summary>
     /// The result that actually owns native storage for this whole chain - itself, for a result
-    /// returned directly from <see cref="LadybugConnection.QueryAsync"/>; the same value passed
+    /// returned directly from <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>; the same value passed
     /// down from the predecessor, for a result returned from <see cref="NextResultAsync"/>. See
     /// this type's remarks.
     /// </summary>
@@ -60,11 +60,49 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     /// </summary>
     private readonly string[] _columnNames;
 
+    /// <summary>Every column's type id, read once: a column's type cannot change between rows, and <c>lbug_value_get_data_type</c> allocates per call.</summary>
+    private readonly lbug_data_type_id[] _columnTypes;
+
     /// <summary><see langword="true"/> once <see cref="GetAsyncEnumerator"/> has been called - see its remarks.</summary>
     private bool _enumerated;
 
     /// <summary><see langword="true"/> once <see cref="NextResultAsync"/> has returned a real result - see its remarks.</summary>
     private bool _nextResultConsumed;
+
+    /// <summary>
+    /// <c>1</c> once <see cref="DisposeAsync"/> has run, so a second disposal - which is legal, and
+    /// which <c>await using</c> plus an explicit <see cref="DisposeAsync"/> produces routinely - does
+    /// not decrement <see cref="_liveCount"/> twice.
+    /// </summary>
+    private int _disposed;
+
+    /// <summary>Backing field for <see cref="LiveCount"/>.</summary>
+    private static long _liveCount;
+
+    /// <summary>
+    /// How many <see cref="LadybugQueryResult"/> instances have been constructed and not yet
+    /// disposed, process-wide.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Exists for the tests, and specifically for one class of them.</b> Nothing in this client's
+    /// behaviour reads it. A caller who never receives a result - which is the whole shape of
+    /// <see cref="LadybugConnection.Select{T}"/>, where the result lives and dies inside a compiler-
+    /// generated iterator - has no handle to assert disposal against, so without a counter here the
+    /// only available evidence that the iterator released its result is an
+    /// <see cref="Environment.WorkingSet"/> measurement: a whole-process metric this repository has
+    /// already had to quarantine on hosted CI, and one that a
+    /// <see cref="System.Runtime.InteropServices.SafeHandle"/> finalizer can silently paper over. This
+    /// counter makes "the result was released" a deterministic assertion instead.
+    /// </para>
+    /// <para>
+    /// Deliberately counts <em>explicit disposal</em> only: this type has no finalizer, so a leaked
+    /// result never decrements this, which is exactly the property the leak assertion needs. Note the
+    /// counter is process-wide - there is nothing to scope it to a single test - so a test reading it
+    /// must run alone (<c>[NotInParallel]</c>), for the same reason <c>LeakTests</c> does.
+    /// </para>
+    /// </remarks>
+    internal static long LiveCount => Interlocked.Read(ref _liveCount);
 
     /// <summary>
     /// Constructs a result directly owned by <paramref name="handle"/> (see <see cref="_root"/>),
@@ -95,9 +133,55 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
         _handle = handle;
         _root = root;
         _columnNames = ReadColumnNames();
+        _columnTypes = ReadColumnTypes();
+
+        // Last, so a constructor that threw above (ReadColumnNames can) does not count a result that
+        // was never handed out and so can never be disposed - see LiveCount.
+        Interlocked.Increment(ref _liveCount);
     }
 
+    /// <summary>
+    /// This result's own handle, for the interop layer. Dereferencing it requires the same leases
+    /// every native call in this type takes - the owning database's, the root result's, and this
+    /// handle's own - held for the whole call; taking them in any other combination is how a
+    /// disposed ancestor's freed storage gets dereferenced, which is a crash rather than an
+    /// exception. See <see cref="HasNext"/> for the shape.
+    /// </summary>
     internal LbugQueryResultHandle Handle => _handle;
+
+    /// <summary>
+    /// This result's column names, in result order - read once from the engine when the result was
+    /// constructed (see <see cref="_columnNames"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The live array, not a copy: this is <see langword="internal"/> precisely so it can be, and
+    /// callers inside this assembly must treat it as read-only. <see cref="LadybugRow"/> is handed the
+    /// same array for the same reason.
+    /// </para>
+    /// <para>
+    /// <b>Why the result, and not just a row, exposes the column shape.</b> A projection resolved from
+    /// the first <em>row</em> cannot be resolved at all for a result that returns none, so a query
+    /// returning zero rows would silently "succeed" against a <c>T</c> that could never have mapped
+    /// its columns. Reading the shape here lets <see cref="LadybugConnection.Select{T}"/> resolve its
+    /// plan before the first row and report a mismatched <c>T</c> on an empty result too.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<string> ColumnNames => _columnNamesView ??= Array.AsReadOnly(_columnNames);
+
+    /// <summary>
+    /// Read-only view over <see cref="_columnNames"/>, built once on first access. The array itself is
+    /// never handed out: <see cref="string"/><c>[]</c> implements
+    /// <see cref="IReadOnlyList{T}"/>, so returning it directly would let a caller cast back to the
+    /// array and rewrite this result's column names.
+    /// </summary>
+    private IReadOnlyList<string>? _columnNamesView;
+
+    /// <summary>
+    /// The column names, as the array this result owns. For the mapping layer, which compares and
+    /// hashes them per row and should not pay for the read-only wrapper. Not for direct use.
+    /// </summary>
+    internal string[] ColumnNamesArray => _columnNames;
 
     /// <summary>
     /// <see langword="true"/> if there is at least one more row available from
@@ -114,11 +198,20 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
         }
     }
 
-    /// <summary>Closes the result. Safe to call even if the parent database was disposed first.</summary>
+    /// <summary>Closes the result. Safe to call even if the parent database was disposed first, and idempotent.</summary>
     public ValueTask DisposeAsync()
     {
-        _handle.Dispose();
+        Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>Closes the result. Equivalent to <see cref="DisposeAsync"/>; idempotent in any combination with it.</summary>
+    public void Dispose()
+    {
+        // Once, however many times this is called - see LiveCount and _disposed.
+        if (Interlocked.Exchange(ref _disposed, 1) == 0) Interlocked.Decrement(ref _liveCount);
+
+        _handle.Dispose();
     }
 
     /// <summary>
@@ -154,7 +247,7 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
 
     /// <summary>
     /// Advances to the next statement's result, for a script that ran more than one Cypher
-    /// statement in a single <see cref="LadybugConnection.QueryAsync"/> call. Returns
+    /// statement in a single <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> call. Returns
     /// <see langword="null"/> when this was the last statement.
     /// </summary>
     /// <remarks>
@@ -228,41 +321,68 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     }
 
     /// <remarks>
-    /// Leases <see cref="_database"/> and <see cref="_root"/> for the entire read, in addition to
-    /// the per-call lease each native step already takes on its own handle - see
-    /// <see cref="HasNext"/> for why. The lease is held across every native call this method makes
-    /// (has-next check, tuple fetch, one value fetch per column) rather than re-acquired per call,
-    /// since none of it can run safely once the database or the owning result is gone.
+    /// The tuple and the cells are borrows the engine owns - <c>lbug_query_result_get_next</c> and
+    /// <c>lbug_flat_tuple_get_value</c> both store C++-owned pointers (<c>_is_owned_by_cpp = true</c>)
+    /// whose destroy calls are no-ops (upstream <c>src/c_api/flat_tuple.cpp</c>, <c>value.cpp</c>) - so
+    /// the wrapper structs live on this frame, with no <see cref="System.Runtime.InteropServices.SafeHandle"/>
+    /// and no destroy. The result lease held for the whole read is the same guarantee the per-call
+    /// leases used to give. Container elements and node/rel properties are caller-owned and still
+    /// go through <see cref="LbugValueHandle"/> in <see cref="ValueReader"/>. Measured on 10,000
+    /// three-column rows: 858 ns/row before, 323 ns/row after.
     /// </remarks>
     private unsafe LadybugRow? ReadRow()
     {
         using var dbLease = _database.Acquire();
         using var rootLease = _root.Acquire();
+        using var lease = _handle.Acquire();
 
-        bool hasNext;
-        using (var lease = _handle.Acquire())
-        {
-            hasNext = LbugNative.lbug_query_result_has_next((lbug_query_result*)lease.Pointer) != 0;
-        }
-        if (!hasNext) return null;
+        var result = (lbug_query_result*)lease.Pointer;
+        if (LbugNative.lbug_query_result_has_next(result) == 0) return null;
 
-        using var tupleHandle = LbugFlatTupleHandle.GetNext(_handle, out var tupleState);
-        if (tupleState != lbug_state.LbugSuccess)
+        lbug_flat_tuple tuple;
+        if (LbugNative.lbug_query_result_get_next(result, &tuple) != lbug_state.LbugSuccess)
             throw new LadybugException(NativeString.WithErrorDetail("Failed to advance to the next row."));
 
         var columnCount = _columnNames.Length;
         var values = new LadybugValue[columnCount];
+        lbug_value cell;
         for (var i = 0; i < columnCount; i++)
         {
-            using var valueHandle = LbugValueHandle.GetValue(tupleHandle, (ulong)i, out var valueState);
-            if (valueState != lbug_state.LbugSuccess)
+            if (LbugNative.lbug_flat_tuple_get_value(&tuple, (ulong)i, &cell) != lbug_state.LbugSuccess)
                 throw new LadybugException(NativeString.WithErrorDetail($"Failed to read column {i}."));
 
-            using var lease = valueHandle.Acquire();
-            values[i] = ValueReader.Read((lbug_value*)lease.Pointer);
+            values[i] = ValueReader.Read(&cell, _columnTypes[i]);
         }
 
         return new LadybugRow(values, _columnNames);
+    }
+
+    /// <summary>Once, from the constructor; the <c>lbug_logical_type</c> each call fills is caller-owned and destroyed here.</summary>
+    private unsafe lbug_data_type_id[] ReadColumnTypes()
+    {
+        using var dbLease = _database.Acquire();
+        using var rootLease = _root.Acquire();
+        using var lease = _handle.Acquire();
+
+        var result = (lbug_query_result*)lease.Pointer;
+        var count = LbugNative.lbug_query_result_get_num_columns(result);
+        var types = new lbug_data_type_id[count];
+        for (ulong i = 0; i < count; i++)
+        {
+            lbug_logical_type type;
+            var state = LbugNative.lbug_query_result_get_column_data_type(result, i, &type);
+            if (state != lbug_state.LbugSuccess)
+                throw new LadybugException(NativeString.WithErrorDetail($"Failed to read the type of column {i}."));
+            try
+            {
+                types[i] = LbugNative.lbug_data_type_get_id(&type);
+            }
+            finally
+            {
+                LbugNative.lbug_data_type_destroy(&type);
+            }
+        }
+        return types;
     }
 
     /// <remarks>

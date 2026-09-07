@@ -16,8 +16,7 @@ covered by an SLA.
 ## Scope
 
 **In scope:** this repository — the .NET binding itself (`LadybugDb.Client`), how it marshals
-data across the P/Invoke boundary, how it manages native handle lifetime, and how
-`LadybugDb.Client.Native` packages and verifies the binaries it redistributes.
+data across the P/Invoke boundary, and how it manages native handle lifetime.
 
 **Out of scope:** the LadybugDB engine itself. A vulnerability in `liblbug`'s query execution,
 storage format, or C API belongs to [LadybugDB/ladybug](https://github.com/LadybugDB/ladybug) —
@@ -26,8 +25,9 @@ and we'll redirect it if needed.
 
 ## Native binary integrity
 
-`LadybugDb.Client.Native` redistributes prebuilt `liblbug` binaries. It never builds them from
-source. Every binary is pinned to a specific upstream release and verified by SHA256 against
-`LadybugDb.Client.Native/liblbug.lock` before it's placed in the package — see
-[docs/BUILDING.md](docs/BUILDING.md#how-native-binaries-are-pinned-and-verified). A hash mismatch
-fails the build rather than shipping an unverified binary.
+This repository redistributes no `liblbug` binaries. The engine comes from upstream's own
+`LadybugDB.Native` packages on nuget.org, published by the LadybugDB organization from its
+releases; their integrity is upstream's responsibility and NuGet's signing. This client pins the
+engine version it was generated against (`third-party/liblbug.version`) and refuses to open a
+database against an older engine — see
+[docs/BUILDING.md](docs/BUILDING.md#how-the-engine-version-is-pinned).

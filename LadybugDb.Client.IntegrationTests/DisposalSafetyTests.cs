@@ -47,10 +47,10 @@ public class DisposalSafetyTests
         {
             var db = new LadybugDatabase(path);
             var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 1, name: 'Limbo'})");
 
             var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
             await using var enumerator = result.GetAsyncEnumerator();
@@ -119,10 +119,10 @@ public class DisposalSafetyTests
         {
             var db = new LadybugDatabase(path);
             var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 1, name: 'Limbo'})");
 
             var result = await conn.QueryAsync("MATCH (o:Obj) RETURN o.name");
             string? name = null;

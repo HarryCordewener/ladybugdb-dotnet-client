@@ -1,8 +1,12 @@
+using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ExtendedNumerics;
+using LadybugDb.Client.Diagnostics;
 using LadybugDb.Client.Interop;
+using LadybugDb.Client.Mapping;
 using LadybugDb.Client.Native;
 
 namespace LadybugDb.Client;
@@ -15,9 +19,9 @@ namespace LadybugDb.Client;
 /// <para>
 /// Leases only its own <see cref="LbugPreparedStatementHandle"/> for every <c>Bind*</c> call: none
 /// of the <c>lbug_prepared_statement_bind_*</c> entry points take a connection or database
-/// pointer, so - unlike <see cref="ExecuteAsync"/>, which calls <c>lbug_connection_execute</c> and
+/// pointer, so - unlike <see cref="ExecuteAsync(CancellationToken)"/>, which calls <c>lbug_connection_execute</c> and
 /// therefore leases the parent database and connection too, exactly like
-/// <see cref="LadybugConnection.QueryAsync"/> - there is no ancestor storage a bind call could
+/// <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/> - there is no ancestor storage a bind call could
 /// dereference after it was freed.
 /// </para>
 /// <para>
@@ -33,16 +37,16 @@ namespace LadybugDb.Client;
 /// which only protects against a concurrent <em>disposal</em>, a separate concern from concurrent
 /// re-entry into the same mutable native state. This is not a hot path relative to the native call
 /// itself, so a plain <see cref="Lock"/> is the right tool - no need for anything fancier.
-/// <see cref="ExecuteAsync"/> deliberately does NOT take this lock: it does not touch
+/// <see cref="ExecuteAsync(CancellationToken)"/> deliberately does NOT take this lock: it does not touch
 /// <c>_bound_values</c> itself (the engine reads whatever was bound most recently, whenever
 /// <c>lbug_connection_execute</c> runs), so serializing it against binds would only add contention
-/// without closing any actual gap - see that method's remarks. What <see cref="ExecuteAsync"/> gets
+/// without closing any actual gap - see that method's remarks. What <see cref="ExecuteAsync(CancellationToken)"/> gets
 /// concurrently with a <c>Bind</c> in flight, if a caller races the two, is a query result that
 /// reflects the bound values as of whenever the engine happened to read them - a correctness
 /// question for the CALLER to avoid by not doing that, not a memory-safety one.
 /// </para>
 /// </remarks>
-public sealed class LadybugPreparedStatement : IAsyncDisposable
+public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
 {
     private static readonly DateOnly Epoch = new(1970, 1, 1);
 
@@ -50,6 +54,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     private readonly LbugConnectionHandle _connection;
     private readonly LbugPreparedStatementHandle _handle;
     private readonly string _cypher;
+    private readonly string _databasePath;
 
     /// <summary>
     /// Serializes every <c>Bind*</c>/<see cref="BindNull"/> call on this instance against every
@@ -59,12 +64,14 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
 
     /// <summary>
     /// Runs <c>lbug_connection_prepare</c> and checks <c>lbug_prepared_statement_is_success</c>,
-    /// throwing on failure - the compile-time counterpart of how <see cref="LadybugConnection.QueryAsync"/>
+    /// throwing on failure - the compile-time counterpart of how <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>
     /// checks <c>lbug_query_result_is_success</c> after a plain query.
     /// </summary>
     internal static unsafe LadybugPreparedStatement Prepare(
-        LbugDatabaseHandle database, LbugConnectionHandle connection, string cypher)
+        LadybugDatabase owner, LbugConnectionHandle connection, string cypher)
     {
+        var database = owner.Handle;
+        var databasePath = owner.Path;
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try
         {
@@ -86,10 +93,13 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                throw new LadybugException(failureMessage, cypher);
+                // Classified: preparing a write statement contends for the writer slot like
+                // executing one, so it can fail with the retryable conflict.
+                throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
-            return new LadybugPreparedStatement(database, connection, handle, cypher);
+            Interlocked.Increment(ref _preparedCount);
+            return new LadybugPreparedStatement(database, connection, handle, cypher, databasePath);
         }
         finally
         {
@@ -98,12 +108,14 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     }
 
     private LadybugPreparedStatement(
-        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle handle, string cypher)
+        LbugDatabaseHandle database, LbugConnectionHandle connection, LbugPreparedStatementHandle handle,
+        string cypher, string databasePath)
     {
         _database = database;
         _connection = connection;
         _handle = handle;
         _cypher = cypher;
+        _databasePath = databasePath;
     }
 
     /// <summary>Binds a boolean parameter.</summary>
@@ -558,7 +570,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// whatever values the most recent <c>Bind</c> calls set.
     /// </summary>
     /// <remarks>
-    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="LadybugConnection.QueryAsync"/>:
+    /// No <c>IsClosed</c> pre-check here, for the same reason as <see cref="LadybugConnection.QueryAsync(string, CancellationToken)"/>:
     /// <see cref="Execute"/> leases this statement's handle and both its ancestor connection's and
     /// database's handles internally (via <see cref="LbugQueryResultHandle.ExecutePrepared"/>), and
     /// those leases already throw <see cref="ObjectDisposedException"/> if any of the three has been
@@ -567,12 +579,196 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     public ValueTask<LadybugQueryResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Execute());
+        return ValueTask.FromResult(Execute(cancellationToken));
     }
 
-    private unsafe LadybugQueryResult Execute()
+    /// <summary>
+    /// Binds every parameter named by <paramref name="parameters"/>, then executes this statement -
+    /// the one-call equivalent of a <c>Bind</c> per parameter followed by
+    /// <see cref="ExecuteAsync(CancellationToken)"/>.
+    /// </summary>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object - typically an anonymous one, such as
+    /// <c>new { dbref = 42L, name = "Limbo" }</c> - whose public properties name the parameters. Each
+    /// value dispatches on its runtime type to the matching typed <c>Bind</c> overload.
+    /// </param>
+    /// <param name="cancellationToken">Checked before any binding happens.</param>
+    /// <returns>The statement's result, exactly as <see cref="ExecuteAsync(CancellationToken)"/> returns it.</returns>
+    /// <remarks>
+    /// <para>
+    /// Binds only the parameters <paramref name="parameters"/> names. Any parameter bound by an
+    /// earlier call and not named here keeps its previous value - this statement's bound values are
+    /// engine-side state that survives execution, which is what makes reuse across executions work
+    /// at all.
+    /// </para>
+    /// <para>
+    /// <b>Integer and floating-point values bind at their natural width, which the engine then
+    /// coerces to the target column.</b> An <see langword="int"/> binds <c>INT32</c> and reaches an
+    /// <c>INT64</c> column fine; a <see langword="float"/> binds <c>FLOAT</c> and reaches a
+    /// <c>DOUBLE</c> column fine. This was measured against the engine, not assumed - see the
+    /// integration suite's <c>ParameterWidthCoercionTests</c>. A value outside the target column's
+    /// range is rejected with a <see cref="LadybugException"/> carrying the engine's overflow error,
+    /// not silently truncated.
+    /// </para>
+    /// <para>
+    /// The 19 typed <c>Bind</c> overloads remain the reflection-free, allocation-free path and stay
+    /// the recommendation wherever the parameter types are known at the call site.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="parameters"/> is not a usable parameter bag - a single value, a sequence, a
+    /// dictionary with non-<see cref="string"/> keys, or an object exposing no readable properties -
+    /// or names a value whose runtime type has no <c>Bind</c> overload, in which case the message
+    /// names both the parameter and that type.
+    /// </exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public ValueTask<LadybugQueryResult> ExecuteAsync(
+        object parameters, CancellationToken cancellationToken = default)
     {
-        var handle = LbugQueryResultHandle.ExecutePrepared(_database, _connection, _handle, out var state);
+        ArgumentNullException.ThrowIfNull(parameters);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ParameterBinder.BindAll(this, parameters);
+        return ValueTask.FromResult(Execute(cancellationToken));
+    }
+
+    /// <summary>
+    /// Executes this statement with whatever is currently bound, discarding its result.
+    /// </summary>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ObjectDisposedException">This statement, its connection, or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    /// <remarks>
+    /// The counterpart to <see cref="LadybugConnection.ExecuteAsync(string, CancellationToken)"/>, for
+    /// the case a prepared statement is most often used for: the same write run many times. Without
+    /// it, reusing a plan for writes means disposing a result per execution that has nothing in it -
+    /// <see cref="ExecuteAsync(CancellationToken)"/> returns one because reads need it.
+    /// Returns nothing for the same measured reason: the engine reports no affected-row count.
+    /// </remarks>
+    public async ValueTask ExecuteNonQueryAsync(CancellationToken cancellationToken = default)
+    {
+        await using var _ = ((IAsyncDisposable)await ExecuteAsync(cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Binds <paramref name="parameters"/>, executes this statement, and discards its result.
+    /// </summary>
+    /// <param name="parameters">A dictionary keyed by parameter name, or an object whose public properties name the parameters.</param>
+    /// <param name="cancellationToken">Checked before the statement runs.</param>
+    /// <returns>A task that completes when the statement has run and its result has been released.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ObjectDisposedException">This statement, its connection, or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement.</exception>
+    [RequiresUnreferencedCode(
+        "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
+        "typed Bind overloads, when trimming.")]
+    public async ValueTask ExecuteNonQueryAsync(
+        object parameters, CancellationToken cancellationToken = default)
+    {
+        await using var _ = ((IAsyncDisposable)await ExecuteAsync(parameters, cancellationToken).ConfigureAwait(false))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Executes this statement and streams its rows projected into <typeparamref name="T"/>,
+    /// disposing the underlying result itself.
+    /// </summary>
+    /// <typeparam name="T">The shape to project each row into - a record or class whose constructor
+    /// parameters match the returned column names, or a scalar type for a single-column result.</typeparam>
+    /// <param name="parameters">
+    /// A dictionary keyed by parameter name, or an object whose public properties name the
+    /// parameters; or <see langword="null"/> to execute with whatever is already bound, which is what
+    /// the typed <c>Bind</c> overloads are for.
+    /// </param>
+    /// <param name="cancellationToken">Observed while streaming.</param>
+    /// <returns>The projected rows, streamed.</returns>
+    /// <exception cref="ObjectDisposedException">This statement, its connection, or its database has been disposed.</exception>
+    /// <exception cref="LadybugException">The engine rejected the statement, or a column will not convert to its target.</exception>
+    /// <exception cref="InvalidOperationException">No constructor of <typeparamref name="T"/> matches the returned columns, or more than one does.</exception>
+    /// <remarks>
+    /// <para>
+    /// Without this, typed projection and statement reuse were mutually exclusive: projection lived
+    /// only on <see cref="LadybugConnection.Select{T}"/>, which prepares and discards a statement per
+    /// call, so a caller who wanted both the ergonomic read and the planned-once execution had to give
+    /// one of them up and hand-map rows. Preparing once and projecting per execution is the
+    /// combination this exists to allow.
+    /// </para>
+    /// <para>
+    /// Lifetime matches <see cref="LadybugConnection.Select{T}"/>: the result is held in an
+    /// <see langword="await"/> <see langword="using"/> inside the iterator, so it is released when
+    /// enumeration completes, when the caller breaks out early, and when the caller's loop body
+    /// throws. The statement itself is <em>not</em> disposed - it is yours, and reusing it is the
+    /// point.
+    /// </para>
+    /// <para>
+    /// <b>One execution at a time per statement.</b> Bound values live on the shared native statement,
+    /// so two overlapping enumerations of the same <see cref="LadybugPreparedStatement"/> would
+    /// interleave their parameters. Enumerate one fully - or prepare a statement per concurrent
+    /// caller.
+    /// </para>
+    /// </remarks>
+    [RequiresUnreferencedCode(
+        "Projection resolves a constructor and column conversions by reflection, and reading a " +
+        "parameters object reads its public properties the same way.")]
+    public async IAsyncEnumerable<T> Select<T>(
+        object? parameters = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // null means "use what is already bound", not "bind a null parameter bag" - the same
+        // distinction LadybugConnection.Select<T> draws.
+        await using var result = parameters is null
+            ? await ExecuteAsync(cancellationToken).ConfigureAwait(false)
+            : await ExecuteAsync(parameters, cancellationToken).ConfigureAwait(false);
+
+        // From the result's column shape rather than its first row, so a T that cannot map these
+        // columns is reported even when the statement returns none.
+        var plan = RowMapper.ResolvePlan<T>(result.ColumnNamesArray);
+
+        await foreach (var row in result.WithCancellation(cancellationToken))
+        {
+            yield return plan.Map(row);
+        }
+    }
+
+    /// <summary>Backing field for <see cref="PreparedCount"/>.</summary>
+    private static long _preparedCount;
+
+    /// <summary>Statements prepared process-wide; the tests' evidence that the cache reused one. See <see cref="LadybugQueryResult.LiveCount"/>.</summary>
+    internal static long PreparedCount => Interlocked.Read(ref _preparedCount);
+
+    /// <summary>Executes with whatever is bound; for <see cref="LadybugConnection"/>'s cache path.</summary>
+    internal LadybugQueryResult ExecuteBound(CancellationToken cancellationToken) => Execute(cancellationToken);
+
+    /// <remarks>Mirrors <c>LadybugConnection.Execute</c>; cancellation via <see cref="QueryInterrupt"/>.</remarks>
+    private LadybugQueryResult Execute(CancellationToken cancellationToken)
+    {
+        var scope = LadybugDiagnostics.Start(_cypher, _databasePath);
+        try
+        {
+            var result = ExecuteCore(cancellationToken);
+            scope.Succeed();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            scope.Fail(ex);
+            throw;
+        }
+    }
+
+    private unsafe LadybugQueryResult ExecuteCore(CancellationToken cancellationToken)
+    {
+        LbugQueryResultHandle handle;
+        lbug_state state;
+        using (QueryInterrupt.Register(_connection, cancellationToken))
+        {
+            handle = LbugQueryResultHandle.ExecutePrepared(_database, _connection, _handle, out state);
+        }
 
         // Non-null only on failure - see LadybugConnection.Execute.
         string? failureMessage = null;
@@ -587,7 +783,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
         if (failureMessage is not null)
         {
             handle.Dispose();
-            throw QueryFailureClassifier.Classify(failureMessage, _cypher);
+            throw (Exception?)QueryInterrupt.AsCancellation(failureMessage, cancellationToken)
+                ?? QueryFailureClassifier.Classify(failureMessage, _cypher);
         }
 
         return LadybugQueryResult.Create(_database, handle);
@@ -658,7 +855,10 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// <summary>Destroys this prepared statement. Safe to call even if the parent connection or database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {
-        _handle.Dispose();
+        Dispose();
         return ValueTask.CompletedTask;
     }
+
+    /// <summary>Releases the statement. Equivalent to <see cref="DisposeAsync"/>; results it produced stay usable.</summary>
+    public void Dispose() => _handle.Dispose();
 }

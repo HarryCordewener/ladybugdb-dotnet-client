@@ -15,10 +15,10 @@ public class ValueReadTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 7, name: 'Master Room'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 7, name: 'Master Room'})");
 
             await using var result = await conn.QueryAsync(
                 "MATCH (o:Obj) WHERE o.dbref = 7 RETURN o.name");
@@ -48,10 +48,10 @@ public class ValueReadTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (o:Obj {dbref: 7, name: 'Master Room'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+            await conn.ExecuteAsync(
+                "CREATE (o:Obj {dbref: 7, name: 'Master Room'})");
 
             await using var r = await conn.QueryAsync("MATCH (o:Obj) RETURN o, id(o)");
             await using var e = r.GetAsyncEnumerator();
@@ -80,10 +80,10 @@ public class ValueReadTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE D18(id INT64, amount DECIMAL(18,4), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:D18 {id: 1, amount: 12345.6789})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE D18(id INT64, amount DECIMAL(18,4), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:D18 {id: 1, amount: 12345.6789})");
 
             await using var r = await conn.QueryAsync("MATCH (n:D18) RETURN n.amount");
             await using var e = r.GetAsyncEnumerator();
@@ -108,10 +108,10 @@ public class ValueReadTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE D2(id INT64, neg DECIMAL(10,2), trailing DECIMAL(10,4), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:D2 {id: 1, neg: -123.45, trailing: 100.5000})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE D2(id INT64, neg DECIMAL(10,2), trailing DECIMAL(10,4), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:D2 {id: 1, neg: -123.45, trailing: 100.5000})");
 
             await using var r = await conn.QueryAsync("MATCH (n:D2) RETURN n.neg, n.trailing");
             await using var e = r.GetAsyncEnumerator();
@@ -141,10 +141,10 @@ public class ValueReadTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE D38(id INT64, big DECIMAL(38,0), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:D38 {id: 1, big: 12345678901234567890123456789012345678})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE D38(id INT64, big DECIMAL(38,0), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:D38 {id: 1, big: 12345678901234567890123456789012345678})");
 
             await using var r = await conn.QueryAsync("MATCH (n:D38) RETURN n.big");
             await using var e = r.GetAsyncEnumerator();

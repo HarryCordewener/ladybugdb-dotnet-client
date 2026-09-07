@@ -30,7 +30,7 @@ public class NativeLibraryResolverTests
     public async Task MissingLibrary_ThrowsMessageNamingTheNativePackage()
     {
         var ex = NativeLibraryResolver.CreateMissingLibraryException();
-        await Assert.That(ex.Message).Contains("LadybugDb.Client.Native");
+        await Assert.That(ex.Message).Contains("LadybugDB.Native");
     }
 
     /// <summary>
@@ -46,7 +46,7 @@ public class NativeLibraryResolverTests
     {
         var rid = NativeLibraryResolver.CurrentRid();
         var fileName = NativeLibraryResolver.CurrentFileName();
-        var path = Path.Combine(TestPaths.RepoRoot(), "LadybugDb.Client.Native", "runtimes", rid, "native", fileName);
+        var path = Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", fileName);
 
         await Assert.That(File.Exists(path)).IsTrue();
 

@@ -26,10 +26,10 @@ public class QueryResultErrorTests
     {
         var db = new LadybugDatabase(path);
         var conn = await db.ConnectAsync();
-        await using (var _ = await conn.QueryAsync(
-            "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-        await using (var _ = await conn.QueryAsync(
-            "CREATE (o:Obj {dbref: 1, name: 'Limbo'})")) { }
+        await conn.ExecuteAsync(
+            "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+        await conn.ExecuteAsync(
+            "CREATE (o:Obj {dbref: 1, name: 'Limbo'})");
         return (db, conn);
     }
 
@@ -39,8 +39,9 @@ public class QueryResultErrorTests
     /// already-exhausted result returns a failure <see cref="lbug_state"/>, not a crash.
     /// </summary>
     /// <remarks>
-    /// This deliberately calls <see cref="LbugFlatTupleHandle.GetNext"/> directly at the interop
-    /// layer rather than through the public enumerator. The enumerator checks <c>has_next</c>
+    /// This deliberately calls <c>lbug_query_result_get_next</c> directly at the interop layer, the
+    /// way <c>LadybugQueryResult.ReadRow</c> does (a stack-allocated <c>lbug_flat_tuple</c> the
+    /// engine owns), rather than through the public enumerator. The enumerator checks <c>has_next</c>
     /// immediately before calling it, so under single-threaded, sequential use (the only use this
     /// library's API contract supports) that branch is structurally unreachable - by design, not
     /// by accident. It IS reachable through a genuine data race (concurrent callers both observing
@@ -71,9 +72,17 @@ public class QueryResultErrorTests
             await Assert.That(first).IsEqualTo("Limbo");
             await Assert.That(result.HasNext).IsFalse();
 
-            using var tuple = LbugFlatTupleHandle.GetNext(result.Handle, out var state);
+            var state = DirectGetNext(result);
             await Assert.That(state).IsNotEqualTo(lbug_state.LbugSuccess);
         }
         finally { TestDatabase.Cleanup(path); }
+    }
+
+    /// <summary>The native call itself, outside the async method (pointers to locals are not allowed there).</summary>
+    private static unsafe lbug_state DirectGetNext(LadybugQueryResult result)
+    {
+        using var lease = result.Handle.Acquire();
+        lbug_flat_tuple tuple;
+        return LbugNative.lbug_query_result_get_next((lbug_query_result*)lease.Pointer, &tuple);
     }
 }

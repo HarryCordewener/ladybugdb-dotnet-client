@@ -15,10 +15,10 @@ public class ContainerValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE C(id INT64, tags STRING[], attrs MAP(STRING,STRING), PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE (n:C {id: 1, tags: ['a','b','c'], attrs: map(['k1','k2'],['v1','v2'])})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE C(id INT64, tags STRING[], attrs MAP(STRING,STRING), PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE (n:C {id: 1, tags: ['a','b','c'], attrs: map(['k1','k2'],['v1','v2'])})");
 
             await using var r = await conn.QueryAsync("MATCH (n:C) RETURN n.tags, n.attrs");
             await using var e = r.GetAsyncEnumerator();
@@ -45,9 +45,9 @@ public class ContainerValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE P(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (n:P {id: 7, name: 'Limbo'})")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE P(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync("CREATE (n:P {id: 7, name: 'Limbo'})");
 
             await using var r = await conn.QueryAsync("MATCH (n:P) RETURN n");
             await using var e = r.GetAsyncEnumerator();
@@ -70,14 +70,14 @@ public class ContainerValueTests
         {
             using var db = new LadybugDatabase(path);
             await using var conn = await db.ConnectAsync();
-            await using (var _ = await conn.QueryAsync(
-                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))")) { }
-            await using (var _ = await conn.QueryAsync(
-                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 1, name: 'Ada'})")) { }
-            await using (var _ = await conn.QueryAsync("CREATE (:Person {id: 2, name: 'Grace'})")) { }
-            await using (var _ = await conn.QueryAsync(
-                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)")) { }
+            await conn.ExecuteAsync(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))");
+            await conn.ExecuteAsync(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64)");
+            await conn.ExecuteAsync("CREATE (:Person {id: 1, name: 'Ada'})");
+            await conn.ExecuteAsync("CREATE (:Person {id: 2, name: 'Grace'})");
+            await conn.ExecuteAsync(
+                "MATCH (a:Person {id: 1}), (b:Person {id: 2}) CREATE (a)-[:Knows {since: 1990}]->(b)");
 
             await using var r = await conn.QueryAsync("MATCH (a:Person)-[k:Knows]->(b:Person) RETURN a, k, b");
             await using var e = r.GetAsyncEnumerator();

@@ -12,31 +12,39 @@ engine, but may change before 1.0.
 ## Requirements
 
 - .NET 10 SDK
-- One of the six supported platforms below
+- One of the five platforms upstream ships binaries for (below)
 
 ## Installation
 
-No package is on NuGet yet. Build from source:
+`LadybugDb.Client` is not on NuGet yet; build it from source:
 
 ```console
 git clone https://github.com/HarryCordewener/ladybugdb-dotnet-client.git
 cd ladybugdb-dotnet-client
-bash scripts/fetch-liblbug.sh
 dotnet pack -c Release
 ```
 
-This produces two packages under each project's `bin/Release`. **Both are required.**
+That produces two packages: `LadybugDb.Client` under `LadybugDb.Client/bin/Release`, and
+`LadybugDb.Client.Extensions` (dependency injection, options and a health check for ASP.NET Core
+and other `Microsoft.Extensions` hosts; see [ASP.NET Core and dependency injection](#aspnet-core-and-dependency-injection))
+under `LadybugDb.Client.Extensions/bin/Release`. Both are managed only. The engine binaries come
+from upstream's own native packages, which you add alongside:
 
-| Package | Contents |
-|---|---|
-| `LadybugDb.Client` | Managed client. No native binaries. |
-| `LadybugDb.Client.Native` | `liblbug` for six runtime identifiers. |
+```console
+dotnet add package LadybugDB.Native            # every platform, or:
+dotnet add package LadybugDB.Native.linux-x64  # one platform
+```
 
-They are split so native binaries cannot propagate silently into a consumer's own package.
-`LadybugDb.Client` alone compiles and resolves types; the first call into the engine throws
-`DllNotFoundException` naming the missing package.
+The native package's version is the engine version. This build of the client was generated against
+engine **v0.19.1** (`third-party/liblbug.version`) and accepts that version or newer; opening a
+database against an older engine throws a `LadybugException` that says which version to install.
+`LadybugDatabase.EngineVersion` reports what was actually loaded.
 
-Reference them from a local feed, or add a project reference to
+`LadybugDb.Client` declares no dependency on a native package, so the platform choice and the
+engine version stay yours. Without one, the first call into the engine throws
+`DllNotFoundException` naming the package to add.
+
+Reference the client from a local feed, or add a project reference to
 `LadybugDb.Client/LadybugDb.Client.csproj`. See [docs/BUILDING.md](docs/BUILDING.md) for details.
 
 ## Quick start
@@ -47,18 +55,29 @@ using LadybugDb.Client;
 using var db = new LadybugDatabase("./mydb");
 await using var conn = await db.ConnectAsync();
 
-await using (var _ = await conn.QueryAsync(
-    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))")) { }
-await using (var _ = await conn.QueryAsync(
-    "CREATE (o:Object {dbref: 42, name: 'Limbo'})")) { }
+await conn.ExecuteAsync(
+    "CREATE NODE TABLE Object(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: 42, name: 'Limbo'})");
 
 await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.name");
 await foreach (var row in result)
 {
-    Console.WriteLine(row.GetValue(0).AsString()); // Limbo
+    Console.WriteLine(row.GetString(0)); // Limbo
 }
+
+// Or project straight into your own shape:
+await foreach (var o in conn.Select<Room>(
+    "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.dbref AS Dbref, o.name AS Name",
+    new { dbref = 42L }))
+{
+    Console.WriteLine($"{o.Dbref}: {o.Name}"); // 42: Limbo
+}
+
+record Room(long Dbref, string Name);
 ```
 
+[docs/GUIDE.md](docs/GUIDE.md) walks through the library from install to production settings;
 [docs/USAGE.md](docs/USAGE.md) documents every public member with worked examples.
 
 ## Current features
@@ -72,6 +91,51 @@ connections per database.
 Execute Cypher directly (`QueryAsync`) or as prepared statements (`PrepareAsync`). Read results with
 `await foreach` over `IAsyncEnumerable<LadybugRow>`, addressing columns by position or name. Walk
 multi-statement scripts with `NextResultAsync()`.
+
+**Typed projection**
+`conn.Select<T>(cypher, parameters)` streams rows projected into a type you define — a positional
+`record` needs no attributes or settable properties — or into a scalar for a single-column result:
+
+```csharp
+record Person(long Dbref, string Name);
+
+await foreach (var p in conn.Select<Person>(
+    "MATCH (o:Object) WHERE o.dbref > $min RETURN o.dbref AS Dbref, o.name AS Name",
+    new { min = 40L }))
+{
+    Console.WriteLine($"{p.Dbref}: {p.Name}");
+}
+
+var total = await conn.Select<long>("MATCH (o:Object) RETURN count(*)").FirstAsync();
+```
+
+Nothing is materialized, and the underlying result is owned and released by the projection itself —
+including when you `break` out early. Columns convert to their target type with lossless widening
+(an `INT32` column reads into a `long`) but never narrowing, and a mismatch is a typed error naming
+the column, its engine type, and the target — reported even for a query that returns no rows.
+
+**LINQ**
+`conn.Nodes<T>()` is an `IQueryable<T>` over a `[Node]`-annotated record. `Where`, `Select`,
+`OrderBy`, `Skip`/`Take`, `Distinct`, `GroupBy` aggregates, typed graph steps over `[Rel]` types and
+the `...Async` terminals translate to one parameterized Cypher statement; nothing is evaluated on
+the client, and an expression outside the whitelist throws at translation naming it:
+
+```csharp
+[Node("Object")] record Obj([property: Key] long Dbref, string Name, long? Loc);
+[Node("Attr")]   record Attr([property: Key] string Akey, string Aname, string Aval);
+[Rel("Has", From = typeof(Obj), To = typeof(Attr))] record Has;
+
+var desc = await conn.Nodes<Obj>()
+    .Where(o => o.Dbref == dbref)
+    .Out<Obj, Has, Attr>()
+    .Where(p => p.Target.Aname == "DESC")
+    .Select(p => p.Target.Aval)
+    .FirstOrDefaultAsync();
+// MATCH (n0:Object)-[:Has]->(n1:Attr) WHERE n0.dbref = $p0 AND n1.aname = $p1 RETURN n1.aval AS Aval LIMIT $p2
+```
+
+`conn.Match<T>(pattern, parameters)` is the escape hatch: your `MATCH`, the same typed chain after
+it. See [docs/USAGE.md](docs/USAGE.md#linq).
 
 **Type coverage**
 Every value type the engine returns marshals to a typed `LadybugValue`:
@@ -87,6 +151,20 @@ Every value type the engine returns marshals to a typed `LadybugValue`:
 **Parameterized queries**
 23 binding methods: 19 typed `Bind` overloads (including `Guid`, `Int128`, and `BigDecimal`), three
 timestamp-precision variants, and `BindNull`. A statement executed repeatedly is planned once.
+
+Or pass every parameter at once, as an anonymous object or any string-keyed dictionary — one call for
+a statement run once, and one per execution for a prepared one:
+
+```csharp
+await conn.ExecuteAsync(
+    "CREATE (o:Object {dbref: $dbref, name: $name})", new { dbref = 42L, name = "Limbo" });
+
+await using var stmt = await conn.PrepareAsync("CREATE (o:Object {dbref: $dbref, name: $name})");
+await stmt.ExecuteNonQueryAsync(new { dbref = 43L, name = "The Void" });
+```
+
+Values bind at their natural width and the engine range-checks the coercion rather than truncating; a
+value whose type has no `Bind` overload is an `ArgumentException` naming the parameter and the type.
 
 **Transactions**
 `BeginTransactionAsync` returns a `LadybugTransaction` wrapping `BEGIN`/`COMMIT`/`ROLLBACK`.
@@ -104,7 +182,35 @@ last dependent releases. Disposal order does not crash the process.
 
 **Thread safety**
 `LadybugConnection` is safe for concurrent use. `Bind` calls on a single `LadybugPreparedStatement`
-are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency) for the full contract.
+are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the full contract.
+
+### ASP.NET Core and dependency injection
+
+`LadybugDb.Client.Extensions` adds `AddLadybugDb` for `Microsoft.Extensions.DependencyInjection`
+hosts. The core package has no `Microsoft.Extensions.*` dependency; only this one does.
+
+```csharp
+using LadybugDb.Client;
+using LadybugDb.Client.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddLadybugDb(builder.Configuration.GetSection("LadybugDb"));
+// or: builder.Services.AddLadybugDb("./data/graph", o => o.Config = o.Config with { MaxThreads = 4 });
+
+var app = builder.Build();
+app.MapHealthChecks("/health");
+app.MapGet("/objects/{dbref:long}", async (long dbref, LadybugConnection conn) =>
+    await conn.Select<string>(
+        "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.name", new { dbref }).FirstOrDefaultAsync());
+app.Run();
+```
+
+`AddLadybugDb` registers `LadybugDatabase` as a singleton (opened on first resolve, disposed with
+the container), `LadybugConnection` as scoped (one per request, disposed with it),
+`IOptions<LadybugDbOptions>` bound from the section (`DatabasePath`, `Config`, `DisableHealthChecks`),
+and a health check named `ladybugdb` that runs `RETURN 1` on a fresh connection. A missing
+`DatabasePath` fails at registration. See
+[docs/USAGE.md](docs/USAGE.md#extensions-dependency-injection-and-health-checks).
 
 ## Known limitations
 
@@ -117,9 +223,13 @@ are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency) for th
 - **`POINTER` is unreachable.** An engine-internal type with no Cypher-level representation. It reads
   as `LadybugType.Unsupported`.
 - **`AsTimeSpan()` on `INTERVAL` is lossy.** The engine converts months at 30 days each.
-- **Raw-Cypher transactions bypass safety guarantees.** Issuing `BEGIN TRANSACTION` through
-  `QueryAsync` instead of `BeginTransactionAsync` forfeits the disposal protections above and can
-  abort the process. See [docs/USAGE.md](docs/USAGE.md#transactions).
+- **Raw-Cypher transactions are recognized, but only in their plain form.** `BEGIN TRANSACTION`,
+  `BEGIN TRANSACTION READ ONLY`, `COMMIT`, and `ROLLBACK` issued through `QueryAsync` are tracked, so
+  the client refuses a nested `BEGIN` rather than letting the engine destroy the transaction already
+  in flight. Recognition is deliberately conservative: a multi-statement script such as
+  `"BEGIN TRANSACTION; CREATE ...; COMMIT"` is not tracked, and a transaction opened that way stays
+  invisible to the guard. Uncommitted work is discarded on dispose either way; what `BeginTransactionAsync`
+  adds is a deterministic close at a point you choose, rather than whenever the connection is destroyed. See [docs/USAGE.md](docs/USAGE.md#transactions).
 - **Temporal conversion functions are excluded.** The 12 `*_to_tm`/`*_from_tm` C API functions have
   no portable `struct tm` ABI across the supported platforms. Epoch-based equivalents are used
   throughout.
@@ -136,36 +246,50 @@ that abstraction.
 
 ## Supported platforms
 
-| RID | OS | Verified in CI |
-|---|---|---|
-| `linux-x64` | Linux x64 | Yes |
-| `win-x64` | Windows x64 | Yes |
-| `linux-arm64` | Linux ARM64 | No |
-| `osx-x64` | macOS x64 | No |
-| `osx-arm64` | macOS ARM64 | No |
-| `win-arm64` | Windows ARM64 | No |
+The platforms are whatever upstream's `LadybugDB.Native.<rid>` packages cover:
 
-Unverified platforms are packaged from upstream releases but not exercised in CI.
+| RID | OS | This repository's CI |
+|---|---|---|
+| `linux-x64` | Linux x64 | Unit and integration tests, required |
+| `win-x64` | Windows x64 | Unit tests, required |
+| `linux-arm64` | Linux ARM64 | Integration tests on `ubuntu-24.04-arm`, advisory until its first green run |
+| `osx-arm64` | macOS ARM64 | Unit and integration tests on `macos-latest`, advisory until its first green run |
+| `osx-x64` | macOS x64 | Not run (no GitHub-hosted Intel macOS runner) |
+
+Upstream publishes a `win-arm64` engine build but no native package for it yet; on that platform,
+place `lbug_shared.dll` from the upstream release next to the application (the resolver probes
+`runtimes/win-arm64/native/` and the application directory).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [docs/USAGE.md](docs/USAGE.md) | Complete API guide — every public member, with examples |
+| [docs/GUIDE.md](docs/GUIDE.md) | Getting started — a walkthrough from install to production settings, every sample executed |
+| [docs/USAGE.md](docs/USAGE.md) | Complete API reference — every public member of both packages, with examples; the LINQ chapter is [here](docs/USAGE.md#linq) |
+| [docs/2026-09-06-production-readiness.md](docs/2026-09-06-production-readiness.md) | Readiness review, benchmark analysis, and the LINQ direction |
+| [benchmarks/](benchmarks/README.md) | Workload and micro-benchmark harnesses and their results |
 | [docs/BUILDING.md](docs/BUILDING.md) | Building and testing from source |
-| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process |
+| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process, versioning policy |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 
-## Relationship to upstream
+## Relationship to upstream and to other .NET bindings
 
 An independent client, not an official LadybugDB project. It targets the official C API
-(`src/include/c_api/lbug.h`). Upstream ships bindings for Python, NodeJS, Rust, Go, Swift, Java, and
-C/C++, but none for .NET. A separate third-party binding also exists:
-[`Ladybug`](https://www.nuget.org/packages/Ladybug) by Denis Knaack.
+(`src/include/c_api/lbug.h`). Since mid-2026 upstream also ships its own .NET binding, so there are
+now three options on nuget.org:
+
+| Package | Owner | Shape |
+|---|---|---|
+| [`LadybugDB`](https://www.nuget.org/packages/LadybugDB) + `LadybugDB.Native.<rid>` | upstream ([LadybugDB/ladybug-dotnet](https://github.com/LadybugDB/ladybug-dotnet)) | Synchronous `Database`/`Connection`/`QueryResult` over the C API; rows as `object?[]`; net10.0 and netstandard2.0; five RIDs; version tracks the engine. No typed values, async, cancellation, projection, or transaction guard. |
+| [`Ladybug`](https://www.nuget.org/packages/Ladybug) | Denis Knaack | An abstraction surface; ships no native binaries. |
+| `LadybugDb.Client` (this repository) | independent | Typed `LadybugValue` for every engine type, `IAsyncEnumerable` rows, `Select<T>`, parameter objects, a managed transaction with a nested-`BEGIN` guard, refcounted native lifetimes. Async-shaped, completes synchronously. Uses upstream's `LadybugDB.Native` packages for the engine. |
+
+If you need the upstream-maintained binding and a synchronous API, use `LadybugDB`. This client
+exists for the typed, async-shaped surface above, and it is the one SharpMUSH is built against.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). LadybugDB is also MIT licensed, so the native binaries redistributed in
-`LadybugDb.Client.Native` carry no additional restrictions. Attribution ships in that package's
-`THIRD-PARTY-NOTICES.md`.
+MIT — see [LICENSE](LICENSE). This repository redistributes no LadybugDB binaries; the engine comes
+from upstream's own MIT-licensed `LadybugDB.Native` packages.
