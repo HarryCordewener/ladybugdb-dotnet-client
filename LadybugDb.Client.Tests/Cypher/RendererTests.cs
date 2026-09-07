@@ -144,6 +144,16 @@ public class RendererTests
     }
 
     [Test]
+    public async Task Cast_RendersTheTypeQuoted_AndRefusesANonTypeName()
+    {
+        var q = CypherDsl.Match(O).Return(CypherDsl.Func("size", CypherDsl.Prop("o", "name")).Cast("INT32").As("L")).Limit(1L).Build();
+        await Assert.That(q.Render().Cypher).IsEqualTo("MATCH (o:Object) RETURN cast(size(o.name), 'INT32') AS L LIMIT $p0");
+
+        var bad = CypherDsl.Match(O).Return(CypherDsl.Prop("o", "name").Cast("INT32') AS x, 1 AS y --").As("L")).Build();
+        Assert.Throws<InvalidOperationException>(() => bad.Render());
+    }
+
+    [Test]
     public async Task VariableLength_WithoutUpperBound_IsRefused()
     {
         var q = CypherDsl.Match(CypherDsl.Node("Object", "a").RelTo("Located", CypherDsl.Node("Object", "b"), minHops: 1))

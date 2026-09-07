@@ -74,6 +74,11 @@ public static class CypherDsl
     /// <param name="arguments">The arguments.</param>
     public static FunctionExpr Func(string name, params Expr[] arguments) => new(name, arguments);
 
+    /// <summary><c>cast(operand, 'typeName')</c> - the engine's type conversion; <c>INT32</c>, <c>STRING</c>, <c>DECIMAL(38, 10)</c>, ...</summary>
+    /// <param name="operand">The converted expression.</param>
+    /// <param name="typeName">The target type as the engine names it.</param>
+    public static CastExpr Cast(Expr operand, string typeName) => new(operand, typeName);
+
     /// <summary><c>count(*)</c>.</summary>
     public static CountExpr CountAll() => new(Distinct: false, Operand: null);
 

@@ -321,6 +321,13 @@ internal static class CypherRenderer
                     AppendList(f.Arguments, AppendExpr);
                     Text.Append(')');
                     break;
+                case CastExpr c:
+                    if (!TypeName.IsValid(c.TypeName))
+                        throw new InvalidOperationException($"'{c.TypeName}' is not a valid type name for cast().");
+                    Text.Append("cast(");
+                    AppendExpr(c.Operand);
+                    Text.Append(", '").Append(c.TypeName).Append("')");
+                    break;
                 case AliasExpr a:
                     AppendExpr(a.Expression);
                     Text.Append(" AS ").Append(Identifier.Render(a.Alias));

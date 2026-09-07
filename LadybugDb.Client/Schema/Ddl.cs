@@ -15,7 +15,7 @@ public sealed record ColumnDefinition(string Name, string Type);
 /// Renders the engine's DDL statements: <c>CREATE NODE TABLE</c>, <c>CREATE REL TABLE</c>,
 /// <c>DROP TABLE</c>. DDL takes no parameters, so everything here is interpolated - which is why
 /// every piece is either an identifier (rendered through <see cref="Identifier"/>) or a type name
-/// checked against the narrow grammar <see cref="IsTypeName"/> accepts.
+/// checked against the narrow grammar <see cref="TypeName.IsValid"/> accepts.
 /// </summary>
 public static class Ddl
 {
@@ -75,55 +75,9 @@ public static class Ddl
         return "DROP TABLE " + Identifier.Render(name);
     }
 
-    /// <summary>
-    /// Whether <paramref name="type"/> has the shape of an engine type name: a plain identifier
-    /// (<c>INT64</c>, <c>STRING</c>, <c>TIMESTAMP_TZ</c>), optionally with a parenthesized
-    /// comma-separated digit list (<c>DECIMAL(38, 10)</c>) and optionally a list or array suffix
-    /// (<c>STRING[]</c>, <c>INT64[3]</c>). Nothing else - in particular no space outside the
-    /// parentheses, no quote, no semicolon - so a type is a single token to the parser and cannot
-    /// smuggle a second statement into the DDL it is interpolated into.
-    /// </summary>
+    /// <summary>Whether <paramref name="type"/> has the shape of an engine type name - see <see cref="TypeName.IsValid"/>.</summary>
     /// <param name="type">The type name to test.</param>
-    public static bool IsTypeName(string type)
-    {
-        if (string.IsNullOrEmpty(type)) return false;
-        var i = 0;
-        while (i < type.Length && (char.IsAsciiLetterOrDigit(type[i]) || type[i] == '_')) i++;
-        if (i == 0) return false;
-
-        if (i < type.Length && type[i] == '(')
-        {
-            var close = type.IndexOf(')', i);
-            if (close < 0) return false;
-            var inner = type.AsSpan(i + 1, close - i - 1);
-            if (inner.IsEmpty) return false;
-            foreach (var part in inner.Split(','))
-            {
-                var digits = inner[part].Trim();
-                if (digits.IsEmpty) return false;
-                foreach (var c in digits)
-                {
-                    if (!char.IsAsciiDigit(c)) return false;
-                }
-            }
-
-            i = close + 1;
-        }
-
-        if (i < type.Length && type[i] == '[')
-        {
-            var close = type.IndexOf(']', i);
-            if (close < 0) return false;
-            foreach (var c in type.AsSpan(i + 1, close - i - 1))
-            {
-                if (!char.IsAsciiDigit(c)) return false;
-            }
-
-            i = close + 1;
-        }
-
-        return i == type.Length;
-    }
+    public static bool IsTypeName(string type) => TypeName.IsValid(type);
 
     private static void AppendColumns(StringBuilder text, string table, IReadOnlyList<ColumnDefinition> columns)
     {

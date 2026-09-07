@@ -35,7 +35,7 @@ namespace LadybugDb.Client;
 /// only that the C# API surface itself never corrupts its own bookkeeping or crashes the process
 /// under concurrent use.
 /// </remarks>
-public sealed class LadybugConnection : IAsyncDisposable
+public sealed partial class LadybugConnection : IAsyncDisposable
 {
     private readonly LadybugDatabase _database;
     private readonly LbugConnectionHandle _handle;

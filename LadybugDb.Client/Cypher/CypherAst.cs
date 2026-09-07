@@ -168,6 +168,10 @@ public abstract record Expr
     /// <param name="list">The list expression.</param>
     public Expr InList(Expr list) => new InExpr(this, list);
 
+    /// <summary><c>cast(this, 'typeName')</c>.</summary>
+    /// <param name="typeName">The target type as the engine names it.</param>
+    public CastExpr Cast(string typeName) => new(this, typeName);
+
     /// <summary><c>this AS alias</c>, for a <c>RETURN</c> or <c>WITH</c> item.</summary>
     /// <param name="alias">The column name.</param>
     public AliasExpr As(string alias) => new(this, alias);
@@ -230,6 +234,11 @@ public sealed record InExpr(Expr Operand, Expr List) : Expr;
 /// <param name="Name">The function name, as the engine spells it (<c>label</c>, <c>size</c>, <c>list_contains</c>, ...).</param>
 /// <param name="Arguments">The arguments.</param>
 public sealed record FunctionExpr(string Name, IReadOnlyList<Expr> Arguments) : Expr;
+
+/// <summary><c>cast(operand, 'TYPE')</c>, the engine's spelling of a type conversion.</summary>
+/// <param name="Operand">The converted expression.</param>
+/// <param name="TypeName">The target type as the engine names it (<c>INT32</c>, <c>STRING</c>, ...). Rendered verbatim inside quotes, so it must satisfy <see cref="TypeName.IsValid"/>.</param>
+public sealed record CastExpr(Expr Operand, string TypeName) : Expr;
 
 /// <summary><c>expression AS alias</c>.</summary>
 /// <param name="Expression">The projected expression.</param>

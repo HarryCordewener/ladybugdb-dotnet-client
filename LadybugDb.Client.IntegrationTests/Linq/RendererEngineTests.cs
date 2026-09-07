@@ -160,6 +160,15 @@ public class RendererEngineTests
         await Assert.That(rows[0].GetString("L")).IsEqualTo("n1");
     });
 
+    /// <summary><c>size()</c> is INT64 in the engine; the cast is what lets a C# <c>int</c> receive it.</summary>
+    [Test]
+    public Task Cast_ToInt32() => Check(async conn =>
+    {
+        var rows = await Run(conn, CypherDsl.Match(O).Return(CypherDsl.Func("size", O.Prop("name")).Cast("INT32").As("L")).Limit(1L));
+        await Assert.That(rows[0]["L"].Type).IsEqualTo(LadybugType.Int32);
+        await Assert.That(rows[0].GetInt32("L")).IsEqualTo(2);
+    });
+
     [Test]
     public Task Exists_Subquery() => Check(async conn =>
     {

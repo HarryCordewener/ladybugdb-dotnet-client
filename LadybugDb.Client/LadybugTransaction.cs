@@ -190,6 +190,17 @@ public sealed class LadybugTransaction : IAsyncDisposable
         string cypher, object? parameters = null, CancellationToken cancellationToken = default) =>
         _connection.Select<T>(cypher, parameters, cancellationToken);
 
+    /// <summary>
+    /// <see cref="LadybugConnection.Nodes{T}"/> on this transaction's connection. A transaction lives
+    /// on the connection (see this type's remarks), so every query run while it is open already
+    /// participates in it; this exists so a caller holding only the transaction need not reach for
+    /// <see cref="Connection"/>.
+    /// </summary>
+    /// <typeparam name="T">A <see cref="Schema.NodeAttribute"/> type.</typeparam>
+    /// <param name="schema">The schema to translate against, or <see langword="null"/> for <see cref="Schema.LadybugSchema.Default"/>.</param>
+    [RequiresUnreferencedCode("Resolves [Node]/[Rel] descriptors, projected constructors and row conversions by reflection.")]
+    public IQueryable<T> Nodes<T>(Schema.LadybugSchema? schema = null) => _connection.Nodes<T>(schema);
+
     /// <summary>Commits the transaction by issuing <c>COMMIT</c>.</summary>
     /// <param name="cancellationToken">Forwarded to the underlying <c>COMMIT</c> query.</param>
     /// <exception cref="InvalidOperationException">
