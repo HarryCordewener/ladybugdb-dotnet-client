@@ -35,7 +35,7 @@ namespace LadybugDb.Client;
 /// only that the C# API surface itself never corrupts its own bookkeeping or crashes the process
 /// under concurrent use.
 /// </remarks>
-public sealed class LadybugConnection : IAsyncDisposable
+public sealed class LadybugConnection : IAsyncDisposable, IDisposable
 {
     private readonly LadybugDatabase _database;
     private readonly LbugConnectionHandle _handle;
@@ -278,6 +278,13 @@ public sealed class LadybugConnection : IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.FromResult(Execute(cypher));
     }
+
+    /// <summary>
+    /// The synchronous twin of <see cref="QueryUncheckedAsync"/>, for the disposal paths that
+    /// must roll back without an <see langword="await"/>. Same contract: no transaction
+    /// classification, not for direct use.
+    /// </summary>
+    internal LadybugQueryResult QueryUnchecked(string cypher) => Execute(cypher);
 
     /// <summary>
     /// Executes a parameterized Cypher statement once - preparing it, binding
@@ -649,8 +656,20 @@ public sealed class LadybugConnection : IAsyncDisposable
     /// </remarks>
     public ValueTask DisposeAsync()
     {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Closes the connection synchronously. Identical to <see cref="DisposeAsync"/> - every
+    /// operation on this type completes synchronously, so there is nothing for the asynchronous
+    /// form to wait for - and offered so a caller without an <see langword="await"/> context
+    /// (a test fixture, a console tool, a <c>using</c> block) does not have to block on a
+    /// <see cref="ValueTask"/>. Safe to call even if the parent database was disposed first.
+    /// </summary>
+    public void Dispose()
+    {
         EnsureNoOpenTransactionForDispose();
         _handle.Dispose();
-        return ValueTask.CompletedTask;
     }
 }

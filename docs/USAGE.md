@@ -1133,8 +1133,12 @@ connection, or result used after its own disposal, or after an ancestor's dispos
 
 ## Disposal and lifetime
 
-`LadybugDatabase` is `IDisposable`; `LadybugConnection`, `LadybugQueryResult`, and
-`LadybugTransaction` are `IAsyncDisposable`. For transactions opened through `BeginTransactionAsync`
+`LadybugDatabase` is `IDisposable`; `LadybugConnection`, `LadybugQueryResult`,
+`LadybugPreparedStatement` and `LadybugTransaction` implement both `IDisposable` and
+`IAsyncDisposable`, and the two are equivalent: every operation on them completes synchronously, so
+there is nothing for the asynchronous form to wait for. Use `using` or `await using`, whichever
+fits the call site; mixing them on one object is fine, and disposing twice is a no-op. For
+transactions opened through `BeginTransactionAsync`
 — the API this section otherwise describes — disposal is safe in any order: it never corrupts state
 or crashes the process. Children should still normally be disposed before the database they came
 from:

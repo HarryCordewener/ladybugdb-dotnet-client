@@ -45,7 +45,7 @@ namespace LadybugDb.Client;
 /// question for the CALLER to avoid by not doing that, not a memory-safety one.
 /// </para>
 /// </remarks>
-public sealed class LadybugPreparedStatement : IAsyncDisposable
+public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
 {
     private static readonly DateOnly Epoch = new(1970, 1, 1);
 
@@ -819,7 +819,14 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
     /// <summary>Destroys this prepared statement. Safe to call even if the parent connection or database was disposed first.</summary>
     public ValueTask DisposeAsync()
     {
-        _handle.Dispose();
+        Dispose();
         return ValueTask.CompletedTask;
     }
+
+    /// <summary>
+    /// Releases the statement synchronously. Identical to <see cref="DisposeAsync"/> (every
+    /// operation on this type completes synchronously). Results already produced by this
+    /// statement stay usable - they never depend on it.
+    /// </summary>
+    public void Dispose() => _handle.Dispose();
 }

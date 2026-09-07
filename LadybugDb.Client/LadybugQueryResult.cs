@@ -39,7 +39,7 @@ namespace LadybugDb.Client;
 /// instead of doing that silently - see the remarks on each member.
 /// </para>
 /// </remarks>
-public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<LadybugRow>
+public sealed class LadybugQueryResult : IAsyncDisposable, IDisposable, IAsyncEnumerable<LadybugRow>
 {
     private readonly LbugDatabaseHandle _database;
     private readonly LbugQueryResultHandle _handle;
@@ -200,11 +200,21 @@ public sealed class LadybugQueryResult : IAsyncDisposable, IAsyncEnumerable<Lady
     /// <summary>Closes the result. Safe to call even if the parent database was disposed first, and idempotent.</summary>
     public ValueTask DisposeAsync()
     {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Closes the result synchronously. Identical to <see cref="DisposeAsync"/> (every operation
+    /// on this type completes synchronously); safe to call even if the parent database was
+    /// disposed first, and idempotent, in any combination with <see cref="DisposeAsync"/>.
+    /// </summary>
+    public void Dispose()
+    {
         // Once, however many times this is called - see LiveCount and _disposed.
         if (Interlocked.Exchange(ref _disposed, 1) == 0) Interlocked.Decrement(ref _liveCount);
 
         _handle.Dispose();
-        return ValueTask.CompletedTask;
     }
 
     /// <summary>
