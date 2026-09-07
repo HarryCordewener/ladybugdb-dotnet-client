@@ -460,6 +460,24 @@ In order, each item small enough for one PR:
 7. LINQ Phase A, then B.
 8. Cancellation via `interrupt`; the `Extensions` package (DI, health, telemetry).
 
+### Tracked follow-up: validate projection types without rows
+
+Two reviewers asked for `Select<T>` to reject a type mismatch on an empty result, not just a column
+mismatch. It is a real gap and it is deliberately not closed here.
+
+The obstacle is that the conversion rules live in `RowMapper.Converters` as 21 lambdas, 8 of them
+switches encoding the lossless-widening table. Predicting a mismatch means knowing which
+`LadybugType`s each target accepts, and writing that as a second table beside the converters invites
+exactly the drift that makes such a check worse than none. The single-source-of-truth version is to
+restructure each entry into an accepted-set plus a conversion that consults it, then key the plan
+cache by column types as well as names and validate each binding at plan time. That is a design
+change to the most delicate code in the mapping layer, plus both `Select` call sites and the LINQ
+materializer, and it earns a branch and a review of its own rather than a late addition to this one.
+
+Until then the behaviour is stated precisely where it is promised: the column *shape* is validated
+without rows, a type mismatch surfaces on the first row, and `docs/USAGE.md` and `RowMapper`'s
+remarks both say so and why.
+
 ## Reproducing the numbers
 
 ```bash

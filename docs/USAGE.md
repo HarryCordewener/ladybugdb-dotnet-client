@@ -237,9 +237,9 @@ All 23 binding methods, plus `ExecuteAsync`/`DisposeAsync`:
 | `Bind(string, BigDecimal)` | `DECIMAL` | See [DECIMAL](#decimal-asdecimal-vs-asbigdecimal) below - lossless, all 38 digits. |
 | `BindNull(string)` | typed `NULL` | Binds a `NULL` of the parameter's own type. |
 | `ExecuteAsync(CancellationToken = default)` | - | Runs the statement with the currently bound values; may be called more than once. |
-| `ExecuteNonQueryAsync(CancellationToken = default)` | Executes with whatever is bound and discards the result — the reuse-a-plan-for-writes case. |
-| `ExecuteNonQueryAsync(object parameters, CancellationToken = default)` | Binds `parameters`, executes, discards the result. |
-| `Select<T>(object? parameters = null, CancellationToken = default)` | Executes and streams rows projected into `T`, disposing the result itself. Lets one statement be planned once *and* read typed. |
+| `ExecuteNonQueryAsync(CancellationToken = default)` | - | Executes with whatever is bound and discards the result — the reuse-a-plan-for-writes case. |
+| `ExecuteNonQueryAsync(object parameters, CancellationToken = default)` | - | Binds `parameters`, executes, discards the result. |
+| `Select<T>(object? parameters = null, CancellationToken = default)` | - | Executes and streams rows projected into `T`, disposing the result itself. Lets one statement be planned once *and* read typed. |
 | `ExecuteAsync(object parameters, CancellationToken = default)` | - | Binds every name/value pair `parameters` names, then runs the statement. See [Parameter objects](#parameter-objects). |
 | `DisposeAsync()` | - | Destroys the prepared statement. Safe even if the parent connection/database was disposed first. |
 
