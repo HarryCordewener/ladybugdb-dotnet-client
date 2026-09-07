@@ -318,6 +318,21 @@ internal static class RowMapper
         {
             columnIndexes.TryAdd(columnNames[i], i);
         }
+        // Second pass, so an exact name always wins: an unaliased projection is named by the engine
+        // after its expression - `RETURN o.dbref, o.name` yields columns 'o.dbref' and 'o.name' -
+        // and a record parameter called Dbref should match that without every query needing an AS
+        // per column. Only the text after the LAST dot counts, and only for names that contain one,
+        // so 'o.dbref' matches Dbref while a genuine alias never changes meaning. Two unaliased
+        // columns with the same property name ('o.name', 'r.name') resolve leftmost, the same rule
+        // duplicate aliases already follow.
+        for (var i = 0; i < columnNames.Count; i++)
+        {
+            var dot = columnNames[i].LastIndexOf('.');
+            if (dot >= 0 && dot < columnNames[i].Length - 1)
+            {
+                columnIndexes.TryAdd(columnNames[i][(dot + 1)..], i);
+            }
+        }
 
         var matches = new List<ConstructorInfo>();
         var rejected = new List<string>();
@@ -369,7 +384,9 @@ internal static class RowMapper
         {
             throw new InvalidOperationException(
                 $"Cannot project into {Describe(target)}: no public constructor's parameters all match " +
-                $"the returned columns (matching is case-insensitive; extra columns are ignored). " +
+                $"the returned columns (matching is case-insensitive, an unaliased column such as 'o.name' " +
+                $"matches a parameter named after the part following its last dot, and extra columns are " +
+                $"ignored). " +
                 $"{DescribeColumns(columnNames)} " +
                 (rejected.Count == 0
                     ? $"{Describe(target)} declares no public instance constructor."

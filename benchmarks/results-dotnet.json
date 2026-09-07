@@ -1,0 +1,458 @@
+{
+  "meta": {
+    "seed": 20260727,
+    "thresholds": {
+      "single_write_p99_ms": 5,
+      "point_lookup_p99_ms": 2,
+      "read_under_write_p99_ms": 5,
+      "batch_knee_min_speedup": 10
+    },
+    "attrs_per_obj": 10,
+    "host": {
+      "cpu_count": 20,
+      "storage": "/tmp/",
+      "python": ".NET 10.0.8 LadybugDb.Client",
+      "ladybug": "0.18.3"
+    }
+  },
+  "results": [
+    {
+      "model": "dotnet-map",
+      "size": 1000,
+      "load_s": 0.08,
+      "disk_mb_after_load": 2.16,
+      "cold_open_ms": 14.37,
+      "single_write": {
+        "n": 1000,
+        "p50": 0.2637,
+        "p95": 0.3588,
+        "p99": 0.4103,
+        "max": 0.6178,
+        "mean": 0.27135599999999993
+      },
+      "point_lookup": {
+        "n": 1000,
+        "p50": 0.1092,
+        "p95": 0.1494,
+        "p99": 0.2389,
+        "max": 0.3504,
+        "mean": 0.11366230000000012
+      },
+      "contents_traversal": {
+        "n": 250,
+        "p50": 0.2914,
+        "p95": 0.7445,
+        "p99": 1.1675,
+        "max": 1.2152,
+        "mean": 0.33771520000000016
+      },
+      "read_under_write": {
+        "n": 500,
+        "p50": 0.1406,
+        "p95": 0.2013,
+        "p99": 0.3315,
+        "max": 0.4149,
+        "mean": 0.14634500000000006
+      },
+      "batch_rates": {
+        "1": 3426.2,
+        "10": 4196.2,
+        "100": 4787.6,
+        "1000": 4839.5
+      },
+      "concurrent_rates": {
+        "1": 1907,
+        "2": 1289.7,
+        "4": 1053.7,
+        "8": 987.3
+      },
+      "concurrent_conflicts": {
+        "1": 0,
+        "2": 65913,
+        "4": 195153,
+        "8": 346410
+      },
+      "concurrent_rates_multi_writes": {
+        "1": 2520.7,
+        "2": 2003.3,
+        "4": 788.3,
+        "8": 4344
+      },
+      "concurrent_conflicts_multi_writes": {
+        "1": 0,
+        "2": 6,
+        "4": 5,
+        "8": 77
+      },
+      "disk_mb_after_mutations": 2.53,
+      "notes": [
+        "LadybugDb.Client; prepared statements with bound parameters; COPY FROM bulk load; concurrent_rates_multi_writes = enable_multi_writes on"
+      ]
+    },
+    {
+      "model": "dotnet-edge",
+      "size": 1000,
+      "load_s": 0.09,
+      "disk_mb_after_load": 4.42,
+      "cold_open_ms": 11.09,
+      "single_write": {
+        "n": 1000,
+        "p50": 0.1822,
+        "p95": 0.3303,
+        "p99": 1.1951,
+        "max": 2.2112,
+        "mean": 0.2183768000000001
+      },
+      "point_lookup": {
+        "n": 1000,
+        "p50": 0.0936,
+        "p95": 0.1977,
+        "p99": 0.3873,
+        "max": 0.8083,
+        "mean": 0.11272619999999989
+      },
+      "contents_traversal": {
+        "n": 250,
+        "p50": 0.3881,
+        "p95": 0.6966,
+        "p99": 0.9842,
+        "max": 1.0058,
+        "mean": 0.4040156
+      },
+      "read_under_write": {
+        "n": 500,
+        "p50": 0.0979,
+        "p95": 0.2097,
+        "p99": 1.337,
+        "max": 1.7994,
+        "mean": 0.12925239999999996
+      },
+      "batch_rates": {
+        "1": 5611.7,
+        "10": 6818.7,
+        "100": 7693.3,
+        "1000": 6306.7
+      },
+      "concurrent_rates": {
+        "1": 5567.3,
+        "2": 3385,
+        "4": 1283.7,
+        "8": 772.7
+      },
+      "concurrent_conflicts": {
+        "1": 0,
+        "2": 92429,
+        "4": 191960,
+        "8": 284588
+      },
+      "concurrent_rates_multi_writes": {
+        "1": 3375.3,
+        "2": 5933,
+        "4": 4898.7,
+        "8": 5278.3
+      },
+      "concurrent_conflicts_multi_writes": {
+        "1": 0,
+        "2": 17,
+        "4": 42,
+        "8": 83
+      },
+      "disk_mb_after_mutations": 4.49,
+      "notes": [
+        "LadybugDb.Client; prepared statements with bound parameters; COPY FROM bulk load; concurrent_rates_multi_writes = enable_multi_writes on"
+      ]
+    },
+    {
+      "model": "dotnet-map",
+      "size": 10000,
+      "load_s": 0.11,
+      "disk_mb_after_load": 3.54,
+      "cold_open_ms": 7.99,
+      "single_write": {
+        "n": 1000,
+        "p50": 0.2518,
+        "p95": 0.3371,
+        "p99": 0.3975,
+        "max": 1.1252,
+        "mean": 0.26205519999999977
+      },
+      "point_lookup": {
+        "n": 1000,
+        "p50": 0.0818,
+        "p95": 0.1463,
+        "p99": 0.2202,
+        "max": 0.3212,
+        "mean": 0.09107860000000012
+      },
+      "contents_traversal": {
+        "n": 250,
+        "p50": 0.2873,
+        "p95": 0.3991,
+        "p99": 0.4875,
+        "max": 0.6289,
+        "mean": 0.29540999999999995
+      },
+      "read_under_write": {
+        "n": 500,
+        "p50": 0.1257,
+        "p95": 0.1684,
+        "p99": 0.1915,
+        "max": 0.2632,
+        "mean": 0.12793679999999985
+      },
+      "batch_rates": {
+        "1": 3920.6,
+        "10": 4491.5,
+        "100": 4946.3,
+        "1000": 5061.4
+      },
+      "concurrent_rates": {
+        "1": 3386.7,
+        "2": 2241,
+        "4": 2164.3,
+        "8": 1328
+      },
+      "concurrent_conflicts": {
+        "1": 0,
+        "2": 79987,
+        "4": 202068,
+        "8": 329419
+      },
+      "concurrent_rates_multi_writes": {
+        "1": 2044.3,
+        "2": 2311,
+        "4": 911.7,
+        "8": 5268
+      },
+      "concurrent_conflicts_multi_writes": {
+        "1": 0,
+        "2": 0,
+        "4": 1,
+        "8": 13
+      },
+      "disk_mb_after_mutations": 13.05,
+      "notes": [
+        "LadybugDb.Client; prepared statements with bound parameters; COPY FROM bulk load; concurrent_rates_multi_writes = enable_multi_writes on"
+      ]
+    },
+    {
+      "model": "dotnet-edge",
+      "size": 10000,
+      "load_s": 0.29,
+      "disk_mb_after_load": 14.61,
+      "cold_open_ms": 9.47,
+      "single_write": {
+        "n": 1000,
+        "p50": 0.1387,
+        "p95": 0.1922,
+        "p99": 0.2262,
+        "max": 0.8929,
+        "mean": 0.1450660999999998
+      },
+      "point_lookup": {
+        "n": 1000,
+        "p50": 0.0624,
+        "p95": 0.0915,
+        "p99": 0.1272,
+        "max": 0.5828,
+        "mean": 0.06751710000000001
+      },
+      "contents_traversal": {
+        "n": 250,
+        "p50": 0.3275,
+        "p95": 0.4343,
+        "p99": 0.5852,
+        "max": 0.9313,
+        "mean": 0.3315652
+      },
+      "read_under_write": {
+        "n": 500,
+        "p50": 0.0871,
+        "p95": 0.1213,
+        "p99": 0.1389,
+        "max": 0.6868,
+        "mean": 0.091008
+      },
+      "batch_rates": {
+        "1": 6895.6,
+        "10": 9839.6,
+        "100": 10730.6,
+        "1000": 10883.7
+      },
+      "concurrent_rates": {
+        "1": 6210,
+        "2": 3529,
+        "4": 3180,
+        "8": 2612.7
+      },
+      "concurrent_conflicts": {
+        "1": 0,
+        "2": 73155,
+        "4": 213628,
+        "8": 358204
+      },
+      "concurrent_rates_multi_writes": {
+        "1": 6360.7,
+        "2": 7604,
+        "4": 10970.3,
+        "8": 14393
+      },
+      "concurrent_conflicts_multi_writes": {
+        "1": 0,
+        "2": 1,
+        "4": 10,
+        "8": 38
+      },
+      "disk_mb_after_mutations": 51.42,
+      "notes": [
+        "LadybugDb.Client; prepared statements with bound parameters; COPY FROM bulk load; concurrent_rates_multi_writes = enable_multi_writes on"
+      ]
+    },
+    {
+      "model": "dotnet-map",
+      "size": 100000,
+      "load_s": 1.51,
+      "disk_mb_after_load": 22.08,
+      "cold_open_ms": 10.65,
+      "single_write": {
+        "n": 1000,
+        "p50": 0.2989,
+        "p95": 0.4747,
+        "p99": 0.609,
+        "max": 1.9996,
+        "mean": 0.3184448999999998
+      },
+      "point_lookup": {
+        "n": 1000,
+        "p50": 0.1215,
+        "p95": 0.1711,
+        "p99": 0.2263,
+        "max": 0.9742,
+        "mean": 0.12637629999999997
+      },
+      "contents_traversal": {
+        "n": 250,
+        "p50": 0.3596,
+        "p95": 0.4818,
+        "p99": 0.5354,
+        "max": 0.6396,
+        "mean": 0.36838719999999997
+      },
+      "read_under_write": {
+        "n": 500,
+        "p50": 0.1386,
+        "p95": 0.1933,
+        "p99": 0.2312,
+        "max": 0.7673,
+        "mean": 0.14285099999999998
+      },
+      "batch_rates": {
+        "1": 2966.9,
+        "10": 4620.7,
+        "100": 4380.2,
+        "1000": 4661.5
+      },
+      "concurrent_rates": {
+        "1": 3037.7,
+        "2": 2184.7,
+        "4": 2540,
+        "8": 2013
+      },
+      "concurrent_conflicts": {
+        "1": 0,
+        "2": 66674,
+        "4": 194636,
+        "8": 324429
+      },
+      "concurrent_rates_multi_writes": {
+        "1": 3490.3,
+        "2": 5309.7,
+        "4": 1645,
+        "8": 5224.3
+      },
+      "concurrent_conflicts_multi_writes": {
+        "1": 0,
+        "2": 0,
+        "4": 1,
+        "8": 2
+      },
+      "disk_mb_after_mutations": 123.22,
+      "notes": [
+        "LadybugDb.Client; prepared statements with bound parameters; COPY FROM bulk load; concurrent_rates_multi_writes = enable_multi_writes on"
+      ]
+    },
+    {
+      "model": "dotnet-edge",
+      "size": 100000,
+      "load_s": 1.27,
+      "disk_mb_after_load": 102.12,
+      "cold_open_ms": 8.4,
+      "single_write": {
+        "n": 1000,
+        "p50": 0.1584,
+        "p95": 0.2303,
+        "p99": 0.2645,
+        "max": 0.744,
+        "mean": 0.16588540000000004
+      },
+      "point_lookup": {
+        "n": 1000,
+        "p50": 0.0751,
+        "p95": 0.111,
+        "p99": 0.1755,
+        "max": 0.6721,
+        "mean": 0.0793504000000001
+      },
+      "contents_traversal": {
+        "n": 250,
+        "p50": 0.4421,
+        "p95": 0.5808,
+        "p99": 1.146,
+        "max": 1.1964,
+        "mean": 0.44890800000000003
+      },
+      "read_under_write": {
+        "n": 500,
+        "p50": 0.0821,
+        "p95": 0.1209,
+        "p99": 0.1333,
+        "max": 0.6222,
+        "mean": 0.085309
+      },
+      "batch_rates": {
+        "1": 6542.1,
+        "10": 8033.9,
+        "100": 8924.2,
+        "1000": 8994.9
+      },
+      "concurrent_rates": {
+        "1": 6354.3,
+        "2": 5300,
+        "4": 4570.3,
+        "8": 3645
+      },
+      "concurrent_conflicts": {
+        "1": 0,
+        "2": 77258,
+        "4": 200498,
+        "8": 324652
+      },
+      "concurrent_rates_multi_writes": {
+        "1": 7012.3,
+        "2": 10428.7,
+        "4": 15961,
+        "8": 22154.3
+      },
+      "concurrent_conflicts_multi_writes": {
+        "1": 0,
+        "2": 0,
+        "4": 0,
+        "8": 5
+      },
+      "disk_mb_after_mutations": 434.47,
+      "notes": [
+        "LadybugDb.Client; prepared statements with bound parameters; COPY FROM bulk load; concurrent_rates_multi_writes = enable_multi_writes on"
+      ]
+    }
+  ]
+}

@@ -185,8 +185,11 @@ public class RowMapperIntegrationTests
 
     /// <summary>
     /// The unmatched-parameter error names the columns the query actually returned - unaliased, so
-    /// the message shows the engine's own <c>o.name</c> naming rather than a tidied-up version of it,
-    /// which is the whole point of printing them.
+    /// the message shows the engine's own <c>o.parent</c> naming rather than a tidied-up version of
+    /// it, which is the whole point of printing them. <c>o.dbref</c> does match <c>Dbref</c> by its
+    /// dotted suffix (see <c>SelectTests.Select_MatchesUnaliasedColumnsByTheNameAfterTheDot</c>);
+    /// <c>o.parent</c> matches nothing on <c>Person</c>, so the projection still fails and the
+    /// message must name the column the engine returned.
     /// </summary>
     [Test]
     public async Task NoMatchingConstructor_NamesTheEnginesOwnColumnNamesAndTheCandidate()
@@ -198,7 +201,7 @@ public class RowMapperIntegrationTests
             using var _db = db;
             await using var _conn = conn;
 
-            await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.dbref, o.name");
+            await using var result = await conn.QueryAsync("MATCH (o:Object) RETURN o.dbref, o.parent");
             await using var rows = result.GetAsyncEnumerator();
             await Assert.That(await rows.MoveNextAsync()).IsTrue();
             var row = rows.Current;
@@ -207,7 +210,8 @@ public class RowMapperIntegrationTests
 
             await Assert.That(ex).IsNotNull();
             await Assert.That(ex!.Message).Contains("'o.dbref'");
-            await Assert.That(ex.Message).Contains("'o.name'");
+            await Assert.That(ex.Message).Contains("'o.parent'");
+            await Assert.That(ex.Message).Contains("'Name'");
             await Assert.That(ex.Message).Contains("Person(long Dbref, string Name)");
         }
         finally { TestDatabase.Cleanup(path); }

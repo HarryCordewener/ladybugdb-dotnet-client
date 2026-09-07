@@ -9,6 +9,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="LadybugDb.Client.Tests" />
     <InternalsVisibleTo Include="LadybugDb.Client.IntegrationTests" />
+    <InternalsVisibleTo Include="LadybugDb.Client.Benchmarks" />
   </ItemGroup>
   <ItemGroup>
     <!--

@@ -14,6 +14,7 @@ internal static class QueryFailureClassifier
     /// Classifies a query failure by its error message and returns the exception to throw.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Matches the broad substring <c>"write transaction"</c> rather than a longer phrase like
     /// <c>"one write transaction"</c> or <c>"new write transaction"</c>. The real engine (v0.18.3)
     /// reports the full message
@@ -26,11 +27,29 @@ internal static class QueryFailureClassifier
     /// word (e.g. to "another write transaction is already in progress"). <c>"write transaction"</c>
     /// is present in every phrasing seen so far and is not part of any other error message this
     /// engine is known to emit.
+    /// </para>
+    /// <para>
+    /// A second, unrelated wording covers the same retryable condition under
+    /// <see cref="LadybugConfig.EnableMultiWrites"/>: <c>"Runtime exception: Write-write conflict
+    /// of updating the same row."</c> There the engine admits concurrent writers and detects the
+    /// collision at the row instead of at the writer slot, so the message never mentions a
+    /// transaction at all. Matched on <c>"write-write conflict"</c>. Before this was added, that
+    /// failure surfaced as a plain <see cref="LadybugException"/>, which a retry loop written to
+    /// the documented contract treated as fatal - the benchmark workload's concurrent-writer
+    /// section lost every writer that way.
+    /// </para>
     /// </remarks>
     internal static LadybugException Classify(string? message, string statement)
     {
+        // Two distinct engine wordings, one retryable condition. "write transaction" is the
+        // single-writer refusal (the default mode); "write-write conflict" is what the engine says
+        // instead under EnableMultiWrites, where two writers are admitted and collide on a row
+        // ("Runtime exception: Write-write conflict of updating the same row.", observed against
+        // v0.18.3 by the benchmark workload's concurrent-writer section). Both mean the same thing
+        // to a caller: nothing was applied, retry the transaction.
         var isWriteConflict = message is not null
-            && message.Contains("write transaction", StringComparison.OrdinalIgnoreCase);
+            && (message.Contains("write transaction", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("write-write conflict", StringComparison.OrdinalIgnoreCase));
         var normalized = string.IsNullOrEmpty(message) ? "Query failed." : message;
 
         return isWriteConflict

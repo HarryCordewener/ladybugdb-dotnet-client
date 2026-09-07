@@ -89,7 +89,12 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                throw new LadybugException(failureMessage, cypher);
+                // Classified, not thrown raw: preparing a write statement contends for the engine's
+                // single writer slot exactly as executing one does, so it can fail with the same
+                // write-conflict message - and a retry loop that only catches
+                // LadybugWriteConflictException must see it as one. Pinned by
+                // DatabaseLifecycleTests.ConcurrentPrepareOfWriteStatement_ThrowsLadybugWriteConflictException.
+                throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
             return new LadybugPreparedStatement(database, connection, handle, cypher);

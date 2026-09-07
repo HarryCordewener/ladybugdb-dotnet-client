@@ -31,6 +31,14 @@ public class QueryFailureClassifierTests
     /// </summary>
     private const string SpecExcerptWriteConflictMessage = "Cannot start a new write transaction in the system";
 
+    /// <summary>
+    /// The wording the engine uses for a conflict under <see cref="LadybugConfig.EnableMultiWrites"/>,
+    /// where two writers are admitted and collide on a row instead of on the single writer slot.
+    /// Observed against v0.18.3 by the benchmark workload's concurrent-writer section.
+    /// </summary>
+    private const string MultiWritesConflictMessage =
+        "Runtime exception: Write-write conflict of updating the same row.";
+
     [Test]
     public async Task RealEngineMessage_ClassifiesAsWriteConflict()
     {
@@ -47,6 +55,15 @@ public class QueryFailureClassifierTests
         var ex = QueryFailureClassifier.Classify(SpecExcerptWriteConflictMessage, "CREATE (o:Obj {dbref: 2})");
 
         await Assert.That(ex).IsTypeOf<LadybugWriteConflictException>();
+    }
+
+    [Test]
+    public async Task MultiWritesRowConflictMessage_ClassifiesAsWriteConflict()
+    {
+        var ex = QueryFailureClassifier.Classify(MultiWritesConflictMessage, "MATCH (a:Attr) WHERE a.akey = $k SET a.aval = $v");
+
+        await Assert.That(ex).IsTypeOf<LadybugWriteConflictException>();
+        await Assert.That(ex.Message).Contains(MultiWritesConflictMessage);
     }
 
     [Test]

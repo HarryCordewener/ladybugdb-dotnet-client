@@ -886,7 +886,10 @@ accessors.
 
 **Constructor matching.** The constructor whose parameter names all match returned column names,
 compared case-insensitively, is the one used — which is why a positional `record` works with no
-settable properties and no attributes:
+settable properties and no attributes. An unaliased column is named by the engine after its
+expression (`RETURN o.dbref, o.name` yields `o.dbref` and `o.name`); such a column also matches a
+parameter named after the part following its last dot, so `record Person(long Dbref, string Name)`
+maps that result with no `AS` at all. An exact alias always wins over a dotted suffix:
 
 - Exactly one fully-matching constructor → it is used.
 - No matching constructor → `InvalidOperationException` listing the returned columns *and* every
@@ -993,9 +996,10 @@ columns is otherwise a debugger session. Two worked examples:
 
 ```
 Cannot project into Person: no public constructor's parameters all match the returned columns
-(matching is case-insensitive; extra columns are ignored). Returned columns: 'o.dbref', 'o.name'.
-Candidate constructor(s): Person(long Dbref, string Name) - no returned column matches parameters
-'Dbref', 'Name'.
+(matching is case-insensitive, an unaliased column such as 'o.name' matches a parameter named after
+the part following its last dot, and extra columns are ignored). Returned columns: 'o.dbref',
+'o.nmae'. Candidate constructor(s): Person(long Dbref, string Name) - no returned column matches
+parameter 'Name'.
 ```
 
 ```
@@ -1005,8 +1009,8 @@ as the type the column actually has (or a wider one of the same kind), or CAST t
 Cypher.
 ```
 
-The first is the missing-`AS` mistake: the engine names an unaliased column `o.dbref`, which does
-not match a parameter called `Dbref`.
+The first is a misspelt property: `o.nmae` matches nothing, and the message names both the column
+and the parameter left unmatched.
 
 A mismatched `T` is reported even when the query returns **no rows**. The projection is resolved from
 the result's column shape before the first row is read, precisely so that an empty result cannot
@@ -1280,9 +1284,9 @@ By default, LadybugDB permits exactly one write transaction at a time and **reje
 rather than queuing it. Under contention this is expected, not exceptional, and it's surfaced as
 the typed, retryable `LadybugWriteConflictException` rather than a raw engine error string.
 
-This was benchmarked, not assumed: with the default configuration, throughput was flat from 1 to
-8 concurrent writers (roughly 2,400-2,800 mutations/sec regardless of writer count) while conflict
-retries climbed past 10,000 over the same run. The client does not serialize writes internally —
+This was benchmarked, not assumed: with the default configuration, throughput falls from 1 to 8
+concurrent writers (6,200 to 2,600 mutations/sec on 10,000 objects) while a retry loop spins through
+hundreds of thousands of refusals in the same three seconds. The client does not serialize writes internally —
 if you open multiple connections and write from more than one at a time with the default
 configuration, you *will* see this exception, by design. A retry loop at the call site is the
 expected pattern:
@@ -1307,21 +1311,36 @@ async Task<LadybugQueryResult> ExecuteWithRetryAsync(
 
 ### `EnableMultiWrites`: measured, not assumed
 
-`LadybugConfig.EnableMultiWrites` maps to the engine's `enable_multi_writes` setting, and it was
-an open question — since the very first benchmark in this project — whether it actually changes
-anything. It does. Set on a database, the same 1/2/4/8-concurrent-writer workload above produced
-**zero** `LadybugWriteConflictException`s at any writer count, across four separate 3-second runs,
-and throughput rose with concurrency instead of staying flat (roughly 2,600-2,900 mutations/sec at
-one writer, up to 3,500-3,900/sec at four to eight). With it off (the default), conflicts climbed
-with writer count in every run of the same experiment (0 → ~2,700 → ~8,000 → ~18,000 over the same
-3-second window) while throughput stayed essentially flat.
+`LadybugConfig.EnableMultiWrites` maps to the engine's `enable_multi_writes` setting (also reachable
+at runtime as `CALL debug_enable_multi_writes=true`; upstream's own multi-threaded write benchmark
+turns it on). It changes the engine's concurrency model, not merely a limit: with it on, several
+write transactions are admitted at once and a collision is detected at the **row** instead of at the
+writer slot. The engine then reports `"Runtime exception: Write-write conflict of updating the same
+row."`, which this client classifies as the same retryable `LadybugWriteConflictException` as the
+single-writer refusal (it did not before 2026-09-06; that version of this section claimed "zero
+conflicts" because the conflicts were surfacing as a different exception type).
 
-These specific mutations/sec figures are this machine's, not a portable number - an independent
-spot-check on different hardware/load saw 602-1,248 mut/s instead of ~2,600-3,900, with the same
-conflict counts scaling into the thousands with the flag off. What travels is the *shape* of the
-result (conflicts present and climbing with the flag off, zero with it on, throughput flat vs.
-scaling), not the absolute rate - re-measure on your own hardware if the exact numbers matter to
-you.
+Measured with the benchmark workload (`LadybugDb.Client.Benchmarks --workload`, edge model, three
+seconds per writer count, retry on conflict, 2026-09-06):
+
+| Objects | Writers | Default: mutations/s (refused attempts) | `EnableMultiWrites`: mutations/s (row conflicts) |
+|---:|---:|---:|---:|
+| 10,000 | 1 | 6,210 (0) | 6,361 (0) |
+| 10,000 | 2 | 3,529 (many) | 7,604 (1) |
+| 10,000 | 4 | 3,180 (many) | 10,970 (10) |
+| 10,000 | 8 | 2,613 (358,204) | 14,393 (38) |
+| 100,000 | 8 | 3,645 (324,652) | 22,154 (5) |
+
+With the default, throughput *falls* as writers are added and the retry loop spins through hundreds
+of thousands of refusals. With the flag, throughput scales with writers and the handful of genuine
+row collisions are the only retries. The MAP-column schema model does not scale either way, because
+every attribute set rewrites a whole row; the attributes-as-nodes model above does.
+
+These mutations/sec figures are this machine's, not a portable number - earlier spot-checks on
+other hardware and load saw 602-1,248 and 2,600-3,900 mut/s for the same experiment. What travels
+is the *shape* of the result (refusals climbing and throughput falling with the flag off; a handful
+of row conflicts and throughput scaling with it on), not the absolute rate - re-measure on your own
+hardware if the exact numbers matter to you.
 
 ```csharp
 var config = new LadybugConfig { EnableMultiWrites = true };

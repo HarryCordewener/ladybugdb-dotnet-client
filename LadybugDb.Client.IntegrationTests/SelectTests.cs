@@ -46,6 +46,31 @@ public class SelectTests
 
     // -------------------------------------------------------------------------------- projection
 
+    /// <summary>
+    /// The engine names an unaliased projection after its expression - <c>o.dbref</c>, <c>o.name</c> -
+    /// and a record parameter named <c>Dbref</c> matches that by the text after the last dot, so the
+    /// common <c>RETURN o.dbref, o.name</c> needs no <c>AS</c> per column. Pinned against the real
+    /// engine because the column naming is the engine's, not this client's.
+    /// </summary>
+    [Test]
+    public async Task Select_MatchesUnaliasedColumnsByTheNameAfterTheDot()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            var (db, conn) = await OpenWithObjects(path);
+            using var _db = db;
+            await using var _conn = conn;
+
+            var people = new List<Person>();
+            await foreach (var p in conn.Select<Person>("MATCH (o:Object) RETURN o.dbref, o.name ORDER BY o.dbref"))
+                people.Add(p);
+
+            await Assert.That(people).IsEquivalentTo([new Person(1, "Limbo"), new Person(2, "Master Room"), new Person(3, "Void")]);
+        }
+        finally { TestDatabase.Cleanup(path); }
+    }
+
     /// <summary>The design's own example, end to end: a record, a parameter object, and one call.</summary>
     [Test]
     public async Task Select_ProjectsARecordWithParameters()

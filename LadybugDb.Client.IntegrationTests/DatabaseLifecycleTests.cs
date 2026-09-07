@@ -97,4 +97,44 @@ public class DatabaseLifecycleTests
             TestDatabase.Cleanup(path);
         }
     }
+
+    /// <summary>
+    /// The same conflict, reached through <see cref="LadybugConnection.PrepareAsync"/> instead of
+    /// a query: preparing a WRITE statement contends for the engine's single writer slot exactly as
+    /// executing one does, so it can fail with the same conflict message. It must surface as the
+    /// same retryable <see cref="LadybugWriteConflictException"/>, not as a plain
+    /// <see cref="LadybugException"/> a retry loop would treat as fatal. Found by the benchmark
+    /// workload's concurrent-writer section, where every writer prepares its statements on its own
+    /// connection while the others are already writing.
+    /// </summary>
+    [Test]
+    public async Task ConcurrentPrepareOfWriteStatement_ThrowsLadybugWriteConflictException()
+    {
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+            await using var conn1 = await db.ConnectAsync();
+            await using var conn2 = await db.ConnectAsync();
+
+            await conn1.ExecuteAsync(
+                "CREATE NODE TABLE Obj(dbref INT64, name STRING, PRIMARY KEY(dbref))");
+
+            await conn1.ExecuteAsync("BEGIN TRANSACTION");
+            await conn1.ExecuteAsync("CREATE (o:Obj {dbref: 1, name: 'A'})");
+
+            const string conflicting = "CREATE (o:Obj {dbref: $d, name: 'B'})";
+            var ex = await Assert.ThrowsAsync<LadybugWriteConflictException>(
+                async () => await conn2.PrepareAsync(conflicting));
+
+            await Assert.That(ex!.Statement).IsEqualTo(conflicting);
+            await Assert.That(ex.Message).Contains("write transaction");
+
+            await conn1.ExecuteAsync("COMMIT");
+        }
+        finally
+        {
+            TestDatabase.Cleanup(path);
+        }
+    }
 }

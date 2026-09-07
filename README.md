@@ -202,17 +202,27 @@ Unverified platforms are packaged from upstream releases but not exercised in CI
 | Document | Contents |
 |---|---|
 | [docs/USAGE.md](docs/USAGE.md) | Complete API guide — every public member, with examples |
+| [docs/2026-09-06-production-readiness.md](docs/2026-09-06-production-readiness.md) | Readiness review, benchmark analysis, and the LINQ direction |
+| [benchmarks/](benchmarks/README.md) | Workload and micro-benchmark harnesses and their results |
 | [docs/BUILDING.md](docs/BUILDING.md) | Building and testing from source |
 | [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 
-## Relationship to upstream
+## Relationship to upstream and to other .NET bindings
 
 An independent client, not an official LadybugDB project. It targets the official C API
-(`src/include/c_api/lbug.h`). Upstream ships bindings for Python, NodeJS, Rust, Go, Swift, Java, and
-C/C++, but none for .NET. A separate third-party binding also exists:
-[`Ladybug`](https://www.nuget.org/packages/Ladybug) by Denis Knaack.
+(`src/include/c_api/lbug.h`). Since mid-2026 upstream also ships its own .NET binding, so there are
+now three options on nuget.org:
+
+| Package | Owner | Shape |
+|---|---|---|
+| [`LadybugDB`](https://www.nuget.org/packages/LadybugDB) + `LadybugDB.Native.<rid>` | upstream ([LadybugDB/ladybug-dotnet](https://github.com/LadybugDB/ladybug-dotnet)) | Synchronous `Database`/`Connection`/`QueryResult` over the C API; rows as `object?[]`; net10.0 and netstandard2.0; five RIDs; version tracks the engine. No typed values, async, cancellation, projection, or transaction guard. |
+| [`Ladybug`](https://www.nuget.org/packages/Ladybug) | Denis Knaack | An abstraction surface; ships no native binaries. |
+| `LadybugDb.Client` (this repository) | independent | Typed `LadybugValue` for every engine type, `IAsyncEnumerable` rows, `Select<T>`, parameter objects, a managed transaction with a nested-`BEGIN` guard, refcounted native lifetimes, six RIDs including win-arm64. Async-shaped, completes synchronously. |
+
+If you need the upstream-maintained binding and a synchronous API, use `LadybugDB`. This client
+exists for the typed, async-shaped surface above, and it is the one SharpMUSH is built against.
 
 ## License
 

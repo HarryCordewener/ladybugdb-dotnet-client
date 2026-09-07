@@ -66,6 +66,20 @@ internal static class TransactionStatement
             return TransactionEffect.None;
         }
 
+        // Nearly every statement is neither BEGIN, COMMIT nor ROLLBACK, and this runs on every
+        // QueryAsync. Decide that from the first keyword before normalizing anything: a statement
+        // that does not start with one of the three words is a definite None with no allocation,
+        // and only a candidate pays for the normalized exact comparison below (which still rejects
+        // "COMMITTED" or "BEGIN TRANSACTION; CREATE ..."). Measured before this check: 118 ns and
+        // 528 B per typical MATCH statement (LadybugDb.Client.Benchmarks, ClassifierBenchmarks).
+        var trimmedStart = cypher.AsSpan().TrimStart();
+        if (!trimmedStart.StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase)
+            && !trimmedStart.StartsWith("COMMIT", StringComparison.OrdinalIgnoreCase)
+            && !trimmedStart.StartsWith("ROLLBACK", StringComparison.OrdinalIgnoreCase))
+        {
+            return TransactionEffect.None;
+        }
+
         var normalized = Normalize(cypher);
 
         // Ordered longest-first so READ ONLY is not shadowed by the bare form.

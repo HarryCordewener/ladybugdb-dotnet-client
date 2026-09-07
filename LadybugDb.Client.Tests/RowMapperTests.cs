@@ -511,4 +511,48 @@ public class RowMapperTests
         await Assert.That(rows.Select(r => r.Dbref)).IsEquivalentTo(new[] { 1L, 2L, 3L, 4L, 5L });
         await Assert.That(rows.Select(r => r.Name)).IsEquivalentTo(new[] { "n1", "n2", "n3", "n4", "n5" });
     }
+
+    // ----------------------------------------------------- unaliased (dotted) column matching
+
+    [Test]
+    public async Task Map_MatchesAnUnaliasedColumnByTheNameAfterItsLastDot()
+    {
+        var row = Row(("o.dbref", Int64(42)), ("o.name", Str("Limbo")));
+
+        var person = RowMapper.Map<Person>(row);
+
+        await Assert.That(person).IsEqualTo(new Person(42, "Limbo"));
+    }
+
+    [Test]
+    public async Task Map_PrefersAnExactAliasOverADottedSuffix()
+    {
+        // 'r.name' would also match Name by suffix; the exact alias wins regardless of position.
+        var row = Row(("r.name", Str("Room")), ("Name", Str("Limbo")), ("Dbref", Int64(42)));
+
+        var person = RowMapper.Map<Person>(row);
+
+        await Assert.That(person).IsEqualTo(new Person(42, "Limbo"));
+    }
+
+    [Test]
+    public async Task Map_ResolvesTwoDottedColumnsWithTheSameSuffixToTheLeftmost()
+    {
+        var row = Row(("o.dbref", Int64(42)), ("o.name", Str("Limbo")), ("r.name", Str("Room")));
+
+        var person = RowMapper.Map<Person>(row);
+
+        await Assert.That(person.Name).IsEqualTo("Limbo");
+    }
+
+    [Test]
+    public async Task Map_StillRejectsAColumnWhoseSuffixMatchesNothing()
+    {
+        var row = Row(("o.dbref", Int64(42)), ("o.nmae", Str("Limbo")));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => RowMapper.Map<Person>(row));
+
+        await Assert.That(ex!.Message).Contains("'o.nmae'");
+        await Assert.That(ex.Message).Contains("'Name'");
+    }
 }
