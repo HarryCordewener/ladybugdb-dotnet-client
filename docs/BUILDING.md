@@ -61,6 +61,24 @@ dotnet test LadybugDb.Client.Tests -c Release --treenode-filter "/*/*/PackagingT
 dotnet test LadybugDb.Client.IntegrationTests -c Release --treenode-filter "/*/*/DatabaseLifecycleTests/ConcurrentWrite_ThrowsLadybugWriteConflictException"
 ```
 
+## The Native AOT sample
+
+`samples/LadybugDb.Client.AotSample` is a console program that opens a database, inserts through a
+prepared statement, and reads rows back with the typed accessors. It is not in the solution file:
+its `PublishAot=true` makes restore pull the ILCompiler toolchain for the host, which every
+`dotnet build` of the solution would then pay for. CI's `aot-publish` job publishes it and runs the
+result, which is the evidence behind the shipping project's `IsAotCompatible=true`. To do the same
+locally (needs `clang`):
+
+```console
+dotnet publish samples/LadybugDb.Client.AotSample -c Release -r linux-x64 -o aot-out
+./aot-out/LadybugDb.Client.AotSample
+```
+
+The sample uses only the non-reflective surface. `Select<T>` and the parameter-object overloads
+are annotated `[RequiresUnreferencedCode]`; calling them from an AOT-published app is a trim
+warning, which `TreatWarningsAsErrors` turns into a failure here.
+
 ## Regenerating interop
 
 The raw P/Invoke layer (`LadybugDb.Client/Native/LbugNative.g.cs`) is generated from the pinned

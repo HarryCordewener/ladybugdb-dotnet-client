@@ -52,6 +52,27 @@ No long-lived nuget.org API key is stored anywhere in this repo or its secrets â
 [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), backed
 by GitHub OIDC.
 
+## Package validation and the API baseline
+
+`LadybugDb.Client.csproj` has `EnablePackageValidation=true`, so every `dotnet pack` checks the
+package against itself (compatible frameworks and runtimes). The check that matters for consumers,
+"did this version break the previous one's public API", needs a published version to compare
+against, and starts on the release after the first publish:
+
+1. After the first version (say `0.2.0`) is live on nuget.org, add to
+   `LadybugDb.Client/LadybugDb.Client.csproj` (and, once it ships, to
+   `LadybugDb.Client.Extensions/LadybugDb.Client.Extensions.csproj`):
+
+   ```xml
+   <PackageValidationBaselineVersion>0.2.0</PackageValidationBaselineVersion>
+   ```
+
+2. From then on `dotnet pack` downloads that version and fails on a removed or changed public
+   member. Bump the property to the newest published version with each release.
+3. A deliberate break (pre-1.0 this is allowed; after 1.0 it means a major bump) is recorded by
+   adding the reported suppression to `CompatibilitySuppressions.xml` next to the csproj, and by
+   a `Changed`/`Removed` entry in `CHANGELOG.md`.
+
 ## Versioning
 
 The pushed **tag is the single source of truth** for the published version. The workflow strips

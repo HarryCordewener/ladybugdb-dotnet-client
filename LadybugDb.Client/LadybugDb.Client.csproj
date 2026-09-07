@@ -5,6 +5,21 @@
     <PackageId>LadybugDb.Client</PackageId>
     <Description>.NET client for LadybugDB, an embedded graph database with Cypher. Managed assembly only; add upstream's LadybugDB.Native (or LadybugDB.Native.&lt;rid&gt;) package for the engine binaries.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!--
+      Package validation runs at pack time. Without a PackageValidationBaselineVersion it checks
+      only that the package is consistent with itself (compatible frameworks and runtimes); the
+      baseline check, which fails the pack on an API break against the last published version,
+      starts when docs/RELEASING.md's first-publish step adds that property.
+    -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <!--
+      Turns on the trim, single-file and AOT analyzers and stamps the assembly as AOT-compatible.
+      The reflective paths (parameter objects, Select<T>) are annotated [RequiresUnreferencedCode]
+      and surface as warnings in the consumer's AOT build; everything else is P/Invoke over a
+      blittable C API, which needs no runtime marshalling. samples/LadybugDb.Client.AotSample is
+      published with PublishAot=true in CI to prove it.
+    -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
     <!--

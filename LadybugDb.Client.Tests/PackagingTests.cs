@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using TUnit.Assertions;
@@ -101,6 +102,20 @@ public class PackagingTests
 
         using var zip = ZipFile.OpenRead(snupkg);
         await Assert.That(zip.Entries.Select(e => e.FullName)).Contains("lib/net10.0/LadybugDb.Client.pdb");
+    }
+
+    /// <summary>
+    /// <c>IsAotCompatible=true</c> stamps the assembly with this metadata (since .NET 10), which
+    /// consumers' <c>VerifyReferenceAotCompatibility</c> check reads. Losing the flag would be a
+    /// silent regression for every AOT consumer, hence the guard.
+    /// </summary>
+    [Test]
+    public async Task ManagedAssembly_DeclaresAotCompatibility()
+    {
+        var value = typeof(LadybugDatabase).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "IsAotCompatible")?.Value;
+        await Assert.That(value).IsEqualTo("True");
     }
 
     [Test]

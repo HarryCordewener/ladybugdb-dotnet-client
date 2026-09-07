@@ -41,6 +41,22 @@ jobs:
       - name: Integration tests
         run: dotnet test LadybugDb.Client.IntegrationTests -c Release
 
+  aot-publish:
+    # The evidence behind LadybugDb.Client's IsAotCompatible flag: the sample is compiled
+    # ahead-of-time (ILC re-runs the trim/AOT analysis, so an unannotated reflective path fails
+    # here even if the Roslyn analyzers let it through) and then executed against the real
+    # engine. ubuntu-latest has the clang the ILCompiler toolchain needs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Publish the AOT sample
+        run: dotnet publish samples/LadybugDb.Client.AotSample -c Release -r linux-x64 -o aot-out
+      - name: Run the native binary
+        run: ./aot-out/LadybugDb.Client.AotSample
+
   interop-drift:
     runs-on: ubuntu-latest
     steps:
