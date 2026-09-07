@@ -25,5 +25,11 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+    <!--
+      The implementation package, not .Abstractions: AddHealthChecks() and HealthCheckServiceOptions
+      (what AddLadybugDb registers the check into) live there. It brings Hosting.Abstractions and
+      Logging.Abstractions along, both already present in any host that has health checks.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.11" />
   </ItemGroup>
 </Project>

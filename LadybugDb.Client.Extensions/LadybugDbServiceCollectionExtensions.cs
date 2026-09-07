@@ -76,6 +76,10 @@ public static class LadybugDbServiceCollectionExtensions
     {
         Validate(options);
 
+        if (services.Any(static d => d.ServiceType == typeof(RegistrationMarker)))
+            return services;
+        services.AddSingleton(RegistrationMarker.Instance);
+
         // The resolved values are copied into the options pipeline rather than re-bound there, so
         // IOptions<LadybugDbOptions> reports exactly what the database was opened with.
         services.AddOptions<LadybugDbOptions>().Configure(o =>
@@ -99,7 +103,24 @@ public static class LadybugDbServiceCollectionExtensions
             return pending.IsCompletedSuccessfully ? pending.Result : pending.AsTask().GetAwaiter().GetResult();
         });
 
+        if (!options.DisableHealthChecks)
+        {
+            services.AddHealthChecks()
+                .AddCheck<LadybugDbHealthCheck>(LadybugDbHealthCheck.DefaultName, tags: ["db", "ladybugdb"]);
+        }
+
         return services;
+    }
+
+    /// <summary>
+    /// Present in the collection once <c>AddLadybugDb</c> has run, so a second call is a no-op
+    /// (the first registration wins, as with <c>TryAdd</c>) instead of a second validator, a
+    /// second options configurator and a duplicate health-check name that
+    /// <c>HealthCheckService</c> would reject at its first run.
+    /// </summary>
+    private sealed class RegistrationMarker
+    {
+        public static readonly RegistrationMarker Instance = new();
     }
 
     private static void Validate(LadybugDbOptions options)

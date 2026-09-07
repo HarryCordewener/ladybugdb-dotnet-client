@@ -11,6 +11,11 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
     <!--
+      HealthCheckService's implementation takes an ILogger; a host registers logging before
+      anything else, so the tests that run the service do the same with AddLogging().
+    -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.11" />
+    <!--
       Upstream's own native packages carry liblbug (runtimes/<rid>/native); this repository ships
       no binaries of its own. LadybugDB.Native is the meta package for every RID, which is what a
       test project that runs on both Linux and Windows CI needs. Its version is the engine version.

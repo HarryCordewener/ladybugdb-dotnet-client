@@ -213,6 +213,11 @@ public class ServiceCollectionTests
             var services = new ServiceCollection().AddLadybugDb(path).AddLadybugDb(path);
             await Assert.That(services.Count(d => d.ServiceType == typeof(LadybugDatabase))).IsEqualTo(1);
             await Assert.That(services.Count(d => d.ServiceType == typeof(LadybugConnection))).IsEqualTo(1);
+
+            // HealthCheckService rejects a duplicate name at its first run, so one registration matters here too.
+            await using var provider = services.BuildServiceProvider();
+            var registrations = provider.GetRequiredService<IOptions<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckServiceOptions>>().Value.Registrations;
+            await Assert.That(registrations.Count(r => r.Name == "ladybugdb")).IsEqualTo(1);
         }
         finally { TestDatabase.Cleanup(path); }
     }
