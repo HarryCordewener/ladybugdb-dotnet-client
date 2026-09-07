@@ -6,7 +6,7 @@ namespace LadybugDb.Client.Native;
 
 /// <summary>
 /// Resolves the liblbug native library from the layout NuGet produces for
-/// LadybugDb.Client.Native, so the managed package can ship no binaries of its own.
+/// upstream's LadybugDB.Native packages, so the managed package can ship no binaries of its own.
 /// </summary>
 internal static class NativeLibraryResolver
 {
@@ -45,7 +45,7 @@ internal static class NativeLibraryResolver
     /// <summary>
     /// Candidate paths to probe for the native library, in priority order:
     /// the NuGet <c>runtimes/&lt;rid&gt;/native/</c> layout that
-    /// LadybugDb.Client.Native copies next to the consuming app, then a
+    /// the LadybugDB.Native packages copy next to the consuming app, then a
     /// flat app-local fallback for hand-placed binaries. Each is tried
     /// relative to both the resolver assembly's own directory and the
     /// app's base directory, since they can differ (e.g. plugin/probing
@@ -70,10 +70,11 @@ internal static class NativeLibraryResolver
         new($"""
              Could not load the LadybugDB native library ({CurrentFileName()}) for {CurrentRid()}.
 
-             LadybugDb.Client ships no native binaries by design. Add the companion package:
+             LadybugDb.Client ships no native binaries by design. Add upstream's native package:
 
-                 dotnet add package LadybugDb.Client.Native
+                 dotnet add package LadybugDB.Native
 
+             (or one LadybugDB.Native.<rid> package) at version {EngineVersion.Pinned} or newer.
              If you supply the library yourself, place it at
              runtimes/{CurrentRid()}/native/{CurrentFileName()} next to the application,
              or alongside the application binary.
@@ -88,7 +89,7 @@ internal static class NativeLibraryResolver
     // DllNotFoundException instead is a supported pattern: exceptions raised
     // from a DllImportResolver callback propagate unmodified to the P/Invoke
     // call site (verified empirically), so this is how the actionable
-    // "install LadybugDb.Client.Native" guidance actually reaches the caller
+    // "install LadybugDB.Native" guidance actually reaches the caller
     // instead of being replaced by the runtime's own generic message.
     private static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {

@@ -1,7 +1,7 @@
 # Releasing
 
-How a version of `LadybugDb.Client` and `LadybugDb.Client.Native` gets from a commit on `main`
-to two packages on nuget.org.
+How a version of `LadybugDb.Client` gets from a commit on `main` to a package on nuget.org. (The
+engine binaries are upstream's `LadybugDB.Native` packages; this repository publishes none.)
 
 - [How a release ships](#how-a-release-ships)
 - [What the workflow actually does](#what-the-workflow-actually-does)
@@ -23,7 +23,7 @@ to two packages on nuget.org.
 
    Pushing a tag matching `v[0-9]+.[0-9]+.[0-9]+*` triggers
    [`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds, tests, packs,
-   and publishes both packages.
+   and publishes the package.
 
    Alternatively, run the workflow manually from the Actions tab (`workflow_dispatch`) and supply a
    `version` input — useful for re-publishing after a transient failure without cutting a new tag,
@@ -35,18 +35,17 @@ In order, on `ubuntu-latest`:
 
 1. Determine the version from the tag (or the `workflow_dispatch` input) and validate it looks like
    SemVer.
-2. `bash scripts/fetch-liblbug.sh` — fetch and checksum-verify the pinned native binaries for all
-   six RIDs, same as CI.
-3. `dotnet restore`, `dotnet build -c Release -p:Version=<version>`.
-4. `dotnet test` for both `LadybugDb.Client.Tests` and `LadybugDb.Client.IntegrationTests`, against
+2. `dotnet restore` (which also brings in the `LadybugDB.Native` package the test projects
+   reference), `dotnet build -c Release -p:Version=<version>`.
+3. `dotnet test` for both `LadybugDb.Client.Tests` and `LadybugDb.Client.IntegrationTests`, against
    the just-built `Release` binaries. **A publish never happens from artifacts that weren't
    tested** — if either test project fails, the job stops before packing or pushing anything.
-5. `dotnet pack -c Release -p:Version=<version>` — produces exactly two packages
-   (`LadybugDb.Client` and `LadybugDb.Client.Native`; the two test projects are `IsPackable=false`).
-6. `NuGet/login@v1` exchanges this job's GitHub OIDC token for a nuget.org API key good for one
+4. `dotnet pack -c Release -p:Version=<version>` — produces exactly one package
+   (`LadybugDb.Client`; every other project is `IsPackable=false`).
+5. `NuGet/login@v1` exchanges this job's GitHub OIDC token for a nuget.org API key good for one
    hour. This step runs right before the push steps, not earlier in the job, since the key is
    short-lived.
-7. `dotnet nuget push` for each package, with `--skip-duplicate` so re-running the workflow (e.g.
+6. `dotnet nuget push`, with `--skip-duplicate` so re-running the workflow (e.g.
    after a flaky push) isn't fatal if a package version already exists on nuget.org.
 
 No long-lived nuget.org API key is stored anywhere in this repo or its secrets — this is
@@ -87,8 +86,7 @@ this repository.
      key to `release.yml`, in which case both must be changed together.
 
    If nuget.org requires the target package IDs to already exist or be reserved before a Trusted
-   Publishing policy can be scoped to them, reserve `LadybugDb.Client` and `LadybugDb.Client.Native`
-   first. If this is a private/new nuget.org policy, it starts temporarily active for **7 days**
+   Publishing policy can be scoped to them, reserve `LadybugDb.Client` first. If this is a private/new nuget.org policy, it starts temporarily active for **7 days**
    and locks to this repo's owner/repository IDs on the first successful publish — expect that
    window, and don't be alarmed if the policy shows as "pending" until the first tag ships.
 
@@ -112,19 +110,17 @@ step (empty/wrong `user`, or no matching Trusted Publishing policy) or the `dotn
 
 ## Verifying a publish succeeded
 
-- **In the workflow run:** both `Push LadybugDb.Client` and `Push LadybugDb.Client.Native` steps
-  should complete without error. A `--skip-duplicate` push of a version that's already live prints
+- **In the workflow run:** the `Push LadybugDb.Client` step should complete without error. A `--skip-duplicate` push of a version that's already live prints
   a message and still exits 0 — that's expected on a re-run, not a sign anything is wrong.
 - **On nuget.org:** check
-  [nuget.org/packages/LadybugDb.Client](https://www.nuget.org/packages/LadybugDb.Client) and
-  [nuget.org/packages/LadybugDb.Client.Native](https://www.nuget.org/packages/LadybugDb.Client.Native)
+  [nuget.org/packages/LadybugDb.Client](https://www.nuget.org/packages/LadybugDb.Client)
   for the new version. New versions can take a few minutes to appear while nuget.org finishes
   indexing.
 - **From a consuming project:**
 
   ```console
   dotnet add package LadybugDb.Client --version 0.2.0
-  dotnet add package LadybugDb.Client.Native --version 0.2.0
+  dotnet add package LadybugDB.Native --version 0.19.1
   ```
 
 ## What is unverified
@@ -135,7 +131,7 @@ already be in place with a real account. Specifically unverified:
 
 - That `NuGet/login@v1` successfully exchanges this repo's GitHub OIDC token for a nuget.org API
   key once the Trusted Publishing policy above exists.
-- That the resulting API key has push rights sufficient for `dotnet nuget push` on both packages.
+- That the resulting API key has push rights sufficient for `dotnet nuget push`.
 - The exact behavior/wording nuget.org returns on a `--skip-duplicate` push against an existing
   version.
 - End-to-end timing: whether the 1-hour API key window is comfortably enough for build+test+pack to
@@ -143,6 +139,6 @@ already be in place with a real account. Specifically unverified:
   minutes — but this has not been timed for this specific workflow).
 
 The workflow YAML has been validated with `actionlint` and a YAML parser, and its non-publishing
-steps (fetch, restore, build, test, pack) are the same commands CI already runs successfully on
+steps (restore, build, test, pack) are the same commands CI already runs successfully on
 every PR — only the final OIDC login and `dotnet nuget push` steps are new and untested against the
 real service.

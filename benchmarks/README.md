@@ -24,7 +24,7 @@ dotnet run -c Release -- --workload --sizes 1000,10000,100000 --samples 1000 --o
 dotnet run -c Release -- --filter '*'
 dotnet run -c Release -- --filter '*PointLookup*'
 
-# Python control (needs a venv with ladybug==0.18.3, i.e. the pinned engine version)
+# Python control (needs a venv with the ladybug version matching third-party/liblbug.version)
 python workload_bench.py --sizes 1000 10000 --samples 1000 --out results-python.json
 
 # render

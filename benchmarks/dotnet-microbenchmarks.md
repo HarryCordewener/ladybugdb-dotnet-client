@@ -70,3 +70,34 @@ Engine v0.18.3, LadybugDb.Client at branch `feat/api-ergonomics` plus the 2026-0
 | BeginTransaction | 48.986 ns | 0.7225 ns | 0.5224 ns | 48.778 ns | 45.30 |    0.64 | 0.0107 |     168 B |          NA |
 
 Before the fix (run 1): `TypicalQuery` 117.88 ns, 528 B; `BeginTransaction` 38.08 ns, 168 B.
+
+## Engine 0.19.1 re-run (run 4, 20:10, after switching to upstream's `LadybugDB.Native` 0.19.1)
+
+Same host, same code as run 2. Point lookups are 8–12% slower than on 0.18.3 across every dispatch shape; the read path is unchanged within noise.
+
+| Type                  | Method                    | Rows  | Size   | Mean         | Error      | StdDev     | Median       | Ratio | RatioSD | Gen0     | Gen1     | Gen2     | Allocated  | Alloc Ratio |
+|---------------------- |-------------------------- |------ |------- |-------------:|-----------:|-----------:|-------------:|------:|--------:|---------:|---------:|---------:|-----------:|------------:|
+| ReadPathBenchmarks    | CountOnly                 | 10000 | ?      |    181.06 μs |   2.112 μs |   1.257 μs |    181.54 μs |  0.02 |    0.00 |        - |        - |        - |      536 B |       0.000 |
+| ReadPathBenchmarks    | RowAccessors              | 10000 | ?      |  8,854.34 μs | 247.920 μs | 193.559 μs |  8,886.55 μs |  1.00 |    0.03 | 265.6250 |        - |        - |  4399632 B |       1.000 |
+| ReadPathBenchmarks    | SelectRecord              | 10000 | ?      |  9,026.27 μs | 194.134 μs | 151.567 μs |  9,066.13 μs |  1.02 |    0.03 | 359.3750 |        - |        - |  5760000 B |       1.309 |
+| ReadPathBenchmarks    | RowsToListAsync           | 10000 | ?      | 11,804.15 μs | 210.193 μs | 139.029 μs | 11,778.88 μs |  1.33 |    0.03 | 359.3750 | 234.3750 | 109.3750 |  4924282 B |       1.119 |
+| ReadPathBenchmarks    | NodeValues                | 10000 | ?      | 20,153.15 μs | 426.768 μs | 333.193 μs | 20,266.73 μs |  2.28 |    0.06 | 625.0000 |        - |        - | 10239528 B |       2.327 |
+| ReadPathBenchmarks    | Prototype_FastPath_Values | 10000 | ?      |  3,047.33 μs |  61.433 μs |  47.963 μs |  3,044.00 μs |  0.34 |    0.01 | 125.0000 | 117.1875 |  50.7813 |  1862178 B |       0.423 |
+| ReadPathBenchmarks    | Prototype_FastPath_Typed  | 10000 | ?      |  1,892.43 μs |  18.515 μs |  14.456 μs |  1,893.03 μs |  0.21 |    0.00 |  82.0313 |  80.0781 |  41.0156 |  1062060 B |       0.241 |
+| ReadPathBenchmarks    | Prototype_ArrowChunks     | 10000 | ?      |  1,725.19 μs |  25.585 μs |  19.975 μs |  1,728.60 μs |  0.19 |    0.00 |  82.0313 |  80.0781 |  41.0156 |  1062084 B |       0.241 |
+| PointLookupBenchmarks | Interpolated              | ?     | 10000  |    111.58 μs |   6.327 μs |   4.575 μs |    111.57 μs |  0.83 |    0.03 |        - |        - |        - |      592 B |        0.45 |
+| PointLookupBenchmarks | ParametersObject          | ?     | 10000  |    134.51 μs |   2.581 μs |   1.867 μs |    134.39 μs |  1.00 |    0.02 |        - |        - |        - |     1305 B |        1.00 |
+| PointLookupBenchmarks | PreparedTypedBind         | ?     | 10000  |     66.20 μs |   0.845 μs |   0.503 μs |     66.14 μs |  0.49 |    0.01 |        - |        - |        - |      480 B |        0.37 |
+| PointLookupBenchmarks | PreparedParametersObject  | ?     | 10000  |     65.42 μs |   1.119 μs |   0.809 μs |     65.77 μs |  0.49 |    0.01 |        - |        - |        - |     1128 B |        0.86 |
+| PointLookupBenchmarks | PreparedSelectScalar      | ?     | 10000  |     66.86 μs |   2.725 μs |   1.802 μs |     66.56 μs |  0.50 |    0.01 |        - |        - |        - |     1464 B |        1.12 |
+| PointLookupBenchmarks | PreparedTypedBind_TaskRun | ?     | 10000  |     73.11 μs |   2.938 μs |   2.124 μs |     73.32 μs |  0.54 |    0.02 |        - |        - |        - |      752 B |        0.58 |
+| PointLookupBenchmarks | AttrByPrimaryKey          | ?     | 10000  |     67.57 μs |   0.804 μs |   0.478 μs |     67.69 μs |  0.50 |    0.01 |        - |        - |        - |      523 B |        0.40 |
+| PointLookupBenchmarks | AttrByTraversalHop        | ?     | 10000  |    502.94 μs |  15.806 μs |  12.340 μs |    503.14 μs |  3.74 |    0.10 |        - |        - |        - |      480 B |        0.37 |
+| PointLookupBenchmarks | Interpolated              | ?     | 100000 |    108.30 μs |   5.208 μs |   3.766 μs |    107.94 μs |  0.74 |    0.04 |        - |        - |        - |      592 B |        0.45 |
+| PointLookupBenchmarks | ParametersObject          | ?     | 100000 |    146.97 μs |   9.756 μs |   7.054 μs |    145.47 μs |  1.00 |    0.06 |        - |        - |        - |     1305 B |        1.00 |
+| PointLookupBenchmarks | PreparedTypedBind         | ?     | 100000 |     69.03 μs |   1.693 μs |   1.224 μs |     69.03 μs |  0.47 |    0.02 |        - |        - |        - |      480 B |        0.37 |
+| PointLookupBenchmarks | PreparedParametersObject  | ?     | 100000 |     71.73 μs |   5.465 μs |   4.267 μs |     69.77 μs |  0.49 |    0.04 |        - |        - |        - |     1128 B |        0.86 |
+| PointLookupBenchmarks | PreparedSelectScalar      | ?     | 100000 |     73.48 μs |   1.946 μs |   1.519 μs |     73.66 μs |  0.50 |    0.02 |        - |        - |        - |     1464 B |        1.12 |
+| PointLookupBenchmarks | PreparedTypedBind_TaskRun | ?     | 100000 |     79.61 μs |   3.317 μs |   2.590 μs |     79.60 μs |  0.54 |    0.03 |        - |        - |        - |      752 B |        0.58 |
+| PointLookupBenchmarks | AttrByPrimaryKey          | ?     | 100000 |     73.81 μs |   1.409 μs |   0.932 μs |     73.42 μs |  0.50 |    0.02 |        - |        - |        - |      527 B |        0.40 |
+| PointLookupBenchmarks | AttrByTraversalHop        | ?     | 100000 |    580.96 μs |   5.949 μs |   4.644 μs |    579.97 μs |  3.96 |    0.18 |        - |        - |        - |      480 B |        0.37 |

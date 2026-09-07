@@ -137,4 +137,27 @@ public class DatabaseLifecycleTests
             TestDatabase.Cleanup(path);
         }
     }
+
+    /// <summary>
+    /// The engine comes from upstream's <c>LadybugDB.Native</c> package, whose version is the engine
+    /// version, so the library this process loaded must report at least the version this client was
+    /// generated against - and the constructor's compatibility check must accept it.
+    /// </summary>
+    [Test]
+    public async Task EngineVersion_IsReportedAndAtLeastTheMinimum()
+    {
+        var loaded = LadybugDatabase.EngineVersion;
+        await Assert.That(string.IsNullOrWhiteSpace(loaded)).IsFalse();
+        await Assert.That(EngineVersion.IsCompatible(loaded, LadybugDatabase.MinimumEngineVersion)).IsTrue();
+
+        var path = TestDatabase.NewPath();
+        try
+        {
+            using var db = new LadybugDatabase(path);
+        }
+        finally
+        {
+            TestDatabase.Cleanup(path);
+        }
+    }
 }

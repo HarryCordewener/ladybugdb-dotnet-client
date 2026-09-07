@@ -3,8 +3,7 @@ namespace LadybugDb.Client.Tests;
 /// <summary>
 /// Shared path helpers for tests that need to locate files in the repo
 /// checkout rather than the test output directory (e.g. built .nupkg
-/// artifacts, or the gitignored native binaries under
-/// LadybugDb.Client.Native/runtimes/).
+/// artifacts, or the pinned engine version in third-party/liblbug.version).
 /// </summary>
 internal static class TestPaths
 {

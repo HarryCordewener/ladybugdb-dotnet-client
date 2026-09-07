@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="$(tr -d '[:space:]' < "$ROOT/LadybugDb.Client.Native/liblbug.version")"
+VERSION="$(tr -d '[:space:]' < "$ROOT/third-party/liblbug.version")"
 HEADER_DIR="$ROOT/third-party"
 HEADER="$HEADER_DIR/lbug.h"
 OUT="$ROOT/LadybugDb.Client/Native/LbugNative.g.cs"

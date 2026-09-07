@@ -32,11 +32,11 @@ See [docs/BUILDING.md](docs/BUILDING.md#running-tests) for how to run each, incl
 
 ## Native binaries
 
-Never commit native binaries. `LadybugDb.Client.Native/runtimes/` is fetched by
-`scripts/fetch-liblbug.sh` from pinned, hash-verified upstream releases — see
-[docs/BUILDING.md](docs/BUILDING.md#how-native-binaries-are-pinned-and-verified). If your change
-needs a newer `liblbug`, bump `liblbug.version` and update the lockfile as described there; don't
-hand-add a binary to the tree.
+Never commit native binaries. This repository ships none: the engine comes from upstream's
+`LadybugDB.Native` packages, referenced by the test projects, and the version this client was
+generated against is pinned in `third-party/liblbug.version` — see
+[docs/BUILDING.md](docs/BUILDING.md#how-the-engine-version-is-pinned). If your change needs a newer
+engine, bump the pin and the package references together and regenerate the interop.
 
 ## Generated interop
 

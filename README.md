@@ -12,31 +12,37 @@ engine, but may change before 1.0.
 ## Requirements
 
 - .NET 10 SDK
-- One of the six supported platforms below
+- One of the five platforms upstream ships binaries for (below)
 
 ## Installation
 
-No package is on NuGet yet. Build from source:
+`LadybugDb.Client` is not on NuGet yet; build it from source:
 
 ```console
 git clone https://github.com/HarryCordewener/ladybugdb-dotnet-client.git
 cd ladybugdb-dotnet-client
-bash scripts/fetch-liblbug.sh
 dotnet pack -c Release
 ```
 
-This produces two packages under each project's `bin/Release`. **Both are required.**
+That produces one package, `LadybugDb.Client`, under `LadybugDb.Client/bin/Release`. It is the
+managed client only. The engine binaries come from upstream's own native packages, which you add
+alongside it:
 
-| Package | Contents |
-|---|---|
-| `LadybugDb.Client` | Managed client. No native binaries. |
-| `LadybugDb.Client.Native` | `liblbug` for six runtime identifiers. |
+```console
+dotnet add package LadybugDB.Native            # every platform, or:
+dotnet add package LadybugDB.Native.linux-x64  # one platform
+```
 
-They are split so native binaries cannot propagate silently into a consumer's own package.
-`LadybugDb.Client` alone compiles and resolves types; the first call into the engine throws
-`DllNotFoundException` naming the missing package.
+The native package's version is the engine version. This build of the client was generated against
+engine **v0.19.1** (`third-party/liblbug.version`) and accepts that version or newer; opening a
+database against an older engine throws a `LadybugException` that says which version to install.
+`LadybugDatabase.EngineVersion` reports what was actually loaded.
 
-Reference them from a local feed, or add a project reference to
+`LadybugDb.Client` declares no dependency on a native package, so the platform choice and the
+engine version stay yours. Without one, the first call into the engine throws
+`DllNotFoundException` naming the package to add.
+
+Reference the client from a local feed, or add a project reference to
 `LadybugDb.Client/LadybugDb.Client.csproj`. See [docs/BUILDING.md](docs/BUILDING.md) for details.
 
 ## Quick start
@@ -186,16 +192,19 @@ that abstraction.
 
 ## Supported platforms
 
-| RID | OS | Verified in CI |
+The platforms are whatever upstream's `LadybugDB.Native.<rid>` packages cover:
+
+| RID | OS | Verified in this repository's CI |
 |---|---|---|
 | `linux-x64` | Linux x64 | Yes |
 | `win-x64` | Windows x64 | Yes |
 | `linux-arm64` | Linux ARM64 | No |
 | `osx-x64` | macOS x64 | No |
 | `osx-arm64` | macOS ARM64 | No |
-| `win-arm64` | Windows ARM64 | No |
 
-Unverified platforms are packaged from upstream releases but not exercised in CI.
+Upstream publishes a `win-arm64` engine build but no native package for it yet; on that platform,
+place `lbug_shared.dll` from the upstream release next to the application (the resolver probes
+`runtimes/win-arm64/native/` and the application directory).
 
 ## Documentation
 
@@ -219,13 +228,12 @@ now three options on nuget.org:
 |---|---|---|
 | [`LadybugDB`](https://www.nuget.org/packages/LadybugDB) + `LadybugDB.Native.<rid>` | upstream ([LadybugDB/ladybug-dotnet](https://github.com/LadybugDB/ladybug-dotnet)) | Synchronous `Database`/`Connection`/`QueryResult` over the C API; rows as `object?[]`; net10.0 and netstandard2.0; five RIDs; version tracks the engine. No typed values, async, cancellation, projection, or transaction guard. |
 | [`Ladybug`](https://www.nuget.org/packages/Ladybug) | Denis Knaack | An abstraction surface; ships no native binaries. |
-| `LadybugDb.Client` (this repository) | independent | Typed `LadybugValue` for every engine type, `IAsyncEnumerable` rows, `Select<T>`, parameter objects, a managed transaction with a nested-`BEGIN` guard, refcounted native lifetimes, six RIDs including win-arm64. Async-shaped, completes synchronously. |
+| `LadybugDb.Client` (this repository) | independent | Typed `LadybugValue` for every engine type, `IAsyncEnumerable` rows, `Select<T>`, parameter objects, a managed transaction with a nested-`BEGIN` guard, refcounted native lifetimes. Async-shaped, completes synchronously. Uses upstream's `LadybugDB.Native` packages for the engine. |
 
 If you need the upstream-maintained binding and a synchronous API, use `LadybugDB`. This client
 exists for the typed, async-shaped surface above, and it is the one SharpMUSH is built against.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). LadybugDB is also MIT licensed, so the native binaries redistributed in
-`LadybugDb.Client.Native` carry no additional restrictions. Attribution ships in that package's
-`THIRD-PARTY-NOTICES.md`.
+MIT — see [LICENSE](LICENSE). This repository redistributes no LadybugDB binaries; the engine comes
+from upstream's own MIT-licensed `LadybugDB.Native` packages.

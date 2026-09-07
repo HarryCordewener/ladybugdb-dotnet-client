@@ -61,10 +61,6 @@ jobs:
           echo "Publishing version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch native binaries
-        shell: bash
-        run: bash scripts/fetch-liblbug.sh
-
       - name: Restore
         run: dotnet restore
 
@@ -78,9 +74,9 @@ jobs:
         run: dotnet test LadybugDb.Client.IntegrationTests --no-build -c Release
 
       - name: Pack
-        # Only LadybugDb.Client and LadybugDb.Client.Native are IsPackable;
-        # the two test projects are not, so this produces exactly the two
-        # packages this workflow pushes below.
+        # Only LadybugDb.Client is IsPackable; the test, benchmark and crash-repro
+        # projects are not, so this produces exactly the one package this workflow
+        # pushes below. The engine binaries are upstream's LadybugDB.Native packages.
         run: dotnet pack --no-build -c Release -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       - name: NuGet login (OIDC -> temporary API key)
@@ -102,13 +98,6 @@ jobs:
       - name: Push LadybugDb.Client
         run: >-
           dotnet nuget push "artifacts/LadybugDb.Client.${{ steps.version.outputs.version }}.nupkg"
-          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
-          --source https://api.nuget.org/v3/index.json
-          --skip-duplicate
-
-      - name: Push LadybugDb.Client.Native
-        run: >-
-          dotnet nuget push "artifacts/LadybugDb.Client.Native.${{ steps.version.outputs.version }}.nupkg"
           --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate

@@ -4,10 +4,10 @@ This is for building `LadybugDb.Client` itself, not for consuming it. If you jus
 client in your own project, see the [README](../README.md) and [USAGE.md](USAGE.md) instead.
 
 - [Prerequisites](#prerequisites)
-- [First build: fetch the native binaries](#first-build-fetch-the-native-binaries)
+- [Building](#building)
 - [Running tests](#running-tests)
 - [Regenerating interop](#regenerating-interop)
-- [How native binaries are pinned and verified](#how-native-binaries-are-pinned-and-verified)
+- [How the engine version is pinned](#how-the-engine-version-is-pinned)
 
 ## Prerequisites
 
@@ -15,35 +15,20 @@ client in your own project, see the [README](../README.md) and [USAGE.md](USAGE.
   `global.json` pins this. It also sets `test.runner` to `Microsoft.Testing.Platform`, which is
   what makes `dotnet test` work at all here; without it, `dotnet test` falls back to VSTest and
   won't discover TUnit's tests correctly.
-- **`python3`** on `PATH`, used by `scripts/fetch-liblbug.sh` to extract release assets on every
-  platform. `.zip` assets (Windows) go through `python3`'s `zipfile` module because `unzip` is
-  absent from GitHub's `windows-latest` runner image and from Git Bash, and Git Bash's own `tar`
-  can't read zip containers either. `.tar.gz` assets (Linux/macOS) also go through `python3`'s
-  `tarfile` module rather than the `tar` binary: upstream ships the canonical library name
-  (`liblbug.so`, `liblbug.dylib`) as a symlink chain inside the archive, which Git Bash's `tar`
-  cannot recreate on `windows-latest` — `tarfile` resolves the chain from the archive's own member
-  metadata instead, so no symlink is ever created on disk. Either way, `python3`'s stdlib modules
-  need no OS-specific branching and are preinstalled everywhere this project builds.
 - **`clang`** on `PATH`, needed only if you're regenerating the interop layer (see below). Not
   required for a normal build.
 
-## First build: fetch the native binaries
+## Building
 
 ```console
-bash scripts/fetch-liblbug.sh
 dotnet build
 ```
 
-Native binaries are **never committed** to this repository. Building `LadybugDb.Client.Native`
-without running the fetch script first fails **on purpose** — its `.csproj` has a
-`FailIfNativesMissing` target that checks for `runtimes/<rid>/native/...` before `Build` and
-`Pack` run, and errors out with a pointer back to this script if any RID is missing. That's
-deliberate: a silent skip would produce a package that looks fine locally and then throws
-`DllNotFoundException` for whoever installs it.
-
-The script downloads the pinned `liblbug` release for all six supported RIDs, verifies each
-archive's SHA256 against `LadybugDb.Client.Native/liblbug.lock`, and extracts the library file
-into `runtimes/<rid>/native/`. Re-run it any time `liblbug.version` changes.
+Nothing to fetch first. The engine binaries come from upstream's `LadybugDB.Native` package, which
+the test, benchmark and crash-repro projects reference like any other package; `dotnet restore`
+brings them in (about 130 MB for all five RIDs, cached by NuGet after the first restore). The
+shipping `LadybugDb.Client` project references no native package at all, by design — see the
+README's installation section for why the consumer makes that choice.
 
 ## Running tests
 
@@ -53,13 +38,12 @@ Two test projects, and they need different commands:
 # Unit tests — no real engine involved.
 dotnet test LadybugDb.Client.Tests -c Release
 
-# Integration tests — run against the real liblbug, so fetch it first.
-bash scripts/fetch-liblbug.sh
+# Integration tests — run against the real liblbug from the LadybugDB.Native package.
 dotnet test LadybugDb.Client.IntegrationTests -c Release
 ```
 
-`LadybugDb.Client.Tests` also includes `PackagingTests`, which inspects built `.nupkg` files
-directly, so it needs real packages on disk first:
+`LadybugDb.Client.Tests` also includes `PackagingTests`, which inspects the built `.nupkg` directly,
+so it needs a real package on disk first:
 
 ```console
 dotnet pack -c Release
@@ -82,7 +66,7 @@ dotnet test LadybugDb.Client.IntegrationTests -c Release --treenode-filter "/*/*
 The raw P/Invoke layer (`LadybugDb.Client/Native/LbugNative.g.cs`) is generated from the pinned
 `lbug.h` C header via [ClangSharpPInvokeGenerator](https://github.com/dotnet/ClangSharp), pinned
 in `.config/dotnet-tools.json`. It's committed, not built on the fly, so any change to the
-targeted `liblbug` version needs a regeneration:
+targeted engine version needs a regeneration:
 
 ```console
 bash scripts/regen-interop.sh
@@ -90,30 +74,34 @@ bash scripts/regen-interop.sh
 
 This downloads `lbug.h` for the pinned version into `third-party/`, runs the generator with the
 project's specific flags (internal visibility, macro/helper-type generation, the 12 `*_to_tm` /
-`*_from_tm` functions excluded — there's no portable `struct tm` layout across all six target
-RIDs), and then mechanically rewrites the generator's classic `[DllImport]`/`static extern`
-output into the source-generated `[LibraryImport]`/`static partial` shape this codebase requires.
-Every generated entry point is fully blittable (raw pointers, byte-backed `_Bool`, primitive
-numerics, pointer-sized enums), so that rewrite is a safe, deterministic text substitution, not a
-hand-tweak of generator output.
+`*_from_tm` functions excluded — there's no portable `struct tm` layout across the target RIDs),
+and then mechanically rewrites the generator's classic `[DllImport]`/`static extern` output into
+the source-generated `[LibraryImport]`/`static partial` shape this codebase requires. Every
+generated entry point is fully blittable (raw pointers, byte-backed `_Bool`, primitive numerics,
+pointer-sized enums), so that rewrite is a safe, deterministic text substitution, not a hand-tweak
+of generator output.
 
 CI enforces that the committed file matches what regeneration produces (the `interop-drift` job):
 it re-runs `scripts/regen-interop.sh` and fails the build on any diff against
 `LadybugDb.Client/Native/LbugNative.g.cs` or `third-party/lbug.h`. If you change
-`liblbug.version`, run the script and commit the regenerated file in the same change.
+`third-party/liblbug.version`, run the script and commit the regenerated file in the same change.
 
-## How native binaries are pinned and verified
+## How the engine version is pinned
 
-`LadybugDb.Client.Native/liblbug.version` names the exact upstream release tag (currently
-`v0.18.3`). `LadybugDb.Client.Native/liblbug.lock` pins the SHA256 of every release asset the
-fetch script downloads. `scripts/fetch-liblbug.sh` refuses to proceed if a downloaded asset's hash
-doesn't match its lockfile entry — this is the only thing standing between "we redistribute
-upstream's official binary" and "we redistribute whatever a compromised release asset happened to
-contain."
+`third-party/liblbug.version` names the upstream release tag whose C header the interop was
+generated from (currently `v0.19.1`). It is embedded into `LadybugDb.Client.dll` as assembly
+metadata at build time, exposed as `LadybugDatabase.MinimumEngineVersion`, and checked once against
+`lbug_get_version()` when a `LadybugDatabase` is opened: an engine older than the pin (by
+major.minor) is refused with a `LadybugException` naming the version to install, because it would
+be missing entry points this client calls; a newer engine is accepted, since the C API has only
+ever grown between releases.
 
-To bump the pinned version: update `liblbug.version`, then run
-`bash scripts/fetch-liblbug.sh --update-lock` to redownload every asset and rewrite the lockfile
-with fresh hashes (it only overwrites the lockfile after every asset has downloaded and hashed
-successfully, so a network blip or a renamed asset can't leave a half-written lockfile behind).
-Review the hash diff like you would any other dependency bump, then regenerate interop if the C
-API surface changed.
+The binaries are not pinned here at all — the consumer chooses a `LadybugDB.Native` version, and
+upstream's packages carry the engine's own provenance. The test projects reference the same version
+as the pin so the suite runs against exactly the engine the interop was generated for.
+
+To bump the pinned version: edit `third-party/liblbug.version`, bump the `LadybugDB.Native`
+package reference in the test, benchmark and crash-repro projects to match, run
+`bash scripts/regen-interop.sh`, review the interop diff (new entry points, changed structs), and
+run the full suite and the benchmarks. Upstream publishes native packages a little after each
+engine release, so the pin can only move to a version that has one.

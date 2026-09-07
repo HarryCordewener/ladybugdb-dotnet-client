@@ -70,8 +70,24 @@ public sealed class LadybugDatabase : IDisposable
     public LadybugDatabase(string path, LadybugConfig? config = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Client.EngineVersion.EnsureCompatible();
         _handle = LbugDatabaseHandle.Open(path, BuildConfig(config ?? new LadybugConfig()));
     }
+
+    /// <summary>
+    /// The version of the <c>liblbug</c> engine actually loaded into this process, as the engine
+    /// reports it (for example <c>"0.19.1"</c>). Loading the library is what makes this answerable,
+    /// so reading it throws <see cref="DllNotFoundException"/> when no native package is installed.
+    /// </summary>
+    public static string EngineVersion => Client.EngineVersion.Loaded;
+
+    /// <summary>
+    /// The oldest engine this client accepts: the version whose C header its interop was generated
+    /// from, so every entry point it calls is known to exist. Opening a database against an older
+    /// engine throws <see cref="LadybugException"/>; newer engines are accepted, since the C API
+    /// has only ever grown between releases.
+    /// </summary>
+    public static string MinimumEngineVersion => Client.EngineVersion.Pinned;
 
     internal LbugDatabaseHandle Handle => _handle;
 

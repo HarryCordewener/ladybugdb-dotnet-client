@@ -3,9 +3,19 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>true</IsPackable>
     <PackageId>LadybugDb.Client</PackageId>
-    <Description>.NET client for LadybugDB, an embedded graph database with Cypher. Managed assembly only; install LadybugDb.Client.Native for the embedded engine.</Description>
+    <Description>.NET client for LadybugDB, an embedded graph database with Cypher. Managed assembly only; add upstream's LadybugDB.Native (or LadybugDB.Native.&lt;rid&gt;) package for the engine binaries.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+  <ItemGroup>
+    <!--
+      The engine version whose C header this client's interop was generated from
+      (third-party/liblbug.version), embedded so LadybugDatabase can refuse an older engine at open
+      time instead of failing with EntryPointNotFoundException on the first call that is missing.
+      The binaries themselves come from upstream's LadybugDB.Native packages, whose versions are
+      engine versions; consumers pick one at least this new.
+    -->
+    <AssemblyMetadata Include="LadybugEngineVersion" Value="$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../third-party/liblbug.version').Trim())" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="LadybugDb.Client.Tests" />
     <InternalsVisibleTo Include="LadybugDb.Client.IntegrationTests" />

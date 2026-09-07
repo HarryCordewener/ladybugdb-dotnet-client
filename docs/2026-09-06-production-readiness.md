@@ -4,6 +4,12 @@ Date: 2026-09-06. Reviewed: branch `feat/api-ergonomics` at `de3210f` (main `27a
 parameter-object, `Select<T>`, `ExecuteAsync` and transaction-guard work), against engine v0.18.3.
 Host: Intel Core Ultra 7 265F, 20 cores, NVMe, CachyOS, .NET 10.0.8.
 
+**Addendum, same day:** after the review, the repository stopped redistributing engine binaries and
+now takes them from upstream's `LadybugDB.Native` packages, with the interop regenerated against
+engine v0.19.1 and a version guard at database open. The "Packaging" section below describes the
+state the review found; the addendum at its end describes what changed. The benchmark numbers are
+from 0.18.3 except where a 0.19.1 re-run is quoted.
+
 Companion documents written the same day:
 
 - [`research/2026-09-06-dotnet-library-standards.md`](research/2026-09-06-dotnet-library-standards.md) — what outside users expect from a .NET native-wrapper client, with the 1.0 checklist.
@@ -133,6 +139,32 @@ Gaps:
 - **Native package shape.** One `LadybugDb.Client.Native` carrying all six RIDs (roughly 130 MB)
   where every peer ships per-RID packages plus a meta package. Consumers publishing a single-RID
   app pay for five binaries they never load.
+
+**Addendum (done the same day).** Both of the first two items were resolved by adopting upstream's
+packaging rather than improving our own:
+
+- `LadybugDb.Client.Native`, the fetch script and the SHA256 lockfile are gone. The engine comes
+  from upstream's `LadybugDB.Native` meta package or one `LadybugDB.Native.<rid>` package, chosen
+  by the consumer; `LadybugDb.Client` declares no dependency on either (`PackagingTests` pins that).
+  Five RIDs, upstream-signed provenance, nothing to redistribute or verify here. win-arm64 is
+  dropped until upstream packages it (they publish the engine build; the resolver still probes the
+  path for a hand-placed binary).
+- The interop is regenerated against the v0.19.1 header (one function added:
+  `lbug_connection_get_pushed_sql`); `third-party/liblbug.version` is the single pin. 0.20.x has no
+  native package on nuget.org yet, so the pin moves when upstream publishes one.
+- New guard: `LadybugDatabase` reads `lbug_get_version()` once and refuses an engine older than
+  the pinned major.minor with a `LadybugException` naming the version to install, instead of an
+  `EntryPointNotFoundException` from whichever call was missing; newer engines are accepted.
+  `LadybugDatabase.EngineVersion` and `MinimumEngineVersion` expose both sides. Unit tests cover the
+  comparison; an integration test opens a database against the package's engine.
+- CI and the release workflow lost their fetch steps; the release now pushes one package.
+- Re-measured on 0.19.1 (point lookups and the read path, same host, same session): the read
+  path is unchanged within noise (typed accessors 8.85 ms per 10,000 rows, the typed prototype
+  1.89 ms, Arrow 1.73 ms), while every point-lookup shape is 8–12% slower than on 0.18.3 (prepared
+  key lookup 66 µs versus 59 µs at 10,000 objects, 69 µs versus 60 µs at 100,000; the traversal-hop
+  lookup 503 µs versus 459 µs). Consistent across all eight dispatch shapes and both sizes, so it
+  reads as an engine change (0.19.0 reworked the primary-key lookup planner) rather than noise;
+  still far inside every threshold. Full table in `benchmarks/dotnet-microbenchmarks.md`.
 - **Target framework.** net10.0 only is defensible (net8 leaves support 2026-11-10) if the README
   says so; adding net8.0 costs one conditional for `Lock`.
 - **Trimming and AOT.** The reflective paths (`Select<T>`, parameter objects) carry
@@ -148,8 +180,8 @@ put them in an `Extensions` package so the core stays dependency-free.
 
 ### Platforms — six packaged, two verified
 
-linux-x64 and win-x64 run in CI. linux-arm64, osx-x64, osx-arm64 and win-arm64 are packaged from
-upstream releases and never executed. A GitHub-hosted macOS runner and an arm64 Linux runner both
+linux-x64 and win-x64 run in CI. linux-arm64, osx-x64 and osx-arm64 come from upstream's packages
+and are never executed here (win-arm64 has no upstream package; see the packaging addendum). A GitHub-hosted macOS runner and an arm64 Linux runner both
 exist; add them before claiming the RIDs.
 
 ### Documentation — strong
@@ -350,7 +382,7 @@ From the research appendix, marked against this repository today.
 | `PublicApiAnalyzers` with shipped/unshipped files | missing |
 | `IsAotCompatible` + an AOT publish in CI | missing |
 | `[LibraryImport]` | done; `DisableRuntimeMarshalling` and `SuppressGCTransition` not applied |
-| SHA256-pinned natives, `runtimes/{rid}/native` | done; single package for six RIDs |
+| Native binaries with verified provenance, `runtimes/{rid}/native` | done via upstream's `LadybugDB.Native.<rid>` packages (addendum) |
 | Resolver remapping `lbug_shared` ↔ `liblbug` | done |
 | Thread-safety and disposal contract per type, tested | done |
 | SafeHandle everywhere, parent/child lifetime | done |
@@ -401,7 +433,8 @@ rules stay in one place.
 In order, each item small enough for one PR:
 
 1. Merge `feat/api-ergonomics` plus today's fixes to `main`.
-2. Bump the engine to v0.20.2; re-run the suite and the benchmarks.
+2. Move the pin to 0.20.x as soon as upstream publishes a `LadybugDB.Native` package for it; re-run
+   the suite and the benchmarks (0.19.1 is done, see the addendum).
 3. The per-tuple read path from the prototype, inside `LadybugQueryResult`.
 4. `IDisposable` on the four async-disposable types; the prepared-statement cache; surface
    `auto_checkpoint`, `checkpoint_threshold`, `enable_checksums` on `LadybugConfig`.
@@ -415,7 +448,6 @@ In order, each item small enough for one PR:
 ## Reproducing the numbers
 
 ```bash
-bash scripts/fetch-liblbug.sh
 dotnet build -c Release
 cd LadybugDb.Client.Benchmarks
 dotnet run -c Release --no-build -- --filter '*'                 # BenchmarkDotNet, ~10 minutes
@@ -423,5 +455,6 @@ dotnet run -c Release --no-build -- --workload --sizes 1000,10000,100000 --sampl
 cd ../benchmarks && python3 report.py --input results-dotnet.json
 ```
 
-The Python control needs a virtual environment with `ladybug==0.18.3` and runs
+The Python control needs a virtual environment with the same `ladybug` version as the pinned engine
+(`third-party/liblbug.version`; the numbers above used 0.18.3) and runs
 `python workload_bench.py --sizes 1000 10000 --samples 1000 --out results.json`.
