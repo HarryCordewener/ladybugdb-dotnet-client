@@ -134,6 +134,14 @@ public static class CypherDsl
     /// <param name="list">The list expression.</param>
     /// <param name="alias">The element variable.</param>
     public static QueryBuilder Unwind(Expr list, string alias) => QueryBuilder.Empty.Unwind(list, alias);
+
+    /// <summary>Starts a statement with <c>CREATE path, ...</c>.</summary>
+    /// <param name="paths">The patterns to create.</param>
+    public static QueryBuilder Create(params PatternPath[] paths) => QueryBuilder.Empty.Create(paths);
+
+    /// <summary>Starts a statement with <c>MERGE path</c>.</summary>
+    /// <param name="path">The pattern to match or create.</param>
+    public static QueryBuilder Merge(PatternPath path) => QueryBuilder.Empty.Merge(path);
 }
 
 /// <summary>
@@ -216,6 +224,53 @@ public sealed class QueryBuilder
     /// <param name="list">The list expression.</param>
     /// <param name="alias">The element variable.</param>
     public QueryBuilder Unwind(Expr list, string alias) => Append(new UnwindClause(list, alias));
+
+    /// <summary>Appends <c>CREATE path, ...</c>. Property values in the patterns render as parameters.</summary>
+    /// <param name="paths">The patterns to create. A <see cref="NodePattern"/> converts implicitly.</param>
+    public QueryBuilder Create(params PatternPath[] paths) => Append(new CreateClause(paths));
+
+    /// <summary>Appends <c>MERGE path</c>.</summary>
+    /// <param name="path">The pattern to match or create.</param>
+    public QueryBuilder Merge(PatternPath path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return Append(new MergeClause(path));
+    }
+
+    /// <summary>Appends <c>SET alias.name = value</c>. See <see cref="Set(PropertyExpr, Expr)"/>.</summary>
+    /// <param name="alias">The pattern variable.</param>
+    /// <param name="name">The property to assign.</param>
+    /// <param name="value">The value; <c>CypherDsl.Literal(null)</c> renders <c>= NULL</c>, this engine's spelling of <c>REMOVE</c>.</param>
+    public QueryBuilder Set(string alias, string name, Expr value) => Set(new PropertyExpr(alias, name), value);
+
+    /// <summary>
+    /// Appends <c>SET target = value</c> - or, when the previous clause is already a <c>SET</c>, adds
+    /// the assignment to it, so a caller assigning properties one at a time produces one
+    /// comma-separated <c>SET</c> rather than a run of them. The engine has no <c>SET n += {map}</c>,
+    /// so this is the shape a multi-property update takes.
+    /// </summary>
+    /// <param name="target">The property to assign.</param>
+    /// <param name="value">The value; <c>CypherDsl.Literal(null)</c> renders <c>= NULL</c>, this engine's spelling of <c>REMOVE</c>.</param>
+    public QueryBuilder Set(PropertyExpr target, Expr value)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(value);
+        var item = new SetItem(target, value);
+        if (_clauses.Length > 0 && _clauses[^1] is SetClause previous)
+        {
+            return new QueryBuilder([.. _clauses[..^1], new SetClause([.. previous.Assignments, item])]);
+        }
+
+        return Append(new SetClause([item]));
+    }
+
+    /// <summary>Appends <c>DELETE alias, ...</c>.</summary>
+    /// <param name="aliases">The node or relationship variables to delete.</param>
+    public QueryBuilder Delete(params string[] aliases) => Append(new DeleteClause(aliases, Detach: false));
+
+    /// <summary>Appends <c>DETACH DELETE alias, ...</c>, deleting each node's relationships with it.</summary>
+    /// <param name="aliases">The node variables to delete.</param>
+    public QueryBuilder DetachDelete(params string[] aliases) => Append(new DeleteClause(aliases, Detach: true));
 
     /// <summary>The clauses so far, as an immutable <see cref="Query"/>.</summary>
     public Query Build() => new(_clauses);

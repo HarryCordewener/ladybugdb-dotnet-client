@@ -454,6 +454,31 @@ public sealed record LimitClause(Expr Count) : Clause;
 /// <param name="Alias">The variable each element is bound to.</param>
 public sealed record UnwindClause(Expr List, string Alias) : Clause;
 
+/// <summary><c>CREATE path, ...</c>.</summary>
+/// <param name="Paths">The patterns to create; property values render as parameters.</param>
+public sealed record CreateClause(IReadOnlyList<PatternPath> Paths) : Clause;
+
+/// <summary><c>MERGE path</c>.</summary>
+/// <param name="Path">The pattern to match or create.</param>
+public sealed record MergeClause(PatternPath Path) : Clause;
+
+/// <summary>One <c>alias.property = value</c> assignment of a <see cref="SetClause"/>.</summary>
+/// <param name="Target">The property to assign.</param>
+/// <param name="Value">The value; a <see langword="null"/> <see cref="LiteralExpr"/> renders <c>= NULL</c>, which is how this engine spells <c>REMOVE</c>.</param>
+public sealed record SetItem(PropertyExpr Target, Expr Value);
+
+/// <summary>
+/// <c>SET alias.property = value, ...</c>. The engine has no <c>SET n += {map}</c>, so every property
+/// is assigned individually.
+/// </summary>
+/// <param name="Assignments">The assignments, rendered comma-separated.</param>
+public sealed record SetClause(IReadOnlyList<SetItem> Assignments) : Clause;
+
+/// <summary><c>DELETE alias, ...</c> or <c>DETACH DELETE alias, ...</c>.</summary>
+/// <param name="Aliases">The node or relationship variables to delete.</param>
+/// <param name="Detach"><see langword="true"/> to delete a node's relationships with it.</param>
+public sealed record DeleteClause(IReadOnlyList<string> Aliases, bool Detach) : Clause;
+
 /// <summary>A whole statement: its clauses in order.</summary>
 /// <param name="Clauses">The clauses, rendered in order separated by single spaces.</param>
 public sealed record Query(IReadOnlyList<Clause> Clauses)

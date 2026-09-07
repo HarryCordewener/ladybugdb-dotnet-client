@@ -143,6 +143,26 @@ internal static class CypherRenderer
                     AppendExpr(u.List);
                     Text.Append(" AS ").Append(Identifier.Render(u.Alias));
                     break;
+                case CreateClause c:
+                    Text.Append("CREATE ");
+                    AppendList(c.Paths, AppendPath);
+                    break;
+                case MergeClause m:
+                    Text.Append("MERGE ");
+                    AppendPath(m.Path);
+                    break;
+                case SetClause s:
+                    if (s.Assignments.Count == 0)
+                        throw new InvalidOperationException("A SET clause needs at least one assignment.");
+                    Text.Append("SET ");
+                    AppendList(s.Assignments, AppendAssignment);
+                    break;
+                case DeleteClause d:
+                    if (d.Aliases.Count == 0)
+                        throw new InvalidOperationException("A DELETE clause needs at least one variable.");
+                    Text.Append(d.Detach ? "DETACH DELETE " : "DELETE ");
+                    AppendList(d.Aliases, alias => Text.Append(Identifier.Render(alias)));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown clause {clause.GetType().Name}.");
             }
@@ -152,6 +172,13 @@ internal static class CypherRenderer
         {
             AppendExpr(key.Expression);
             if (key.Descending) Text.Append(" DESC");
+        }
+
+        private void AppendAssignment(SetItem item)
+        {
+            AppendExpr(item.Target);
+            Text.Append(" = ");
+            AppendExpr(item.Value);
         }
 
         private void AppendList<T>(IReadOnlyList<T> items, Action<T> append)
