@@ -1310,6 +1310,25 @@ work immediately, so if it already ran before `BeginTransactionAsync` reaches th
 `BeginTransactionAsync` throws `ObjectDisposedException` instead of proceeding - same outcome as
 before, just without a bespoke mechanism dedicated to this one call.
 
+## Cancellation
+
+Every `CancellationToken` a query method accepts is checked before the statement runs and between
+rows, and — since 2026-09-06 — is also wired to the engine's `lbug_connection_interrupt` while the
+native call is in flight. Cancelling the token interrupts the running query: the engine stops at
+its next operator boundary and the call throws `OperationCanceledException` carrying the token. The
+connection stays usable afterwards; nothing else needs resetting. Measured: a query that would run
+for 1.5 s is stopped within a few milliseconds of the token firing, including when the token fires
+while the engine is still parsing and planning (the interrupt is re-sent until the call returns,
+because the engine clears its flag at execution start).
+
+Two things it does not do. A query that had already completed when the token fired returns its
+result — throwing would tell you a `CREATE` did not happen when it did. And interruption is between
+operators, so a single very expensive operator invocation (a large `COPY`, for instance) is
+interrupted when it yields, not mid-way.
+
+Cancellation and the transaction guard compose: a cancelled statement inside a
+`LadybugTransaction` leaves the transaction open, and disposing it rolls back as usual.
+
 ## Concurrency and the single-writer constraint
 
 By default, LadybugDB permits exactly one write transaction at a time and **rejects** a second

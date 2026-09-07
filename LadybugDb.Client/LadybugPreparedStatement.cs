@@ -576,7 +576,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     public ValueTask<LadybugQueryResult> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Execute());
+        return ValueTask.FromResult(Execute(cancellationToken));
     }
 
     /// <summary>
@@ -629,7 +629,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         ParameterBinder.BindAll(this, parameters);
-        return ValueTask.FromResult(Execute());
+        return ValueTask.FromResult(Execute(cancellationToken));
     }
 
     /// <summary>
@@ -743,11 +743,21 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
     internal static long PreparedCount => Interlocked.Read(ref _preparedCount);
 
     /// <summary>Executes with whatever is bound. For <see cref="LadybugConnection"/>'s cache path.</summary>
-    internal LadybugQueryResult ExecuteBound() => Execute();
+    internal LadybugQueryResult ExecuteBound(CancellationToken cancellationToken) => Execute(cancellationToken);
 
-    private unsafe LadybugQueryResult Execute()
+    /// <remarks>
+    /// <paramref name="cancellationToken"/> is wired to <c>lbug_connection_interrupt</c> for the
+    /// duration of the native call - see <see cref="QueryInterrupt"/> and
+    /// <c>LadybugConnection.Execute</c>, which this mirrors.
+    /// </remarks>
+    private unsafe LadybugQueryResult Execute(CancellationToken cancellationToken)
     {
-        var handle = LbugQueryResultHandle.ExecutePrepared(_database, _connection, _handle, out var state);
+        LbugQueryResultHandle handle;
+        lbug_state state;
+        using (QueryInterrupt.Register(_connection, cancellationToken))
+        {
+            handle = LbugQueryResultHandle.ExecutePrepared(_database, _connection, _handle, out state);
+        }
 
         // Non-null only on failure - see LadybugConnection.Execute.
         string? failureMessage = null;
@@ -762,7 +772,8 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
         if (failureMessage is not null)
         {
             handle.Dispose();
-            throw QueryFailureClassifier.Classify(failureMessage, _cypher);
+            throw (Exception?)QueryInterrupt.AsCancellation(failureMessage, cancellationToken)
+                ?? QueryFailureClassifier.Classify(failureMessage, _cypher);
         }
 
         return LadybugQueryResult.Create(_database, handle);

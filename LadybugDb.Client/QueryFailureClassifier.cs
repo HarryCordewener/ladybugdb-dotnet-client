@@ -39,6 +39,15 @@ internal static class QueryFailureClassifier
     /// section lost every writer that way.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Whether <paramref name="message"/> is the engine's report of an interrupted query
+    /// ("Interrupted.", from upstream's <c>InterruptException</c>), which is what
+    /// <c>lbug_connection_interrupt</c> produces and what a cancelled <see cref="CancellationToken"/>
+    /// therefore looks like from the C API.
+    /// </summary>
+    internal static bool IsInterrupted(string? message) =>
+        message is not null && message.Contains("Interrupted", StringComparison.Ordinal);
+
     internal static LadybugException Classify(string? message, string statement)
     {
         // Two distinct engine wordings, one retryable condition. "write transaction" is the

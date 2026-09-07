@@ -126,7 +126,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         // takes neither the gate nor an allocation for the check.
         var effect = TransactionStatement.Classify(cypher);
         return effect == TransactionEffect.None
-            ? ValueTask.FromResult(Execute(cypher))
+            ? ValueTask.FromResult(Execute(cypher, cancellationToken))
             : TrackedTransactionStatementAsync(cypher, effect, cancellationToken);
     }
 
@@ -179,7 +179,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
                     "automatically if it is never committed.");
             }
 
-            var result = Execute(cypher);
+            var result = Execute(cypher, cancellationToken);
             _rawTransactionOpen = effect == TransactionEffect.Begin;
 
             // A raw COMMIT or ROLLBACK closes the transaction at the engine level whichever way it was
@@ -285,7 +285,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Execute(cypher));
+        return ValueTask.FromResult(Execute(cypher, cancellationToken));
     }
 
     /// <summary>
@@ -293,7 +293,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     /// must roll back without an <see langword="await"/>. Same contract: no transaction
     /// classification, not for direct use.
     /// </summary>
-    internal LadybugQueryResult QueryUnchecked(string cypher) => Execute(cypher);
+    internal LadybugQueryResult QueryUnchecked(string cypher) => Execute(cypher, default);
 
     /// <summary>
     /// Executes a parameterized Cypher statement once - preparing it, binding
@@ -376,7 +376,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         try
         {
             ParameterBinder.BindAll(statement, pairs);
-            var result = statement.ExecuteBound();
+            var result = statement.ExecuteBound(cancellationToken);
             // The result does not depend on the statement staying alive (see this method's remarks),
             // so the statement goes back into the cache - or is disposed if the cache declines it.
             _statements.Return(entry);
@@ -523,12 +523,23 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
         return ValueTask.FromResult(LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher));
     }
 
-    private unsafe LadybugQueryResult Execute(string cypher)
+    /// <remarks>
+    /// <paramref name="cancellationToken"/> is checked before the call and, while the native call
+    /// runs, is wired to <c>lbug_connection_interrupt</c> - see <see cref="QueryInterrupt"/>. A query
+    /// the engine reports as interrupted after the token fired surfaces as
+    /// <see cref="OperationCanceledException"/>; every other failure is classified as before.
+    /// </remarks>
+    private unsafe LadybugQueryResult Execute(string cypher, CancellationToken cancellationToken)
     {
         var utf8 = Marshal.StringToCoTaskMemUTF8(cypher);
         try
         {
-            var handle = LbugQueryResultHandle.Execute(_database.Handle, _handle, (sbyte*)utf8, out var state);
+            LbugQueryResultHandle handle;
+            lbug_state state;
+            using (QueryInterrupt.Register(_handle, cancellationToken))
+            {
+                handle = LbugQueryResultHandle.Execute(_database.Handle, _handle, (sbyte*)utf8, out state);
+            }
 
             // Non-null only on failure: NativeString.TakeOwnership never returns null (it maps a
             // null native pointer to string.Empty), so this doubles as the success/failure flag
@@ -547,7 +558,8 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
             if (failureMessage is not null)
             {
                 handle.Dispose();
-                throw QueryFailureClassifier.Classify(failureMessage, cypher);
+                throw (Exception?)QueryInterrupt.AsCancellation(failureMessage, cancellationToken)
+                    ?? QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
             return LadybugQueryResult.Create(_database.Handle, handle);
