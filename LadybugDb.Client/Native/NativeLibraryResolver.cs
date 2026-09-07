@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -52,6 +53,11 @@ internal static class NativeLibraryResolver
     /// scenarios) and <see cref="Assembly.Location"/> is empty for
     /// single-file published apps.
     /// </summary>
+    // Not a #pragma: the AOT compiler (ILC) re-runs this analysis at publish time and only the
+    // attribute form reaches it.
+    [UnconditionalSuppressMessage("SingleFile", "IL3000",
+        Justification = "Assembly.Location being empty in a single-file or Native AOT app is handled: " +
+                        "the assembly directory is skipped and only AppContext.BaseDirectory is probed.")]
     internal static IEnumerable<string> ProbePaths(string rid, string fileName)
     {
         var roots = new List<string>();

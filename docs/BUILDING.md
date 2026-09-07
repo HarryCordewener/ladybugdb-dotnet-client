@@ -32,7 +32,7 @@ README's installation section for why the consumer makes that choice.
 
 ## Running tests
 
-Two test projects, and they need different commands:
+Three test projects, run one at a time:
 
 ```console
 # Unit tests — no real engine involved.
@@ -40,13 +40,16 @@ dotnet test LadybugDb.Client.Tests -c Release
 
 # Integration tests — run against the real liblbug from the LadybugDB.Native package.
 dotnet test LadybugDb.Client.IntegrationTests -c Release
+
+# The Extensions package (DI, options, health check) — also against the real engine.
+dotnet test LadybugDb.Client.Extensions.Tests -c Release
 ```
 
 `LadybugDb.Client.Tests` also includes `PackagingTests`, which inspects the built `.nupkg` directly,
 so it needs a real package on disk first:
 
 ```console
-dotnet pack -c Release
+dotnet pack -c Release   # both packages: LadybugDb.Client and LadybugDb.Client.Extensions
 dotnet test LadybugDb.Client.Tests -c Release
 ```
 
@@ -60,6 +63,24 @@ with a `/assembly/namespace/class/method` glob:
 dotnet test LadybugDb.Client.Tests -c Release --treenode-filter "/*/*/PackagingTests/*"
 dotnet test LadybugDb.Client.IntegrationTests -c Release --treenode-filter "/*/*/DatabaseLifecycleTests/ConcurrentWrite_ThrowsLadybugWriteConflictException"
 ```
+
+## The Native AOT sample
+
+`samples/LadybugDb.Client.AotSample` is a console program that opens a database, inserts through a
+prepared statement, and reads rows back with the typed accessors. It is not in the solution file:
+its `PublishAot=true` makes restore pull the ILCompiler toolchain for the host, which every
+`dotnet build` of the solution would then pay for. CI's `aot-publish` job publishes it and runs the
+result, which is the evidence behind the shipping project's `IsAotCompatible=true`. To do the same
+locally (needs `clang`):
+
+```console
+dotnet publish samples/LadybugDb.Client.AotSample -c Release -r linux-x64 -o aot-out
+./aot-out/LadybugDb.Client.AotSample
+```
+
+The sample uses only the non-reflective surface. `Select<T>` and the parameter-object overloads
+are annotated `[RequiresUnreferencedCode]`; calling them from an AOT-published app is a trim
+warning, which `TreatWarningsAsErrors` turns into a failure here.
 
 ## Regenerating interop
 
@@ -104,4 +125,6 @@ To bump the pinned version: edit `third-party/liblbug.version`, bump the `Ladybu
 package reference in the test, benchmark and crash-repro projects to match, run
 `bash scripts/regen-interop.sh`, review the interop diff (new entry points, changed structs), and
 run the full suite and the benchmarks. Upstream publishes native packages a little after each
-engine release, so the pin can only move to a version that has one.
+engine release, so the pin can only move to a version that has one. The weekly `upstream-check`
+workflow (`.github/workflows/upstream-check.yml`) polls nuget.org for a newer `LadybugDB.Native`
+and opens an issue with the C API diff link when one appears.

@@ -24,9 +24,11 @@ cd ladybugdb-dotnet-client
 dotnet pack -c Release
 ```
 
-That produces one package, `LadybugDb.Client`, under `LadybugDb.Client/bin/Release`. It is the
-managed client only. The engine binaries come from upstream's own native packages, which you add
-alongside it:
+That produces two packages: `LadybugDb.Client` under `LadybugDb.Client/bin/Release`, and
+`LadybugDb.Client.Extensions` (dependency injection, options and a health check for ASP.NET Core
+and other `Microsoft.Extensions` hosts; see [ASP.NET Core and dependency injection](#aspnet-core-and-dependency-injection))
+under `LadybugDb.Client.Extensions/bin/Release`. Both are managed only. The engine binaries come
+from upstream's own native packages, which you add alongside:
 
 ```console
 dotnet add package LadybugDB.Native            # every platform, or:
@@ -156,7 +158,35 @@ last dependent releases. Disposal order does not crash the process.
 
 **Thread safety**
 `LadybugConnection` is safe for concurrent use. `Bind` calls on a single `LadybugPreparedStatement`
-are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency) for the full contract.
+are serialized internally. See [docs/USAGE.md](docs/USAGE.md#concurrency-and-the-single-writer-constraint) for the full contract.
+
+### ASP.NET Core and dependency injection
+
+`LadybugDb.Client.Extensions` adds `AddLadybugDb` for `Microsoft.Extensions.DependencyInjection`
+hosts. The core package has no `Microsoft.Extensions.*` dependency; only this one does.
+
+```csharp
+using LadybugDb.Client;
+using LadybugDb.Client.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddLadybugDb(builder.Configuration.GetSection("LadybugDb"));
+// or: builder.Services.AddLadybugDb("./data/graph", o => o.Config = o.Config with { MaxThreads = 4 });
+
+var app = builder.Build();
+app.MapHealthChecks("/health");
+app.MapGet("/objects/{dbref:long}", async (long dbref, LadybugConnection conn) =>
+    await conn.Select<string>(
+        "MATCH (o:Object) WHERE o.dbref = $dbref RETURN o.name", new { dbref }).FirstOrDefaultAsync());
+app.Run();
+```
+
+`AddLadybugDb` registers `LadybugDatabase` as a singleton (opened on first resolve, disposed with
+the container), `LadybugConnection` as scoped (one per request, disposed with it),
+`IOptions<LadybugDbOptions>` bound from the section (`DatabasePath`, `Config`, `DisableHealthChecks`),
+and a health check named `ladybugdb` that runs `RETURN 1` on a fresh connection. A missing
+`DatabasePath` fails at registration. See
+[docs/USAGE.md](docs/USAGE.md#extensions-dependency-injection-and-health-checks).
 
 ## Known limitations
 
@@ -194,13 +224,13 @@ that abstraction.
 
 The platforms are whatever upstream's `LadybugDB.Native.<rid>` packages cover:
 
-| RID | OS | Verified in this repository's CI |
+| RID | OS | This repository's CI |
 |---|---|---|
-| `linux-x64` | Linux x64 | Yes |
-| `win-x64` | Windows x64 | Yes |
-| `linux-arm64` | Linux ARM64 | No |
-| `osx-x64` | macOS x64 | No |
-| `osx-arm64` | macOS ARM64 | No |
+| `linux-x64` | Linux x64 | Unit and integration tests, required |
+| `win-x64` | Windows x64 | Unit tests, required |
+| `linux-arm64` | Linux ARM64 | Integration tests on `ubuntu-24.04-arm`, advisory until its first green run |
+| `osx-arm64` | macOS ARM64 | Unit and integration tests on `macos-latest`, advisory until its first green run |
+| `osx-x64` | macOS x64 | Not run (no GitHub-hosted Intel macOS runner) |
 
 Upstream publishes a `win-arm64` engine build but no native package for it yet; on that platform,
 place `lbug_shared.dll` from the upstream release next to the application (the resolver probes
@@ -210,11 +240,12 @@ place `lbug_shared.dll` from the upstream release next to the application (the r
 
 | Document | Contents |
 |---|---|
-| [docs/USAGE.md](docs/USAGE.md) | Complete API guide — every public member, with examples |
+| [docs/USAGE.md](docs/USAGE.md) | Complete API guide — every public member of both packages, with examples |
 | [docs/2026-09-06-production-readiness.md](docs/2026-09-06-production-readiness.md) | Readiness review, benchmark analysis, and the LINQ direction |
 | [benchmarks/](benchmarks/README.md) | Workload and micro-benchmark harnesses and their results |
 | [docs/BUILDING.md](docs/BUILDING.md) | Building and testing from source |
-| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process |
+| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process, versioning policy |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 

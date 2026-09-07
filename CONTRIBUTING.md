@@ -47,6 +47,15 @@ regenerate, so the change survives the next regeneration instead of being silent
 CI's `interop-drift` job fails any pull request where the committed file doesn't match a fresh
 regeneration, so this is enforced, not just requested.
 
+## Pull request labels and the changelog
+
+Label every pull request with one of `added`, `changed`, `fixed`, `documentation` or
+`dependencies` (`enhancement` and `bug` work as synonyms for the first and third). GitHub's
+generated release notes sort PRs into sections by those labels
+([`.github/release.yml`](.github/release.yml)); an unlabelled PR lands in "Other", and
+`skip-changelog` keeps it out entirely. A change that a consumer would notice also gets a line
+under `Unreleased` in [CHANGELOG.md](CHANGELOG.md), in the matching section.
+
 ## Code style
 
 Match what's already there: `TreatWarningsAsErrors` and `EnforceCodeStyleInBuild` are both on

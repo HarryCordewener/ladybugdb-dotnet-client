@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>LadybugDb.Client.Extensions</PackageId>
+    <Description>Dependency injection, options binding and a health check for LadybugDb.Client, the .NET client for the LadybugDB embedded graph database. AddLadybugDb registers a singleton LadybugDatabase and a scoped LadybugConnection.</Description>
+    <PackageTags>$(PackageTags);dependency-injection;options;health-check;aspnetcore</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- Same bar as the core: see LadybugDb.Client.csproj for why this is not repo-wide. -->
+    <AnalysisMode>Recommended</AnalysisMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+    <None Include="../LadybugDb.Client/icon.png" Pack="true" PackagePath="" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LadybugDb.Client/LadybugDb.Client.csproj" />
+  </ItemGroup>
+  <!--
+    Pack turns a project reference into a ">= version" dependency, which would let NuGet pair
+    this package with any newer LadybugDb.Client, including one whose public API it was not
+    compiled against. The two ship together at one version (release.yml packs both from the same
+    -p:Version), so the dependency is pinned to exactly that version. NuGet has no property for
+    an exact range on a project reference (NuGet/Home#5556); this rewrites the version pack
+    derived from the referenced project, right after it derived it. PackagingTests checks the
+    result in the nuspec.
+  -->
+  <Target Name="PinCoreDependencyToExactVersion" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithExactVersions Include="@(_ProjectReferencesWithVersions)">
+        <ProjectVersion>[%(_ProjectReferencesWithVersions.ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithExactVersions>
+      <_ProjectReferencesWithVersions Remove="@(_ProjectReferencesWithVersions)" />
+      <_ProjectReferencesWithVersions Include="@(_ProjectReferencesWithExactVersions)" />
+    </ItemGroup>
+  </Target>
+  <ItemGroup>
+    <!--
+      Abstractions where an abstraction is enough: registration needs only IServiceCollection.
+      Options (not .Abstractions) for OptionsBuilder; ConfigurationExtensions for binding a
+      section into it.
+    -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.11" />
+    <!--
+      The implementation package, not .Abstractions: AddHealthChecks() and HealthCheckServiceOptions
+      (what AddLadybugDb registers the check into) live there. It brings Hosting.Abstractions and
+      Logging.Abstractions along, both already present in any host that has health checks.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.11" />
+  </ItemGroup>
+</Project>

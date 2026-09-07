@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Never packed; a console program, not shipped API. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!--
+      Native AOT. CI (the aot-publish job in .github/workflows/ci.yml) runs
+      `dotnet publish -c Release -r linux-x64` on this project and executes the result, which is
+      the evidence behind LadybugDb.Client's IsAotCompatible flag: the analyzers say the library
+      is trim- and AOT-safe, and this program shows the engine actually loads and answers
+      queries from a fully ahead-of-time compiled binary. Setting PublishAot here (rather than on
+      the command line) also enables the same analyzers on `dotnet build` of this project.
+    -->
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../LadybugDb.Client/LadybugDb.Client.csproj" />
+    <!--
+      The engine. On a RID-specific publish NuGet copies that RID's liblbug next to the binary,
+      where the client's resolver finds it (see NativeLibraryResolver.ProbePaths).
+    -->
+    <PackageReference Include="LadybugDB.Native" Version="0.19.1" />
+  </ItemGroup>
+</Project>
