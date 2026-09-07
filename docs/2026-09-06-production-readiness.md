@@ -386,7 +386,7 @@ From the research appendix, marked against this repository today.
 | `PackageIcon`, `PackageTags`, `PublishRepositoryUrl`, release notes | done (package hygiene, same day) |
 | `ContinuousIntegrationBuild` on CI, snupkg | done |
 | `EnablePackageValidation` | done; the baseline version is set at the first publish |
-| `PublicApiAnalyzers` with shipped/unshipped files | missing |
+| `PublicApiAnalyzers` with shipped/unshipped files | done (both packages; RS0026/RS0027 disabled with the reason in the csproj) |
 | `IsAotCompatible` + an AOT publish in CI | done (`samples/LadybugDb.Client.AotSample`, `aot-publish` job) |
 | `[LibraryImport]` | done; `DisableRuntimeMarshalling` and `SuppressGCTransition` not applied |
 | Native binaries with verified provenance, `runtimes/{rid}/native` | done via upstream's `LadybugDB.Native.<rid>` packages (addendum) |

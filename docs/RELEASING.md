@@ -82,6 +82,22 @@ against, and starts on the release after the first publish:
    adding the reported suppression to `CompatibilitySuppressions.xml` next to the csproj, and by
    a `Changed`/`Removed` entry in `CHANGELOG.md`.
 
+### The public API files
+
+Both packable projects carry `Microsoft.CodeAnalysis.PublicApiAnalyzers` with
+`PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` next to the csproj. Every public member must
+appear in one of them or the build fails (RS0016), and a member that disappears from the code but
+not from the files fails too (RS0017), so any change to the surface is a reviewed line in the diff.
+
+- **While developing:** after adding or changing public API, rebuild; each RS0016 error's message
+  is the exact line to add to `PublicAPI.Unshipped.txt`. An IDE with the analyzer's code fix adds
+  it for you. Removed members get a `*REMOVED*` prefix line in `Unshipped`.
+- **At release:** move every line of `Unshipped` (except the `#nullable enable` header) into
+  `Shipped`, sorted, in the release commit. `Shipped` is the contract the version promises; the
+  next `Unshipped` starts empty.
+- RS0026 and RS0027 (overloads differing only by optional parameters) are disabled on purpose in
+  both csproj files; the comment there says why.
+
 ## Versioning
 
 The pushed **tag is the single source of truth** for the published version. The workflow strips

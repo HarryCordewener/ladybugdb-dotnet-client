@@ -1,0 +1,17 @@
+#nullable enable
+LadybugDb.Client.Extensions.LadybugDbHealthCheck
+LadybugDb.Client.Extensions.LadybugDbHealthCheck.CheckHealthAsync(Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult>!
+LadybugDb.Client.Extensions.LadybugDbHealthCheck.LadybugDbHealthCheck(LadybugDb.Client.LadybugDatabase! database) -> void
+LadybugDb.Client.Extensions.LadybugDbOptions
+LadybugDb.Client.Extensions.LadybugDbOptions.Config.get -> LadybugDb.Client.LadybugConfig!
+LadybugDb.Client.Extensions.LadybugDbOptions.Config.set -> void
+LadybugDb.Client.Extensions.LadybugDbOptions.DatabasePath.get -> string!
+LadybugDb.Client.Extensions.LadybugDbOptions.DatabasePath.set -> void
+LadybugDb.Client.Extensions.LadybugDbOptions.DisableHealthChecks.get -> bool
+LadybugDb.Client.Extensions.LadybugDbOptions.DisableHealthChecks.set -> void
+LadybugDb.Client.Extensions.LadybugDbOptions.LadybugDbOptions() -> void
+LadybugDb.Client.Extensions.LadybugDbServiceCollectionExtensions
+const LadybugDb.Client.Extensions.LadybugDbHealthCheck.DefaultName = "ladybugdb" -> string!
+static LadybugDb.Client.Extensions.LadybugDbHealthCheck.Timeout.get -> System.TimeSpan
+static LadybugDb.Client.Extensions.LadybugDbServiceCollectionExtensions.AddLadybugDb(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! section) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static LadybugDb.Client.Extensions.LadybugDbServiceCollectionExtensions.AddLadybugDb(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! databasePath, System.Action<LadybugDb.Client.Extensions.LadybugDbOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

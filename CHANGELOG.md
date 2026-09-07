@@ -71,6 +71,9 @@ Generated against LadybugDB engine **v0.19.1** (`third-party/liblbug.version`); 
   OpenTelemetry database attributes (`db.system.name`, `db.namespace`, `db.operation.name`,
   `db.query.text`, `error.type`). No dependency added; nothing is allocated without a listener.
 - `LadybugDatabase.Config` and `LadybugDatabase.Path`.
+- Public-API tracking: `Microsoft.CodeAnalysis.PublicApiAnalyzers` with `PublicAPI.Shipped.txt`
+  and `PublicAPI.Unshipped.txt` in both packable projects, so a surface change is a reviewed diff
+  and the release step is a documented file move.
 
 ### Changed
 

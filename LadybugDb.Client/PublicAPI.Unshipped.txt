@@ -1,0 +1,270 @@
+#nullable enable
+LadybugDb.Client.Diagnostics.LadybugDiagnostics
+LadybugDb.Client.LadybugConfig
+LadybugDb.Client.LadybugConfig.<Clone>$() -> LadybugDb.Client.LadybugConfig!
+LadybugDb.Client.LadybugConfig.AutoCheckpoint.get -> bool
+LadybugDb.Client.LadybugConfig.AutoCheckpoint.init -> void
+LadybugDb.Client.LadybugConfig.BufferPoolSize.get -> ulong
+LadybugDb.Client.LadybugConfig.BufferPoolSize.init -> void
+LadybugDb.Client.LadybugConfig.CheckpointThreshold.get -> ulong
+LadybugDb.Client.LadybugConfig.CheckpointThreshold.init -> void
+LadybugDb.Client.LadybugConfig.EnableChecksums.get -> bool
+LadybugDb.Client.LadybugConfig.EnableChecksums.init -> void
+LadybugDb.Client.LadybugConfig.EnableCompression.get -> bool
+LadybugDb.Client.LadybugConfig.EnableCompression.init -> void
+LadybugDb.Client.LadybugConfig.EnableMultiWrites.get -> bool
+LadybugDb.Client.LadybugConfig.EnableMultiWrites.init -> void
+LadybugDb.Client.LadybugConfig.Equals(LadybugDb.Client.LadybugConfig? other) -> bool
+LadybugDb.Client.LadybugConfig.LadybugConfig() -> void
+LadybugDb.Client.LadybugConfig.MaxDbSize.get -> ulong
+LadybugDb.Client.LadybugConfig.MaxDbSize.init -> void
+LadybugDb.Client.LadybugConfig.MaxThreads.get -> ulong
+LadybugDb.Client.LadybugConfig.MaxThreads.init -> void
+LadybugDb.Client.LadybugConfig.ReadOnly.get -> bool
+LadybugDb.Client.LadybugConfig.ReadOnly.init -> void
+LadybugDb.Client.LadybugConfig.StatementCacheSize.get -> int
+LadybugDb.Client.LadybugConfig.StatementCacheSize.init -> void
+LadybugDb.Client.LadybugConfig.ThrowOnWalReplayFailure.get -> bool
+LadybugDb.Client.LadybugConfig.ThrowOnWalReplayFailure.init -> void
+LadybugDb.Client.LadybugConnection
+LadybugDb.Client.LadybugConnection.BeginTransactionAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugTransaction!>
+LadybugDb.Client.LadybugConnection.Dispose() -> void
+LadybugDb.Client.LadybugConnection.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugConnection.ExecuteAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugConnection.ExecuteAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugConnection.PrepareAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugPreparedStatement!>
+LadybugDb.Client.LadybugConnection.QueryAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugConnection.QueryAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugConnection.Select<T>(string! cypher, object? parameters = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+LadybugDb.Client.LadybugDatabase
+LadybugDb.Client.LadybugDatabase.Config.get -> LadybugDb.Client.LadybugConfig!
+LadybugDb.Client.LadybugDatabase.ConnectAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugConnection!>
+LadybugDb.Client.LadybugDatabase.Dispose() -> void
+LadybugDb.Client.LadybugDatabase.LadybugDatabase(string! path, LadybugDb.Client.LadybugConfig? config = null) -> void
+LadybugDb.Client.LadybugDatabase.Path.get -> string!
+LadybugDb.Client.LadybugException
+LadybugDb.Client.LadybugException.LadybugException(string! message, System.Exception! innerException) -> void
+LadybugDb.Client.LadybugException.LadybugException(string! message, string? statement = null) -> void
+LadybugDb.Client.LadybugException.Statement.get -> string?
+LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugInternalId.Deconstruct(out ulong TableId, out ulong Offset) -> void
+LadybugDb.Client.LadybugInternalId.Equals(LadybugDb.Client.LadybugInternalId other) -> bool
+LadybugDb.Client.LadybugInternalId.LadybugInternalId() -> void
+LadybugDb.Client.LadybugInternalId.LadybugInternalId(ulong TableId, ulong Offset) -> void
+LadybugDb.Client.LadybugInternalId.Offset.get -> ulong
+LadybugDb.Client.LadybugInternalId.Offset.init -> void
+LadybugDb.Client.LadybugInternalId.TableId.get -> ulong
+LadybugDb.Client.LadybugInternalId.TableId.init -> void
+LadybugDb.Client.LadybugNode
+LadybugDb.Client.LadybugNode.Equals(LadybugDb.Client.LadybugNode? other) -> bool
+LadybugDb.Client.LadybugNode.Id.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugNode.Label.get -> string!
+LadybugDb.Client.LadybugNode.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugPath
+LadybugDb.Client.LadybugPath.Equals(LadybugDb.Client.LadybugPath? other) -> bool
+LadybugDb.Client.LadybugPath.Nodes.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.LadybugNode!>!
+LadybugDb.Client.LadybugPath.Relationships.get -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.LadybugRel!>!
+LadybugDb.Client.LadybugPreparedStatement
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, ExtendedNumerics.BigDecimal value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.DateOnly value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.DateTimeOffset value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.Guid value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.Int128 value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, System.TimeSpan value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, bool value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, byte value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, double value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, float value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, int value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, long value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, sbyte value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, short value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, string! value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, uint value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, ulong value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Bind(string! name, ushort value) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindNull(string! name) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindTimestampMilliseconds(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindTimestampNanoseconds(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.BindTimestampSeconds(string! name, System.DateTime value) -> void
+LadybugDb.Client.LadybugPreparedStatement.Dispose() -> void
+LadybugDb.Client.LadybugPreparedStatement.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugPreparedStatement.ExecuteAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugPreparedStatement.ExecuteAsync(object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugPreparedStatement.ExecuteNonQueryAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugPreparedStatement.ExecuteNonQueryAsync(object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugPreparedStatement.Select<T>(object? parameters = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+LadybugDb.Client.LadybugQueryResult
+LadybugDb.Client.LadybugQueryResult.ColumnNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+LadybugDb.Client.LadybugQueryResult.Dispose() -> void
+LadybugDb.Client.LadybugQueryResult.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugQueryResult.GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerator<LadybugDb.Client.LadybugRow>!
+LadybugDb.Client.LadybugQueryResult.HasNext.get -> bool
+LadybugDb.Client.LadybugQueryResult.NextResultAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult?>
+LadybugDb.Client.LadybugRel
+LadybugDb.Client.LadybugRel.DestinationId.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugRel.Equals(LadybugDb.Client.LadybugRel? other) -> bool
+LadybugDb.Client.LadybugRel.Id.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugRel.Label.get -> string!
+LadybugDb.Client.LadybugRel.Properties.get -> System.Collections.Generic.IReadOnlyDictionary<string!, LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugRel.SourceId.get -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugRow
+LadybugDb.Client.LadybugRow.ColumnCount.get -> int
+LadybugDb.Client.LadybugRow.GetBigDecimal(int index) -> ExtendedNumerics.BigDecimal
+LadybugDb.Client.LadybugRow.GetBigDecimal(string! columnName) -> ExtendedNumerics.BigDecimal
+LadybugDb.Client.LadybugRow.GetBlob(int index) -> byte[]!
+LadybugDb.Client.LadybugRow.GetBlob(string! columnName) -> byte[]!
+LadybugDb.Client.LadybugRow.GetBoolean(int index) -> bool
+LadybugDb.Client.LadybugRow.GetBoolean(string! columnName) -> bool
+LadybugDb.Client.LadybugRow.GetByte(int index) -> byte
+LadybugDb.Client.LadybugRow.GetByte(string! columnName) -> byte
+LadybugDb.Client.LadybugRow.GetColumnName(int index) -> string!
+LadybugDb.Client.LadybugRow.GetDateOnly(int index) -> System.DateOnly
+LadybugDb.Client.LadybugRow.GetDateOnly(string! columnName) -> System.DateOnly
+LadybugDb.Client.LadybugRow.GetDateTime(int index) -> System.DateTime
+LadybugDb.Client.LadybugRow.GetDateTime(string! columnName) -> System.DateTime
+LadybugDb.Client.LadybugRow.GetDateTimeOffset(int index) -> System.DateTimeOffset
+LadybugDb.Client.LadybugRow.GetDateTimeOffset(string! columnName) -> System.DateTimeOffset
+LadybugDb.Client.LadybugRow.GetDecimal(int index) -> decimal
+LadybugDb.Client.LadybugRow.GetDecimal(string! columnName) -> decimal
+LadybugDb.Client.LadybugRow.GetDouble(int index) -> double
+LadybugDb.Client.LadybugRow.GetDouble(string! columnName) -> double
+LadybugDb.Client.LadybugRow.GetGuid(int index) -> System.Guid
+LadybugDb.Client.LadybugRow.GetGuid(string! columnName) -> System.Guid
+LadybugDb.Client.LadybugRow.GetInt128(int index) -> System.Int128
+LadybugDb.Client.LadybugRow.GetInt128(string! columnName) -> System.Int128
+LadybugDb.Client.LadybugRow.GetInt16(int index) -> short
+LadybugDb.Client.LadybugRow.GetInt16(string! columnName) -> short
+LadybugDb.Client.LadybugRow.GetInt32(int index) -> int
+LadybugDb.Client.LadybugRow.GetInt32(string! columnName) -> int
+LadybugDb.Client.LadybugRow.GetInt64(int index) -> long
+LadybugDb.Client.LadybugRow.GetInt64(string! columnName) -> long
+LadybugDb.Client.LadybugRow.GetSByte(int index) -> sbyte
+LadybugDb.Client.LadybugRow.GetSByte(string! columnName) -> sbyte
+LadybugDb.Client.LadybugRow.GetSingle(int index) -> float
+LadybugDb.Client.LadybugRow.GetSingle(string! columnName) -> float
+LadybugDb.Client.LadybugRow.GetString(int index) -> string!
+LadybugDb.Client.LadybugRow.GetString(string! columnName) -> string!
+LadybugDb.Client.LadybugRow.GetTimeSpan(int index) -> System.TimeSpan
+LadybugDb.Client.LadybugRow.GetTimeSpan(string! columnName) -> System.TimeSpan
+LadybugDb.Client.LadybugRow.GetUInt16(int index) -> ushort
+LadybugDb.Client.LadybugRow.GetUInt16(string! columnName) -> ushort
+LadybugDb.Client.LadybugRow.GetUInt32(int index) -> uint
+LadybugDb.Client.LadybugRow.GetUInt32(string! columnName) -> uint
+LadybugDb.Client.LadybugRow.GetUInt64(int index) -> ulong
+LadybugDb.Client.LadybugRow.GetUInt64(string! columnName) -> ulong
+LadybugDb.Client.LadybugRow.GetValue(int index) -> LadybugDb.Client.LadybugValue
+LadybugDb.Client.LadybugRow.LadybugRow() -> void
+LadybugDb.Client.LadybugRow.this[string! columnName].get -> LadybugDb.Client.LadybugValue
+LadybugDb.Client.LadybugTransaction
+LadybugDb.Client.LadybugTransaction.CommitAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.Connection.get -> LadybugDb.Client.LadybugConnection!
+LadybugDb.Client.LadybugTransaction.Dispose() -> void
+LadybugDb.Client.LadybugTransaction.DisposeAsync() -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.ExecuteAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.ExecuteAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.IsCompleted.get -> bool
+LadybugDb.Client.LadybugTransaction.QueryAsync(string! cypher, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugTransaction.QueryAsync(string! cypher, object! parameters, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<LadybugDb.Client.LadybugQueryResult!>
+LadybugDb.Client.LadybugTransaction.RollbackAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+LadybugDb.Client.LadybugTransaction.Select<T>(string! cypher, object? parameters = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Blob = 16 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Boolean = 2 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Date = 18 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Decimal = 14 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Double = 13 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int128 = 11 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int16 = 4 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int32 = 5 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int64 = 6 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Int8 = 3 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.InternalId = 28 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Interval = 21 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.List = 22 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Map = 24 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Node = 25 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Null = 1 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Path = 27 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Rel = 26 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Single = 12 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.String = 15 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Struct = 23 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Timestamp = 19 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.TimestampTz = 20 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt16 = 8 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt32 = 9 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt64 = 10 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.UInt8 = 7 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Unsupported = 0 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugType.Uuid = 17 -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugValue
+LadybugDb.Client.LadybugValue.AsBigDecimal() -> ExtendedNumerics.BigDecimal
+LadybugDb.Client.LadybugValue.AsBlob() -> byte[]!
+LadybugDb.Client.LadybugValue.AsBoolean() -> bool
+LadybugDb.Client.LadybugValue.AsByte() -> byte
+LadybugDb.Client.LadybugValue.AsDateOnly() -> System.DateOnly
+LadybugDb.Client.LadybugValue.AsDateTime() -> System.DateTime
+LadybugDb.Client.LadybugValue.AsDateTimeOffset() -> System.DateTimeOffset
+LadybugDb.Client.LadybugValue.AsDecimal() -> decimal
+LadybugDb.Client.LadybugValue.AsDouble() -> double
+LadybugDb.Client.LadybugValue.AsGuid() -> System.Guid
+LadybugDb.Client.LadybugValue.AsInt128() -> System.Int128
+LadybugDb.Client.LadybugValue.AsInt16() -> short
+LadybugDb.Client.LadybugValue.AsInt32() -> int
+LadybugDb.Client.LadybugValue.AsInt64() -> long
+LadybugDb.Client.LadybugValue.AsInternalId() -> LadybugDb.Client.LadybugInternalId
+LadybugDb.Client.LadybugValue.AsList() -> System.Collections.Generic.IReadOnlyList<LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugValue.AsMap() -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<LadybugDb.Client.LadybugValue, LadybugDb.Client.LadybugValue>>!
+LadybugDb.Client.LadybugValue.AsNode() -> LadybugDb.Client.LadybugNode!
+LadybugDb.Client.LadybugValue.AsPath() -> LadybugDb.Client.LadybugPath!
+LadybugDb.Client.LadybugValue.AsRel() -> LadybugDb.Client.LadybugRel!
+LadybugDb.Client.LadybugValue.AsSByte() -> sbyte
+LadybugDb.Client.LadybugValue.AsSingle() -> float
+LadybugDb.Client.LadybugValue.AsString() -> string!
+LadybugDb.Client.LadybugValue.AsStruct() -> System.Collections.Generic.IReadOnlyDictionary<string!, LadybugDb.Client.LadybugValue>!
+LadybugDb.Client.LadybugValue.AsTimeSpan() -> System.TimeSpan
+LadybugDb.Client.LadybugValue.AsUInt16() -> ushort
+LadybugDb.Client.LadybugValue.AsUInt32() -> uint
+LadybugDb.Client.LadybugValue.AsUInt64() -> ulong
+LadybugDb.Client.LadybugValue.Equals(LadybugDb.Client.LadybugValue other) -> bool
+LadybugDb.Client.LadybugValue.IsNull.get -> bool
+LadybugDb.Client.LadybugValue.LadybugValue() -> void
+LadybugDb.Client.LadybugValue.Type.get -> LadybugDb.Client.LadybugType
+LadybugDb.Client.LadybugWriteConflictException
+LadybugDb.Client.LadybugWriteConflictException.LadybugWriteConflictException(string! message, string? statement = null) -> void
+const LadybugDb.Client.Diagnostics.LadybugDiagnostics.ActivitySourceName = "LadybugDb.Client" -> string!
+const LadybugDb.Client.Diagnostics.LadybugDiagnostics.DbSystemName = "ladybugdb" -> string!
+const LadybugDb.Client.Diagnostics.LadybugDiagnostics.MeterName = "LadybugDb.Client" -> string!
+override LadybugDb.Client.LadybugConfig.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugConfig.GetHashCode() -> int
+override LadybugDb.Client.LadybugConfig.ToString() -> string!
+override LadybugDb.Client.LadybugInternalId.GetHashCode() -> int
+override LadybugDb.Client.LadybugNode.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugNode.GetHashCode() -> int
+override LadybugDb.Client.LadybugNode.ToString() -> string!
+override LadybugDb.Client.LadybugPath.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugPath.GetHashCode() -> int
+override LadybugDb.Client.LadybugPath.ToString() -> string!
+override LadybugDb.Client.LadybugRel.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugRel.GetHashCode() -> int
+override LadybugDb.Client.LadybugRel.ToString() -> string!
+override LadybugDb.Client.LadybugRow.ToString() -> string!
+override LadybugDb.Client.LadybugValue.Equals(object? obj) -> bool
+override LadybugDb.Client.LadybugValue.GetHashCode() -> int
+override LadybugDb.Client.LadybugValue.ToString() -> string!
+static LadybugDb.Client.LadybugConfig.operator !=(LadybugDb.Client.LadybugConfig? left, LadybugDb.Client.LadybugConfig? right) -> bool
+static LadybugDb.Client.LadybugConfig.operator ==(LadybugDb.Client.LadybugConfig? left, LadybugDb.Client.LadybugConfig? right) -> bool
+static LadybugDb.Client.LadybugDatabase.EngineVersion.get -> string!
+static LadybugDb.Client.LadybugDatabase.MinimumEngineVersion.get -> string!
+static LadybugDb.Client.LadybugInternalId.operator !=(LadybugDb.Client.LadybugInternalId left, LadybugDb.Client.LadybugInternalId right) -> bool
+static LadybugDb.Client.LadybugInternalId.operator ==(LadybugDb.Client.LadybugInternalId left, LadybugDb.Client.LadybugInternalId right) -> bool
+static LadybugDb.Client.LadybugNode.operator !=(LadybugDb.Client.LadybugNode? left, LadybugDb.Client.LadybugNode? right) -> bool
+static LadybugDb.Client.LadybugNode.operator ==(LadybugDb.Client.LadybugNode? left, LadybugDb.Client.LadybugNode? right) -> bool
+static LadybugDb.Client.LadybugPath.operator !=(LadybugDb.Client.LadybugPath? left, LadybugDb.Client.LadybugPath? right) -> bool
+static LadybugDb.Client.LadybugPath.operator ==(LadybugDb.Client.LadybugPath? left, LadybugDb.Client.LadybugPath? right) -> bool
+static LadybugDb.Client.LadybugRel.operator !=(LadybugDb.Client.LadybugRel? left, LadybugDb.Client.LadybugRel? right) -> bool
+static LadybugDb.Client.LadybugRel.operator ==(LadybugDb.Client.LadybugRel? left, LadybugDb.Client.LadybugRel? right) -> bool
+~override LadybugDb.Client.LadybugInternalId.Equals(object obj) -> bool
+~override LadybugDb.Client.LadybugInternalId.ToString() -> string

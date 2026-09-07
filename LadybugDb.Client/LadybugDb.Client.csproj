@@ -62,4 +62,26 @@
     -->
     <AnalysisMode>Recommended</AnalysisMode>
   </PropertyGroup>
+  <ItemGroup>
+    <!--
+      Tracks the public surface in PublicAPI.Shipped.txt / PublicAPI.Unshipped.txt: an unlisted
+      public member is a build error (RS0016), so an API change is a reviewed line in a diff, and
+      everything in Unshipped moves to Shipped at each release. Populate it with the dotnet format
+      analyzers command for RS0016 (see docs/RELEASING.md).
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="All" />
+
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+  <PropertyGroup>
+    <!--
+      RS0026/RS0027 object to overloads that differ only by an optional trailing parameter
+      (QueryAsync(cypher, ct) beside QueryAsync(cypher, parameters, ct)). That shape is this API's
+      deliberate design (docs/superpowers/specs/2026-07-29-api-ergonomics-design.md), and the risk
+      the rules guard against, a future optional parameter making existing calls ambiguous, is one
+      the surface files catch as a reviewed diff. Only the surface-tracking rules stay on.
+    -->
+    <NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+  </PropertyGroup>
 </Project>

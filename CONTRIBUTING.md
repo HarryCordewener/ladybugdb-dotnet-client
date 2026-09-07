@@ -38,6 +38,12 @@ generated against is pinned in `third-party/liblbug.version` — see
 [docs/BUILDING.md](docs/BUILDING.md#how-the-engine-version-is-pinned). If your change needs a newer
 engine, bump the pin and the package references together and regenerate the interop.
 
+## Public API changes
+
+Every public member is listed in `PublicAPI.Unshipped.txt` (or `PublicAPI.Shipped.txt`) next to
+the project; the build fails until it is. Add the line the RS0016 error prints, and describe the
+change under `Unreleased` in `CHANGELOG.md`. See [docs/RELEASING.md](docs/RELEASING.md#the-public-api-files).
+
 ## Generated interop
 
 `LadybugDb.Client/Native/LbugNative.g.cs` is generated from the pinned `lbug.h` header — see
