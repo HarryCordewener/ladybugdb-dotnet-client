@@ -74,6 +74,10 @@ using var db = new LadybugDatabase("./mydb", config);
 | `ReadOnly` | `bool` | `false` | Opens the database read-only. No write transaction is permitted; use this for a process that only ever queries a database another process (or an earlier run) writes to. |
 | `MaxDbSize` | `ulong` | `0` (engine default) | Max database size in bytes. |
 | `EnableMultiWrites` | `bool` | `false` | Maps to the engine's `enable_multi_writes` setting. Measured to genuinely lift LadybugDB's one-write-transaction-at-a-time restriction — see [Concurrency and the single-writer constraint](#concurrency-and-the-single-writer-constraint) for the numbers. |
+| `AutoCheckpoint` | `bool` | `true` | Maps to `auto_checkpoint`: checkpoint automatically once the write-ahead log passes `CheckpointThreshold`. A checkpoint blocks new writers and drains active ones while it runs, so a server that wants to pick its own quiet moment turns this off and issues `CHECKPOINT` itself. |
+| `CheckpointThreshold` | `ulong` | `0` (engine default, 16 MiB) | Maps to `checkpoint_threshold`, in bytes. The readiness review measured a 100,000-object database growing from 102 MB to 434 MB over 250,000 mutations; this is the knob that governs that growth. |
+| `EnableChecksums` | `bool` | `true` | Maps to `enable_checksums`: verify page checksums. |
+| `ThrowOnWalReplayFailure` | `bool` | `true` | Maps to `throw_on_wal_replay_failure`: fail to open a database whose write-ahead log cannot be replayed, instead of discarding the unreplayable tail. |
 
 ## Connections
 

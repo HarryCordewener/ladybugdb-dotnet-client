@@ -115,6 +115,10 @@ public sealed class LadybugDatabase : IDisposable
         native.enable_compression = ToNativeBool(config.EnableCompression);
         native.read_only = ToNativeBool(config.ReadOnly);
         native.enable_multi_writes = ToNativeBool(config.EnableMultiWrites);
+        native.auto_checkpoint = ToNativeBool(config.AutoCheckpoint);
+        if (config.CheckpointThreshold != 0) native.checkpoint_threshold = config.CheckpointThreshold;
+        native.enable_checksums = ToNativeBool(config.EnableChecksums);
+        native.throw_on_wal_replay_failure = ToNativeBool(config.ThrowOnWalReplayFailure);
         return native;
     }
 

@@ -41,11 +41,42 @@ public sealed record LadybugConfig
     /// The specific numbers above are this machine's, not a portable benchmark result - an
     /// independent spot-check on different hardware/load saw materially different absolute
     /// throughput (602 to 1,248 mut/s, versus roughly 2,600 to 3,900 here) but the identical
-    /// qualitative result: conflicts present and climbing with the flag off, zero with it on.
-    /// Treat the shape of the result (does the flag eliminate conflicts, does throughput scale
-    /// with concurrency) as the finding; treat the specific mutations/sec figures as this
-    /// machine's, not a guarantee for yours.
+    /// qualitative result: refusals climbing with the flag off, a handful of genuine row
+    /// conflicts with it on (the engine then reports "Write-write conflict of updating the same
+    /// row.", classified as the same retryable <see cref="LadybugWriteConflictException"/>).
+    /// Treat the shape of the result (does throughput scale with concurrency) as the finding;
+    /// treat the specific mutations/sec figures as this machine's, not a guarantee for yours.
     /// </para>
     /// </remarks>
     public bool EnableMultiWrites { get; init; }
+
+    /// <summary>
+    /// Whether the engine checkpoints automatically once the write-ahead log grows past
+    /// <see cref="CheckpointThreshold"/>. Maps to <c>auto_checkpoint</c>; the engine default is
+    /// <see langword="true"/>. A checkpoint blocks new writers and drains active ones for its
+    /// duration, so a server that wants to choose its own quiet moment turns this off and issues
+    /// <c>CHECKPOINT</c> itself.
+    /// </summary>
+    public bool AutoCheckpoint { get; init; } = true;
+
+    /// <summary>
+    /// The write-ahead log size, in bytes, past which an automatic checkpoint runs. Maps to
+    /// <c>checkpoint_threshold</c>; <c>0</c> keeps the engine default (16 MiB). The readiness
+    /// review measured a 100,000-object database growing from 102 MB to 434 MB across 250,000
+    /// mutations, which is the kind of growth this threshold governs.
+    /// </summary>
+    public ulong CheckpointThreshold { get; init; }
+
+    /// <summary>
+    /// Whether the engine verifies page checksums. Maps to <c>enable_checksums</c>; the engine
+    /// default is <see langword="true"/>.
+    /// </summary>
+    public bool EnableChecksums { get; init; } = true;
+
+    /// <summary>
+    /// Whether opening a database whose write-ahead log cannot be replayed throws instead of
+    /// discarding the unreplayable tail. Maps to <c>throw_on_wal_replay_failure</c>; the engine
+    /// default is <see langword="true"/>.
+    /// </summary>
+    public bool ThrowOnWalReplayFailure { get; init; } = true;
 }
