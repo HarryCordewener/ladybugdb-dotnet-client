@@ -1487,7 +1487,7 @@ Either way, `AddLadybugDb` registers:
 | Service | Lifetime | Notes |
 |---|---|---|
 | `LadybugDatabase` | Singleton | Opened on first resolve, not at registration, so the container can be built before the data directory exists. Disposed with the container. |
-| `LadybugConnection` | Scoped | One per scope (per request in ASP.NET Core), disposed with the scope. `LadybugConnection` is `IAsyncDisposable` only, so a scope you create yourself must be disposed asynchronously: `CreateAsyncScope()` and `await using`. A synchronous `Dispose()` of such a scope throws `InvalidOperationException`; ASP.NET Core's request scope is already asynchronous. |
+| `LadybugConnection` | Scoped | One per scope (per request in ASP.NET Core), disposed with the scope. `LadybugConnection` implements both `IDisposable` and `IAsyncDisposable`, so a scope you create yourself may be disposed either way; `CreateAsyncScope()` with `await using` is the idiomatic form, and ASP.NET Core's request scope is already asynchronous. |
 | `IOptions<LadybugDbOptions>` | Singleton | Reports exactly what the database was opened with. |
 | `ladybugdb` health check | — | See [The health check](#the-health-check). Skipped when `DisableHealthChecks` is set. |
 

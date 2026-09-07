@@ -68,9 +68,13 @@ public class UsageGuideSamples
         finally { TestDatabase.Cleanup(path); }
     }
 
-    /// <summary>The guide's table says a synchronous scope dispose throws; that is the container's rule, checked here.</summary>
+    /// <summary>
+    /// The guide's table says a scope may be disposed either way: <see cref="LadybugConnection"/>
+    /// implements both <see cref="IDisposable"/> and <see cref="IAsyncDisposable"/>, so a
+    /// synchronous scope dispose closes the connection instead of throwing.
+    /// </summary>
     [Test]
-    public async Task ASynchronousScopeDispose_ThrowsBecauseTheConnectionIsAsyncDisposableOnly()
+    public async Task ASynchronousScopeDispose_ClosesTheConnection()
     {
         var path = TestDatabase.NewPath();
         try
@@ -78,10 +82,10 @@ public class UsageGuideSamples
             await using var provider = new ServiceCollection().AddLadybugDb(path).BuildServiceProvider();
 
             var scope = provider.CreateScope();
-            _ = scope.ServiceProvider.GetRequiredService<LadybugConnection>();
+            var conn = scope.ServiceProvider.GetRequiredService<LadybugConnection>();
 
-            await Assert.That(() => scope.Dispose()).Throws<InvalidOperationException>();
-            await ((IAsyncDisposable)scope).DisposeAsync();
+            scope.Dispose();
+            await Assert.That(async () => await conn.QueryAsync("RETURN 1")).Throws<ObjectDisposedException>();
         }
         finally { TestDatabase.Cleanup(path); }
     }

@@ -15,9 +15,8 @@ namespace LadybugDb.Client.Extensions;
 /// touches nothing on disk) and disposed by the container, which then closes it to new work and
 /// destroys the native database once the last dependent releases.</description></item>
 /// <item><description><see cref="LadybugConnection"/>, scoped: one per scope, disposed with the
-/// scope. It is <see cref="IAsyncDisposable"/> only, so scopes must be disposed asynchronously
-/// (<see cref="ServiceProviderServiceExtensions.CreateAsyncScope(IServiceProvider)"/>, or ASP.NET
-/// Core's request scope, which already is); a synchronous scope dispose throws.</description></item>
+/// scope. It implements both <see cref="IDisposable"/> and <see cref="IAsyncDisposable"/>, so a
+/// scope may be disposed either way (ASP.NET Core's request scope disposes asynchronously).</description></item>
 /// <item><description><see cref="IOptions{TOptions}"/> of <see cref="LadybugDbOptions"/>.</description></item>
 /// <item><description>The <c>ladybugdb</c> health check, unless
 /// <see cref="LadybugDbOptions.DisableHealthChecks"/>.</description></item>

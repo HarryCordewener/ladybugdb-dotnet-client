@@ -14,7 +14,7 @@ builder.Services.AddLadybugDb("./data/graph", o => o.Config = o.Config with { Ma
 
 - `LadybugDatabase` as a singleton, opened on first resolve and disposed with the container;
 - `LadybugConnection` as a scoped service, one per scope, disposed with the scope (the
-  connection is `IAsyncDisposable`, so dispose scopes asynchronously: `CreateAsyncScope()`);
+  connection is both `IDisposable` and `IAsyncDisposable`, so scopes may be disposed either way);
 - `IOptions<LadybugDbOptions>`;
 - a health check named `ladybugdb` that runs `RETURN 1` on a fresh connection, unless
   `DisableHealthChecks` is set.
