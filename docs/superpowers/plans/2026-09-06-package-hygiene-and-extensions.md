@@ -24,29 +24,29 @@
 
 **Files:** modify `Directory.Build.props`, `LadybugDb.Client/LadybugDb.Client.csproj`; create `LadybugDb.Client/icon.png` (128×128, a plain ladybug glyph rendered with Python/Pillow or an SVG converted with `rsvg-convert`; no third-party artwork); test `LadybugDb.Client.Tests/PackagingTests.cs`.
 
-- [ ] Test: open the nupkg and assert the nuspec has `<icon>icon.png</icon>`, `<tags>` containing `ladybugdb`, `graph`, `cypher`, `embedded`, `<repository ... commit="...">` with a 40-hex commit, and that a `.snupkg` exists next to the `.nupkg` after `dotnet pack -c Release`.
-- [ ] Implement: `PackageIcon=icon.png` (+ `<None Include="icon.png" Pack="true" PackagePath="" />`), `PackageTags`, `PublishRepositoryUrl=true`, `EmbedUntrackedSources=true`, `IncludeSymbols=true`, `SymbolPackageFormat=snupkg`, `ContinuousIntegrationBuild` conditioned on `'$(GITHUB_ACTIONS)' == 'true'`, `PackageReleaseNotes` pointing at `CHANGELOG.md`.
-- [ ] Commit `build: package icon, tags, symbols, deterministic CI builds`.
+- [x] Test: open the nupkg and assert the nuspec has `<icon>icon.png</icon>`, `<tags>` containing `ladybugdb`, `graph`, `cypher`, `embedded`, `<repository ... commit="...">` with a 40-hex commit, and that a `.snupkg` exists next to the `.nupkg` after `dotnet pack -c Release`.
+- [x] Implement: `PackageIcon=icon.png` (+ `<None Include="icon.png" Pack="true" PackagePath="" />`), `PackageTags`, `PublishRepositoryUrl=true`, `EmbedUntrackedSources=true`, `IncludeSymbols=true`, `SymbolPackageFormat=snupkg`, `ContinuousIntegrationBuild` conditioned on `'$(GITHUB_ACTIONS)' == 'true'`, `PackageReleaseNotes` pointing at `CHANGELOG.md`.
+- [x] Commit `build: package icon, tags, symbols, deterministic CI builds`.
 
 ### Task H2: Package validation and the AOT flag
 
-- [ ] `EnablePackageValidation=true` on the shipping csproj (no baseline yet: `PackageValidationBaselineVersion` is added at the first published version, note this in `docs/RELEASING.md`).
-- [ ] `IsAotCompatible=true`; run `dotnet build -c Release` and fix every IL2xxx/IL3xxx the analyzers raise (the reflective paths are already annotated `[RequiresUnreferencedCode]`; the `AssemblyMetadataAttribute` read in `EngineVersion` is fine; `ParameterBinder`/`RowMapper` may need `[DynamicallyAccessedMembers]` on `T`).
-- [ ] New project `samples/LadybugDb.Client.AotSample` (console: open a database, create a table, insert, query with typed accessors) and a CI job `aot-publish` on ubuntu-latest running `dotnet publish -c Release -r linux-x64 -p:PublishAot=true` and executing the binary. This needs `clang` on the runner (present on ubuntu-latest).
-- [ ] Commit `build: package validation and Native AOT compatibility`.
+- [x] `EnablePackageValidation=true` on the shipping csproj (no baseline yet: `PackageValidationBaselineVersion` is added at the first published version, note this in `docs/RELEASING.md`).
+- [x] `IsAotCompatible=true`; run `dotnet build -c Release` and fix every IL2xxx/IL3xxx the analyzers raise (the reflective paths are already annotated `[RequiresUnreferencedCode]`; the `AssemblyMetadataAttribute` read in `EngineVersion` is fine; `ParameterBinder`/`RowMapper` may need `[DynamicallyAccessedMembers]` on `T`).
+- [x] New project `samples/LadybugDb.Client.AotSample` (console: open a database, create a table, insert, query with typed accessors) and a CI job `aot-publish` on ubuntu-latest running `dotnet publish -c Release -r linux-x64 -p:PublishAot=true` and executing the binary. This needs `clang` on the runner (present on ubuntu-latest).
+- [x] Commit `build: package validation and Native AOT compatibility`.
 
 ### Task H3: Changelog, versioning policy, release notes automation
 
-- [ ] `CHANGELOG.md` (Keep a Changelog 1.1.0): `Unreleased` with every change since `27a3e1c` grouped Added/Changed/Fixed, using `git log --oneline 27a3e1c..HEAD` as the source.
-- [ ] `docs/RELEASING.md` "Versioning" section: package versions are SemVer and independent of the engine; `LadybugDatabase.MinimumEngineVersion` and the README state which engine the release was generated against; a release bumps `third-party/liblbug.version` only when upstream has a `LadybugDB.Native` package for the new engine.
-- [ ] `.github/release.yml` with categories (Added / Changed / Fixed / Documentation / Dependencies) keyed on labels, and a `CONTRIBUTING.md` line asking for those labels.
-- [ ] Commit `docs: changelog, versioning policy, release-notes categories`.
+- [x] `CHANGELOG.md` (Keep a Changelog 1.1.0): `Unreleased` with every change since `27a3e1c` grouped Added/Changed/Fixed, using `git log --oneline 27a3e1c..HEAD` as the source.
+- [x] `docs/RELEASING.md` "Versioning" section: package versions are SemVer and independent of the engine; `LadybugDatabase.MinimumEngineVersion` and the README state which engine the release was generated against; a release bumps `third-party/liblbug.version` only when upstream has a `LadybugDB.Native` package for the new engine.
+- [x] `.github/release.yml` with categories (Added / Changed / Fixed / Documentation / Dependencies) keyed on labels, and a `CONTRIBUTING.md` line asking for those labels.
+- [x] Commit `docs: changelog, versioning policy, release-notes categories`.
 
 ### Task H4: CI on more platforms and a scheduled upstream check
 
-- [ ] `ci.yml`: add `macos-latest` (arm64) to the build matrix and an `integration-macos` job; add a `linux-arm64` integration leg using `ubuntu-24.04-arm` (GitHub-hosted arm runner). Pin `.slnx` explicitly on every `dotnet` command.
-- [ ] `.github/workflows/upstream-check.yml`: weekly cron; queries `https://api.nuget.org/v3-flatcontainer/ladybugdb.native/index.json`, compares the newest stable version to `third-party/liblbug.version`, and opens (or updates) an issue titled `Upstream LadybugDB.Native <version> is available` with the header diff link `https://github.com/LadybugDB/ladybug/compare/v<pinned>...v<new>`.
-- [ ] Commit `ci: macOS and arm64 legs; weekly upstream native-package check`.
+- [x] `ci.yml`: add `macos-latest` (arm64) to the build matrix and an `integration-macos` job; add a `linux-arm64` integration leg using `ubuntu-24.04-arm` (GitHub-hosted arm runner). Pin `.slnx` explicitly on every `dotnet` command.
+- [x] `.github/workflows/upstream-check.yml`: weekly cron; queries `https://api.nuget.org/v3-flatcontainer/ladybugdb.native/index.json`, compares the newest stable version to `third-party/liblbug.version`, and opens (or updates) an issue titled `Upstream LadybugDB.Native <version> is available` with the header diff link `https://github.com/LadybugDB/ladybug/compare/v<pinned>...v<new>`.
+- [x] Commit `ci: macOS and arm64 legs; weekly upstream native-package check`.
 
 ### Task E1: `LadybugDb.Client.Extensions` — options and DI
 
@@ -63,15 +63,15 @@ public static class LadybugDbServiceCollectionExtensions
 ```
 Registers `LadybugDatabase` as a singleton (opened on first resolve, disposed with the container), `LadybugConnection` as scoped (one per scope, disposed with the scope), and `IOptions<LadybugDbOptions>`. Validation: empty `DatabasePath` fails at `AddLadybugDb` with `OptionsValidationException`.
 
-- [ ] Tests: resolve `LadybugDatabase` twice → same instance; two scopes → different connections; disposing the provider disposes the database (subsequent `ConnectAsync` throws `ObjectDisposedException`); configuration binding from an in-memory `IConfiguration` with `LadybugDb:DatabasePath` and `LadybugDb:Config:MaxThreads`.
-- [ ] Implement; commit `feat(extensions): AddLadybugDb with options binding`.
+- [x] Tests: resolve `LadybugDatabase` twice → same instance; two scopes → different connections; disposing the provider disposes the database (subsequent `ConnectAsync` throws `ObjectDisposedException`); configuration binding from an in-memory `IConfiguration` with `LadybugDb:DatabasePath` and `LadybugDb:Config:MaxThreads`.
+- [x] Implement; commit `feat(extensions): AddLadybugDb with options binding`.
 
 ### Task E2: Health check
 
-- [ ] `LadybugDbHealthCheck : IHealthCheck` running `RETURN 1` on a fresh connection with a 5-second timeout; `AddLadybugDb` registers it under the name `ladybugdb` unless `DisableHealthChecks`. Tests: healthy against an open database; unhealthy (with the exception in `Data`) after the database is disposed.
-- [ ] Commit `feat(extensions): health check`.
+- [x] `LadybugDbHealthCheck : IHealthCheck` running `RETURN 1` on a fresh connection with a 5-second timeout; `AddLadybugDb` registers it under the name `ladybugdb` unless `DisableHealthChecks`. Tests: healthy against an open database; unhealthy (with the exception in `Data`) after the database is disposed.
+- [x] Commit `feat(extensions): health check`.
 
 ### Task E3: Docs and release wiring
 
-- [ ] README: an "ASP.NET Core / DI" subsection; `docs/USAGE.md` "Extensions" chapter with executed samples; `release.yml` packs and pushes both packages (`LadybugDb.Client`, `LadybugDb.Client.Extensions`) with the same version; `PackagingTests` asserts the Extensions nupkg depends on `LadybugDb.Client` with an exact-version range `[<version>]`.
-- [ ] Commit `docs: extensions package`.
+- [x] README: an "ASP.NET Core / DI" subsection; `docs/USAGE.md` "Extensions" chapter with executed samples; `release.yml` packs and pushes both packages (`LadybugDb.Client`, `LadybugDb.Client.Extensions`) with the same version; `PackagingTests` asserts the Extensions nupkg depends on `LadybugDb.Client` with an exact-version range `[<version>]`.
+- [x] Commit `docs: extensions package`.
