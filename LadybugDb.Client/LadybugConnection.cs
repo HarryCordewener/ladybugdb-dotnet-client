@@ -86,10 +86,19 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     /// </summary>
     private readonly SemaphoreSlim _transactionGate = new(1, 1);
 
+    /// <summary>
+    /// Prepared statements the parameter-object overloads reuse, keyed by statement text. See
+    /// <see cref="StatementCache{T}"/> for the check-out semantics that keep this safe under this
+    /// type's concurrent-use contract, and <see cref="LadybugConfig.StatementCacheSize"/> for the
+    /// bound.
+    /// </summary>
+    private readonly StatementCache<LadybugPreparedStatement> _statements;
+
     internal LadybugConnection(LadybugDatabase database, LbugConnectionHandle handle)
     {
         _database = database;
         _handle = handle;
+        _statements = new StatementCache<LadybugPreparedStatement>(database.Config.StatementCacheSize);
     }
 
     /// <summary>This connection's underlying handle, mirroring <see cref="LadybugDatabase.Handle"/>.</summary>
@@ -334,23 +343,51 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     [RequiresUnreferencedCode(
         "Reads the parameters object's public properties by reflection. Use a dictionary, or " +
         "PrepareAsync with the typed Bind overloads, when trimming.")]
-    public async ValueTask<LadybugQueryResult> QueryAsync(
+    public ValueTask<LadybugQueryResult> QueryAsync(
         string cypher, object parameters, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cypher);
         ArgumentNullException.ThrowIfNull(parameters);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var statement = LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher);
+        // Enumerated once, up front: the names decide whether a cached statement may be reused
+        // (see StatementCache<T>.Entry.ParameterNames), and the binder takes the same list so the
+        // parameters object is reflected over exactly once per call.
+        var pairs = ParameterBinder.Enumerate(parameters);
+        var names = new string[pairs.Count];
+        for (var i = 0; i < names.Length; i++) names[i] = pairs[i].Key;
+        Array.Sort(names, StringComparer.Ordinal);
+
+        var entry = _statements.TryCheckOut(cypher);
+        if (entry is not null && !entry.ParameterNames.AsSpan().SequenceEqual(names))
+        {
+            // Put it back untouched: the mismatch is this call's problem, not the cached statement's.
+            _statements.Return(entry);
+            throw new ArgumentException(
+                $"This statement was first run with parameters [{string.Join(", ", entry.ParameterNames)}] " +
+                $"and is now being run with [{string.Join(", ", names)}]. A cached prepared statement keeps " +
+                "its previous bound values, so running it with a different set of parameter names would " +
+                "silently reuse stale values for the names left out. Bind the same set of names every time, " +
+                "or use a different statement text.", nameof(parameters));
+        }
+
+        var statement = entry?.Statement ?? LadybugPreparedStatement.Prepare(_database.Handle, _handle, cypher);
+        entry ??= new StatementCache<LadybugPreparedStatement>.Entry(cypher, statement, names);
         try
         {
-            return await statement.ExecuteAsync(parameters, cancellationToken);
+            ParameterBinder.BindAll(statement, pairs);
+            var result = statement.ExecuteBound();
+            // The result does not depend on the statement staying alive (see this method's remarks),
+            // so the statement goes back into the cache - or is disposed if the cache declines it.
+            _statements.Return(entry);
+            return ValueTask.FromResult(result);
         }
-        finally
+        catch
         {
-            // Runs on both paths: after the result exists (which does not depend on the statement
-            // staying alive - see this method's remarks) and if binding or execution threw.
-            await statement.DisposeAsync();
+            // A statement whose bind or execute failed is not returned: a schema change behind a
+            // cached plan is one of the ways it fails, and the next call should prepare afresh.
+            statement.Dispose();
+            throw;
         }
     }
 
@@ -670,6 +707,7 @@ public sealed class LadybugConnection : IAsyncDisposable, IDisposable
     public void Dispose()
     {
         EnsureNoOpenTransactionForDispose();
+        _statements.Dispose();
         _handle.Dispose();
     }
 }

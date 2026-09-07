@@ -97,6 +97,7 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
                 throw QueryFailureClassifier.Classify(failureMessage, cypher);
             }
 
+            Interlocked.Increment(ref _preparedCount);
             return new LadybugPreparedStatement(database, connection, handle, cypher);
         }
         finally
@@ -730,6 +731,19 @@ public sealed class LadybugPreparedStatement : IAsyncDisposable, IDisposable
             yield return plan.Map(row);
         }
     }
+
+    /// <summary>Backing field for <see cref="PreparedCount"/>.</summary>
+    private static long _preparedCount;
+
+    /// <summary>
+    /// How many statements have been prepared, process-wide. Exists for the tests, like
+    /// <see cref="LadybugQueryResult.LiveCount"/>: it is the deterministic evidence that the
+    /// per-connection statement cache reused a statement instead of preparing another.
+    /// </summary>
+    internal static long PreparedCount => Interlocked.Read(ref _preparedCount);
+
+    /// <summary>Executes with whatever is bound. For <see cref="LadybugConnection"/>'s cache path.</summary>
+    internal LadybugQueryResult ExecuteBound() => Execute();
 
     private unsafe LadybugQueryResult Execute()
     {

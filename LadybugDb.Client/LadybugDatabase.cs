@@ -71,8 +71,12 @@ public sealed class LadybugDatabase : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         Client.EngineVersion.EnsureCompatible();
-        _handle = LbugDatabaseHandle.Open(path, BuildConfig(config ?? new LadybugConfig()));
+        Config = config ?? new LadybugConfig();
+        _handle = LbugDatabaseHandle.Open(path, BuildConfig(Config));
     }
+
+    /// <summary>The configuration this database was opened with (the defaults, if none was given).</summary>
+    public LadybugConfig Config { get; }
 
     /// <summary>
     /// The version of the <c>liblbug</c> engine actually loaded into this process, as the engine

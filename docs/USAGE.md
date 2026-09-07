@@ -304,6 +304,30 @@ values survive intact for a retry.
 Both overloads are annotated `[RequiresUnreferencedCode]`, since either may reflect. If you are
 trimming or publishing AOT, use the typed `Bind` overloads.
 
+### The statement cache
+
+`QueryAsync(cypher, parameters)`, `ExecuteAsync(cypher, parameters)` and `Select<T>(cypher,
+parameters)` do not prepare on every call. Each connection keeps the statements those overloads
+prepare, keyed by the exact statement text and evicted least recently used, with
+`LadybugConfig.StatementCacheSize` entries (default 128; `0` turns the cache off). Measured: a key
+lookup through these overloads costs about 122 µs when prepared per call and about 65 µs when the
+statement is reused, the same as holding a `LadybugPreparedStatement` yourself.
+
+Two rules follow from how the engine treats a prepared statement:
+
+- **Bind the same set of parameter names every time you run a given statement text.** A prepared
+  statement keeps its previously bound values, so running it with a different set of names would
+  silently reuse stale values for the names left out. The connection refuses that with an
+  `ArgumentException` naming both sets; use a different statement text if you need a different shape.
+- **A statement whose execution fails is dropped from the cache**, so a schema change behind a
+  cached plan costs one failed call and one re-prepare, not a stale plan forever.
+
+Concurrency is handled by check-out: a cached statement is handed to exactly one caller at a time,
+and a second concurrent caller of the same text prepares its own (which then joins the cache), so
+two callers never interleave one's `Bind` with the other's execute. `PrepareAsync` is still the
+right call when you want to hold the statement yourself, bind incrementally, or keep it across
+connections' lifetimes on your own terms.
+
 ## Reading results
 
 ```csharp

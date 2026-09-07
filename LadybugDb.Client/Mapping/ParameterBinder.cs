@@ -118,10 +118,18 @@ internal static class ParameterBinder
         "Reads the parameters object's public properties by reflection. Use a dictionary, or the " +
         "typed Bind overloads, when trimming.")]
     internal static void BindAll(
-        LadybugPreparedStatement statement, object parameters, string paramName = "parameters")
-    {
-        var pairs = Enumerate(parameters, paramName);
+        LadybugPreparedStatement statement, object parameters, string paramName = "parameters") =>
+        BindAll(statement, Enumerate(parameters, paramName), paramName);
 
+    /// <summary>
+    /// The second half of <see cref="BindAll(LadybugPreparedStatement, object, string)"/>, for a
+    /// caller that already enumerated the parameters (the statement cache checks their names
+    /// first and must not reflect over the object twice).
+    /// </summary>
+    internal static void BindAll(
+        LadybugPreparedStatement statement, IReadOnlyList<KeyValuePair<string, object?>> pairs,
+        string paramName = "parameters")
+    {
         foreach (var (name, value) in pairs)
         {
             if (!BindOrValidate(statement: null, name, value))
@@ -164,7 +172,7 @@ internal static class ParameterBinder
     }
 
     /// <summary>
-    /// The single dispatch table behind both <see cref="Bind"/> and <see cref="BindAll"/>, mapping a
+    /// The single dispatch table behind both <see cref="Bind"/> and <see cref="BindAll(LadybugPreparedStatement, object, string)"/>, mapping a
     /// value's runtime type onto one of <see cref="LadybugPreparedStatement"/>'s typed <c>Bind</c>
     /// overloads. Returns <see langword="false"/>, rather than throwing, when the type has no
     /// overload, so the caller can attach its own <c>paramName</c>.
