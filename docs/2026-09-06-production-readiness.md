@@ -105,7 +105,7 @@ Exceptions carry the native message and the statement. The classifier is the one
 wording is matched; it now covers both conflict wordings and both dispatch paths. Gap: no error
 code. The C API exposes none, so this is a documentation matter only.
 
-### API surface and usability — good, three gaps
+### API surface and usability — good, three gaps (all three closed the same day; see the addendum under the verdict)
 
 What works well: parameter objects with silent-corruption cases tested, `Select<T>` resolved from
 the column shape (so an empty result still reports a mismatched target), typed row accessors,
@@ -178,7 +178,7 @@ packaging rather than improving our own:
   `RequiresUnreferencedCode` correctly; the assembly is not marked `IsAotCompatible` and nothing in
   CI publishes an AOT sample.
 
-### Observability — absent
+### Observability — absent at review time (closed the same day: `LadybugDiagnostics` and `LadybugDb.Client.Extensions`)
 
 No logging, no `ActivitySource`, no `Meter`, no health check, no DI registration. For SharpMUSH this
 is optional; for an outside consumer it is what "production" means. The research appendix gives
