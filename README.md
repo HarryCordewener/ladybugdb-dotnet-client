@@ -214,7 +214,8 @@ place `lbug_shared.dll` from the upstream release next to the application (the r
 | [docs/2026-09-06-production-readiness.md](docs/2026-09-06-production-readiness.md) | Readiness review, benchmark analysis, and the LINQ direction |
 | [benchmarks/](benchmarks/README.md) | Workload and micro-benchmark harnesses and their results |
 | [docs/BUILDING.md](docs/BUILDING.md) | Building and testing from source |
-| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process |
+| [docs/RELEASING.md](docs/RELEASING.md) | Release and publication process, versioning policy |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 

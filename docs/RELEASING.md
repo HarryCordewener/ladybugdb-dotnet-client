@@ -14,7 +14,9 @@ engine binaries are upstream's `LadybugDB.Native` packages; this repository publ
 
 1. Make sure `main` is in the state you want to ship.
 2. Decide the version, e.g. `0.2.0` or `0.2.0-beta.1` (see [Versioning](#versioning)).
-3. Tag it and push the tag:
+3. In `CHANGELOG.md`, rename `Unreleased` to `[0.2.0] - YYYY-MM-DD`, add its compare link at the
+   bottom, and open a fresh empty `Unreleased` above it. Commit that to `main`.
+4. Tag it and push the tag:
 
    ```console
    git tag v0.2.0
@@ -89,6 +91,35 @@ local/CI builds that never publish). This means:
 - Tag `v0.2.0-alpha.1` to ship a pre-release to nuget.org; tag `v0.2.0` for a stable release. NuGet
   treats these as ordinary SemVer 2.0 pre-release/stable semantics — nothing release-specific to
   configure for that.
+
+### What the version means
+
+- **Package versions are SemVer and independent of the engine version.** The official
+  `LadybugDB` binding uses the engine version as its own; this client does not, because its
+  public API (typed values, `Select<T>`, transactions) changes on its own schedule. Pre-1.0, a
+  minor bump may break the API; from 1.0, only a major bump may, and the package-validation
+  baseline (above) enforces it.
+- **Every release names the engine it was generated against.** That is
+  `third-party/liblbug.version`, embedded as `LadybugDatabase.MinimumEngineVersion` and stated
+  in the README's installation section and in the release's `CHANGELOG.md` entry. A consumer
+  picks any `LadybugDB.Native` version at or above it.
+- **A release bumps the engine pin only when upstream has published a `LadybugDB.Native`
+  package for the new engine** (upstream publishes them a little after each engine release).
+  The weekly `upstream-check` workflow opens an issue when a newer native package appears.
+  Bumping the pin follows [docs/BUILDING.md](BUILDING.md#how-the-engine-version-is-pinned) and is
+  a `Changed` entry in the changelog; if the regenerated interop adds entry points the client
+  calls, the minimum engine moves too, which is a breaking change for consumers on the older
+  engine and is called out as one.
+
+### Changelog and release notes
+
+`CHANGELOG.md` is hand-maintained (Keep a Changelog): every consumer-visible change gets a line
+under `Unreleased` in its PR, and cutting a release renames that section to the version and
+date. The GitHub release itself uses generated notes, sorted into the same sections by PR label
+([`.github/release.yml`](../.github/release.yml)); create it after the workflow has published,
+with `gh release create v0.2.0 --generate-notes` or the "Generate release notes" button. The
+workflow does not create the GitHub release itself, since that would need `contents: write` on
+the job that holds the nuget.org publishing token.
 
 ## One-time setup the repo owner must do
 
